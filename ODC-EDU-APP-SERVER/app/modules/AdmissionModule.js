@@ -1,0 +1,241 @@
+// models/Admission.js
+import mongoose from "mongoose";
+
+const AdmissionSchema = new mongoose.Schema(
+  {
+    registrationNo: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+    },
+
+    registrationDate: {
+      type: Date,
+      required: true,
+    },
+
+    studentName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    gender: {
+      type: String,
+      enum: ["Male", "Female"],
+      required: true,
+    },
+
+    dateOfBirth: {
+      type: Date,
+      required: true,
+    },
+
+    caste: {
+      type: String,
+      trim: true,
+    },
+
+    religion: {
+      type: String,
+      enum: ["Muslim", "Non-Muslim"],
+      required: true,
+    },
+
+    cnicOrBForm: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+    },
+
+    disability: {
+      type: Boolean, // Yes = true, No = false
+      default: false,
+    },
+
+    previousSchoolCollege: {
+      type: String,
+      trim: true,
+    },
+
+    lastClassAttended: {
+      type: String,
+      trim: true,
+    },
+
+    fatherName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    fatherCnic: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    fatherOccupation: {
+      type: String,
+      trim: true,
+    },
+
+    fatherContact: {
+      type: String,
+      trim: true,
+    },
+
+    guardianName: {
+      type: String,
+      trim: true,
+    },
+
+    guardianContact: {
+      type: String,
+      trim: true,
+    },
+
+    relationshipWithStudent: {
+      type: String,
+      trim: true,
+    },
+
+    annualIncome: {
+      type: Number,
+      min: 0,
+    },
+
+    mobileNumber: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    whatsappNumber: {
+      type: String,
+      trim: true,
+    },
+
+    emailAddress: {
+      type: String,
+      lowercase: true,
+      trim: true,
+    },
+
+    permanentAddress: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    currentAddress: {
+      type: String,
+      trim: true,
+    },
+
+    // Permanent Address Location Fields
+    province: {
+      type: String,
+      trim: true,
+    },
+
+    city: {
+      type: String,
+      trim: true,
+    },
+
+    unionCouncil: {
+      type: String,
+      trim: true,
+    },
+
+    tehsil: {
+      type: String,
+      trim: true,
+    },
+
+    district: {
+      type: String,
+      trim: true,
+    },
+
+    // Present Address Location Fields
+    presentProvince: {
+      type: String,
+      trim: true,
+    },
+
+    presentDistrict: {
+      type: String,
+      trim: true,
+    },
+
+    presentCity: {
+      type: String,
+      trim: true,
+    },
+
+    presentUnionCouncil: {
+      type: String,
+      trim: true,
+    },
+
+    // Domicile Information
+    domicileDistrict: {
+      type: String,
+      trim: true,
+    },
+
+    emergencyContactNumber: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    reference: {
+      type: String,
+      enum: ["Friend", "Facebook", "Family", "Other"],
+    },
+
+    course: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Course",
+    },
+
+    // Multiple course enrollments
+    enrolledCourses: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Course",
+      },
+    ],
+
+    photo: {
+      type: String, // image URL / filename
+      default: "",
+    },
+
+    profilePicture: {
+      type: String, // Base64 encoded image
+      default: "",
+    },
+
+    // Active status
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  {
+    timestamps: true,
+  },
+);
+
+// Delete the model if it exists to avoid OverwriteModelError
+if (mongoose.models.Admission) {
+  delete mongoose.models.Admission;
+}
+
+export default mongoose.model("Admission", AdmissionSchema);

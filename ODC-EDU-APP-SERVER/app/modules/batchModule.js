@@ -1,0 +1,89 @@
+// models/Batch.js
+import mongoose from "mongoose";
+
+const BatchSchema = new mongoose.Schema(
+  {
+    batchName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    batchCode: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+    },
+
+    course: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Course",
+      required: true,
+    },
+
+    shift: {
+      type: String,
+      enum: ["Morning", "Evening"],
+      required: true,
+    },
+
+    days: {
+      type: String,
+      enum: ["Monday to Saturday", "Monday to Thursday", "Saturday & Sunday"],
+      required: true,
+    },
+
+    hoursPerDay: {
+      type: Number,
+      required: true,
+      min: 1,
+      max: 24,
+    },
+
+    startDate: {
+      type: Date,
+      required: true,
+    },
+
+    endDate: {
+      type: Date,
+    },
+
+    maxStudents: {
+      type: Number,
+      default: 30,
+      min: 1,
+    },
+
+    currentStudents: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    status: {
+      type: String,
+      enum: ["Active", "Completed", "Upcoming", "Cancelled"],
+      default: "Active",
+    },
+
+    description: {
+      type: String,
+      trim: true,
+    },
+
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  {
+    timestamps: true,
+  },
+);
+
+// Compound index to prevent duplicate batch codes per course
+BatchSchema.index({ course: 1, batchCode: 1 }, { unique: true });
+
+export default mongoose.model("Batch", BatchSchema);

@@ -1,0 +1,63 @@
+import mongoose from "mongoose";
+
+const AttendanceSchema = new mongoose.Schema(
+  {
+    batch: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Batch",
+      required: true,
+    },
+
+    date: {
+      type: Date,
+      required: true,
+    },
+
+    // polymorphic ref: person can be a student (Admission) or teacher (Teacher)
+    person: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      refPath: "personModel",
+    },
+
+    personModel: {
+      type: String,
+      enum: ["Admission", "Teacher"],
+      required: true,
+    },
+
+    personType: {
+      type: String,
+      enum: ["student", "teacher"],
+      required: true,
+    },
+
+    status: {
+      type: String,
+      enum: ["Present", "Absent", "Half Day", "Leave", "Holiday"],
+      default: "Absent",
+    },
+
+    notes: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
+    markedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "UserAuth",
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Unique: one attendance record per person per batch per date
+AttendanceSchema.index({ batch: 1, date: 1, person: 1 }, { unique: true });
+// Index for fast queries
+AttendanceSchema.index({ batch: 1, date: 1 });
+AttendanceSchema.index({ person: 1, personType: 1 });
+
+export default mongoose.model("Attendance", AttendanceSchema);

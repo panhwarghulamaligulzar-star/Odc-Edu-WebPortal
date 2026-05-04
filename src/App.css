@@ -1,0 +1,209 @@
+/* Customize the checkbox box */
+.custom-checkbox .ant-checkbox-inner {
+  width: 20px;
+  height: 20px;
+  border: 1px solid #00000040;
+  border-radius: 5px;
+  background-color: #f6f6f6;
+}
+
+/* Customize the checked state */
+.custom-checkbox .ant-checkbox-checked .ant-checkbox-inner {
+  background-color: #01134c;
+  border-color: #01134c;
+}
+
+/* Customize the checkmark */
+.custom-checkbox .ant-checkbox-checked::after {
+  left: 4px;
+  top: 2px;
+  width: 6px;
+  height: 12px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+}
+.custom-checkbox .ant-checkbox-disabled .ant-checkbox-inner {
+  background-color: #e0e0e0;
+  border-color: #b0b0b0;
+}
+.custom-checkbox.ant-checkbox-wrapper:not(.ant-checkbox-wrapper-disabled):hover
+  .ant-checkbox-checked:not(.ant-checkbox-disabled)
+  .ant-checkbox-inner {
+  background-color: #01134c;
+  border-color: transparent  !important;
+}
+/* Container */
+.custom-pagination-table .ant-pagination {
+  display: flex;
+  justify-content: end;
+  margin-top: 20px;
+  padding: 10px;
+}
+
+/* Pagination number buttons */
+.custom-pagination-table .ant-pagination-item {
+  border: 1px solid #d0d0d0 !important; /* custom border */
+  border-radius: 6px !important;
+  color: #333 !important;
+  font-family: Arial, sans-serif;
+  transition: all 0.2s ease;
+}
+
+/* Hover */
+.custom-pagination-table .ant-pagination-item:hover {
+  border-color: #01134c !important;
+  color: #01134c !important;
+}
+
+/* Active page number */
+.custom-pagination-table .ant-pagination-item-active {
+  background-color: #01134c !important; /* your color */
+  border-color: #01134c !important;
+}
+
+.custom-pagination-table .ant-pagination-item-active a {
+  color: white !important;
+  font-weight: bold;
+}
+
+/* Arrows previous/next */
+.custom-pagination-table .ant-pagination-prev button,
+.custom-pagination-table .ant-pagination-next button {
+  border: 1px solid #d0d0d0 !important;
+  border-radius: 6px;
+}
+
+/* Arrows hover */
+.custom-pagination-table .ant-pagination-prev button:hover,
+.custom-pagination-table .ant-pagination-next button:hover {
+  border-color: #01134c !important;
+  color: #01134c !important;
+}
+
+/*===========PWA APP STYLING===========*/
+.install-button {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  padding: 12px 24px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+}
+
+.install-button:hover {
+  background-color: #0056b3;
+}
+
+.update-notification {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: white;
+  padding: 16px 24px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  max-width: 400px;
+}
+
+.notification-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.notification-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.notification-buttons button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.notification-buttons button:first-child {
+  background-color: #007bff;
+  color: white;
+}
+
+.notification-buttons button:last-child {
+  background-color: #6c757d;
+  color: white;
+}
+
+.custom-toggle.ant-switch-checked {
+  background-color: #01134c !important;
+}
+
+.custom-toggle {
+  background-color: rgb(243 244 246) !important;
+}
+
+.custom-toggle.ant-switch-checked:hover {
+  background-color: #01134c !important;
+}
+
+.custom-toggle:hover {
+  background-color: #4b5563 !important;
+}
+
+/* =============================================
+   GLOBAL THEMED SCROLLBAR — #01134C / #E8FC0A
+   ============================================= */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f0f2f5;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #01134c;
+  border-radius: 10px;
+  transition: background 0.2s ease;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #e8fc0a;
+}
+::-webkit-scrollbar-corner {
+  background: #f0f2f5;
+}
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #01134c #f0f2f5;
+}
+
+/* =============================================
+   COMPACT ANT DESIGN TABLE ROWS
+   ============================================= */
+.ant-table-thead > tr > th,
+.ant-table-thead > tr > td {
+  padding: 8px 12px !important;
+  line-height: 1.4 !important;
+}
+.ant-table-tbody > tr > td {
+  padding: 6px 12px !important;
+  line-height: 1.4 !important;
+}
+/* Keep the virtual / fixed column cells consistent */
+.ant-table-cell {
+  font-size: 13px !important;
+}
+.ant-table-thead .ant-table-cell {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+}

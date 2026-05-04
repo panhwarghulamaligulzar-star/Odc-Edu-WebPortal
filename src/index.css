@@ -1,0 +1,118 @@
+/* src/fonts.css */
+@font-face {
+  font-family: "Arial-bold";
+  src: url("./assets/fonts/Inter/Inter-VariableFont_opsz,wght.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Arial-light";
+  src: url("./assets/fonts/Golos_Text/GolosText-VariableFont_wght.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Arial-black";
+  src: url("./assets/fonts/Inter/Inter-VariableFont_opsz,wght.ttf") format("truetype");
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: "Arial-light", Arial, sans-serif;
+  }
+}
+
+@layer components {
+   /*========APP HEADINGS==== */
+   .h1 {
+    @apply text-[48px]  font-[900] leading-[60px] text-dark font-Arial 
+    
+   }
+h3 {
+     @apply text-[40px] font-[600] leading-[36px] text-primary  font-Arial
+     
+   }
+   .h4 {
+     @apply text-[30px] font-[800] leading-[36px] text-dark  font-Arial
+     
+   }
+   
+   /*========APP PARAGRAPHS==== */
+   .sub-heading-sm {
+    @apply text-[20px] font-[700] text-dark font-Arial
+   }
+   .text-md {
+    @apply text-[16px] font-[600] text-dark font-Arial
+  
+   }
+
+
+  /*========APP BUTTONS==== */
+  .btn-xl {
+    @apply w-full h-[60px] rounded-[10px] text-accent bg-primary flex justify-center items-center font-semibold;
+    
+  }
+  .btn-lg {
+  @apply w-[220px] h-[40px] rounded-[10px] text-accent bg-primary flex justify-center items-center font-ArialLight
+         hover:bg-[#0e215fc7]
+}
+  .btn-md {
+  @apply w-[70px] h-[25px] rounded-[3px] text-accent bg-primary flex justify-center items-center font-ArialLight
+         hover:bg-[#0e215fc7]
+}
+  
+  .btn-md-cricle{
+        @apply w-[50px] h-[50px] rounded-full bg-gray-100   flex justify-center items-center font-semibold border !border-[#D1D6D4];
+  }
+
+   .btn-sm-cricle {
+    @apply w-[25px] h-[25px] rounded-full bg-accent text-secondary  flex justify-center items-center font-semibold;
+  }
+
+
+  /*========APP CARDS==== */
+  .card {
+    @apply p-4 bg-white rounded shadow-md text-dark;
+  }
+  
+  /*========APP INPUTS==== */
+  .form-input {
+    @apply w-full h-[56px] border-transparent rounded-[10px] bg-light p-[12px] border border-[#D1D6D4];
+  }
+
+  .form-input:hover {
+  @apply !border-[#D1D6D4];
+}
+/* Placeholder style for all input fields with the class form-input */
+.form-input::placeholder {
+  @apply font-Arial text-[16px] font-[400] text-[#D7D7D7] leading-[24px] opacity-[8px];
+}
+
+/* ===== APP INPUT disabled FIELDS ===== */
+.form-input-disabled {
+  @apply flex w-[100%] h-[52px] p-[14px]  items-center gap-[10px] bg-[#F6F6F6] rounded-[6px] border border-transparent transition-all outline-none;
+}
+
+.form-input-disabled:hover {
+  @apply !border-[#D1D6D4];
+}
+/* Placeholder style for all input fields with the class form-input */
+.form-input-disabled::placeholder {
+  @apply font-Arial text-[16px] font-[400] text-[#000000B2] leading-[24px] opacity-[8px];
+}
+ .password-input input::placeholder {
+  @apply font-Arial text-[16px] font-[400] text-[#D7D7D7] leading-[24px] opacity-[8px];                       /* optional */
+}
+  
+}

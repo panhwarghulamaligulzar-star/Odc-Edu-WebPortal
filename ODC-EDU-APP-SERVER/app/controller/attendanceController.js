@@ -1,0 +1,587 @@
+import AttendanceSchema from "../modules/attendanceModule.js";
+import BatchSchema from "../modules/batchModule.js";
+import EnrollmentSchema from "../modules/enrollmentModule.js";
+import TeacherSchema from "../modules/teacherModule.js";
+import HolidaySchema from "../modules/holidayModule.js";
+
+// ─── Helper: map batch.days string → JS day-of-week numbers ──────────────────
+const batchDaysToDowSet = (days) => {
+  // JS: 0=Sun 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri 6=Sat
+  const map = {
+    "Monday to Saturday": [1, 2, 3, 4, 5, 6],
+    "Monday to Thursday": [1, 2, 3, 4],
+    "Saturday & Sunday": [6, 0],
+  };
+  return new Set(map[days] || []);
+};
+
+// ─── Helper: is the given date a working day for the batch? ──────────────────
+const isWorkingDay = (date, batchDays) => {
+  const dow = new Date(date).getDay();
+  return batchDaysToDowSet(batchDays).has(dow);
+};
+
+// ─── Helper: check if date is a holiday for the batch ────────────────────────
+const checkHoliday = async (date, batchId) => {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  const nextD = new Date(d);
+  nextD.setDate(nextD.getDate() + 1);
+
+  const holiday = await HolidaySchema.findOne({
+    isActive: true,
+    $and: [
+      {
+        $or: [
+          { date: { $gte: d, $lt: nextD } },
+          { date: { $lte: d }, endDate: { $ne: null, $gte: d } },
+        ],
+      },
+      {
+        $or: [
+          { affectedBatches: { $size: 0 } },
+          { affectedBatches: batchId },
+        ],
+      },
+    ],
+  }).lean();
+  return holiday || null;
+};
+
+// ─── POST /attendance/bulk ────────────────────────────────────────────────────
+// Body: { batchId, date, records: [{ personId, personType, status, notes }] }
+const bulkMarkAttendance = async (req, res) => {
+  try {
+    const { batchId, date, records } = req.body;
+    if (!batchId || !date || !Array.isArray(records) || records.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "batchId, date, and records[] are required",
+      });
+    }
+
+    const batch = await BatchSchema.findById(batchId);
+    if (!batch) {
+      return res.status(404).json({ success: false, message: "Batch not found" });
+    }
+
+    const attendanceDate = new Date(date);
+    attendanceDate.setHours(0, 0, 0, 0);
+
+    if (!isWorkingDay(attendanceDate, batch.days)) {
+      return res.status(400).json({
+        success: false,
+        message: `${attendanceDate.toDateString()} is not a working day for batch "${batch.batchName}" (${batch.days})`,
+      });
+    }
+
+    // Block only academy holidays (government holidays allow attendance if academy is open)
+    const holiday = await checkHoliday(attendanceDate, batchId);
+    if (holiday && holiday.type === "academy") {
+      return res.status(400).json({
+        success: false,
+        message: `${attendanceDate.toDateString()} is an academy holiday: "${holiday.name}" — attendance cannot be marked on academy holidays`,
+      });
+    }
+
+    const ops = records.map(({ personId, personType, status, notes }) => {
+      const personModel = personType === "student" ? "Admission" : "Teacher";
+      return {
+        updateOne: {
+          filter: { batch: batchId, date: attendanceDate, person: personId },
+          update: {
+            $set: {
+              batch: batchId,
+              date: attendanceDate,
+              person: personId,
+              personModel,
+              personType,
+              status: status || "Absent",
+              notes: notes || "",
+              markedBy: req.user?._id,
+            },
+          },
+          upsert: true,
+        },
+      };
+    });
+
+    await AttendanceSchema.bulkWrite(ops);
+
+    res.status(200).json({ success: true, message: "Attendance saved successfully" });
+  } catch (error) {
+    console.error("bulkMarkAttendance error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ─── GET /attendance/batch/:batchId?date=YYYY-MM-DD ─────────────────────────
+const getAttendanceByBatchAndDate = async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    const { date } = req.query;
+
+    if (!date) {
+      return res.status(400).json({ success: false, message: "date query param required" });
+    }
+
+    const attendanceDate = new Date(date);
+    attendanceDate.setHours(0, 0, 0, 0);
+    const nextDay = new Date(attendanceDate);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    const records = await AttendanceSchema.find({
+      batch: batchId,
+      date: { $gte: attendanceDate, $lt: nextDay },
+    })
+      .populate("person")
+      .lean();
+
+    res.status(200).json({ success: true, data: records });
+  } catch (error) {
+    console.error("getAttendanceByBatchAndDate error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ─── GET /attendance/person/:personId?personType=student&from=&to= ────────────
+const getPersonAttendance = async (req, res) => {
+  try {
+    const { personId } = req.params;
+    const { personType, from, to } = req.query;
+
+    const filter = { person: personId };
+    if (personType) filter.personType = personType;
+    if (from || to) {
+      filter.date = {};
+      if (from) {
+        const f = new Date(from);
+        f.setHours(0, 0, 0, 0);
+        filter.date.$gte = f;
+      }
+      if (to) {
+        const t = new Date(to);
+        t.setHours(23, 59, 59, 999);
+        filter.date.$lte = t;
+      }
+    }
+
+    const records = await AttendanceSchema.find(filter)
+      .populate("batch", "batchName batchCode days")
+      .sort({ date: -1 })
+      .lean();
+
+    res.status(200).json({ success: true, data: records });
+  } catch (error) {
+    console.error("getPersonAttendance error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ─── GET /attendance/batch/:batchId/members ──────────────────────────────────
+// Returns students (via enrollments) and teachers for a batch
+const getBatchMembers = async (req, res) => {
+  try {
+    const { batchId } = req.params;
+
+    const batch = await BatchSchema.findById(batchId)
+      .populate("course", "courseName")
+      .lean();
+
+    if (!batch) {
+      return res.status(404).json({ success: false, message: "Batch not found" });
+    }
+
+    // Students enrolled in this batch — include Active and On Hold
+    const enrollments = await EnrollmentSchema.find({
+      batch: batchId,
+      status: { $in: ["Active", "On Hold"] },
+    })
+      .populate("student", "studentName registrationNo gender")
+      .lean();
+
+    console.log(`[Attendance] Batch: ${batchId} | Enrollments found: ${enrollments.length}`);
+
+    const students = enrollments
+      .filter((e) => e.student)
+      .map((e) => ({
+        _id: e.student._id,
+        name: e.student.studentName,
+        registrationNo: e.student.registrationNo,
+        gender: e.student.gender,
+        personType: "student",
+      }));
+
+    // Teachers assigned to this course — Teacher schema has no isActive field
+    const courseId = batch.course?._id || batch.course;
+    console.log(`[Attendance] Looking for teachers with courseId: ${courseId}`);
+    const teachers = await TeacherSchema.find({
+      courseId: courseId,
+    })
+      .select("fullName teacherId gender designation")
+      .lean();
+
+    console.log(`[Attendance] Teachers found: ${teachers.length}`);
+
+    const teacherList = teachers.map((t) => ({
+      _id: t._id,
+      name: t.fullName,
+      teacherId: t.teacherId,
+      gender: t.gender,
+      designation: t.designation,
+      personType: "teacher",
+    }));
+
+    res.status(200).json({
+      success: true,
+      data: {
+        batch,
+        students,
+        teachers: teacherList,
+      },
+    });
+  } catch (error) {
+    console.error("getBatchMembers error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ─── GET /attendance/batch/:batchId/summary?from=&to= ────────────────────────
+// Monthly/range summary: count per person
+const getAttendanceSummary = async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    const { from, to, personType } = req.query;
+
+    const filter = { batch: batchId };
+    if (personType) filter.personType = personType;
+    if (from || to) {
+      filter.date = {};
+      if (from) {
+        const f = new Date(from);
+        f.setHours(0, 0, 0, 0);
+        filter.date.$gte = f;
+      }
+      if (to) {
+        const t = new Date(to);
+        t.setHours(23, 59, 59, 999);
+        filter.date.$lte = t;
+      }
+    }
+
+    const summary = await AttendanceSchema.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: { person: "$person", personType: "$personType", status: "$status" },
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $group: {
+          _id: { person: "$_id.person", personType: "$_id.personType" },
+          statusCounts: {
+            $push: { status: "$_id.status", count: "$count" },
+          },
+        },
+      },
+    ]);
+
+    res.status(200).json({ success: true, data: summary });
+  } catch (error) {
+    console.error("getAttendanceSummary error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ─── GET /attendance/working-days/:batchId?year=&month= ──────────────────────
+// Return which calendar days are working days for a batch (excl. holidays)
+const getWorkingDays = async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    const { year, month } = req.query;
+
+    const batch = await BatchSchema.findById(batchId).lean();
+    if (!batch) {
+      return res.status(404).json({ success: false, message: "Batch not found" });
+    }
+
+    const y = parseInt(year) || new Date().getFullYear();
+    const m = parseInt(month) || new Date().getMonth() + 1;
+
+    const dowSet = batchDaysToDowSet(batch.days);
+    const daysInMonth = new Date(y, m, 0).getDate();
+
+    // Fetch holidays for this batch in this month
+    const from = new Date(y, m - 1, 1);
+    const to   = new Date(y, m - 1, daysInMonth, 23, 59, 59);
+    const holidays = await HolidaySchema.find({
+      isActive: true,
+      $and: [
+        {
+          $or: [
+            { date: { $gte: from, $lte: to } },
+            { date: { $lte: to }, endDate: { $ne: null, $gte: from } },
+          ],
+        },
+        {
+          $or: [
+            { affectedBatches: { $size: 0 } },
+            { affectedBatches: batchId },
+          ],
+        },
+      ],
+    }).select("date endDate").lean();
+
+    const holidayDateSet = new Set();
+    holidays.forEach((h) => {
+      const start = new Date(h.date);
+      const end   = h.endDate ? new Date(h.endDate) : new Date(h.date);
+      let cur = new Date(start);
+      while (cur <= end) {
+        holidayDateSet.add(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2,"0")}-${String(cur.getDate()).padStart(2,"0")}`);
+        cur.setDate(cur.getDate() + 1);
+      }
+    });
+
+    const workingDays = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      const date    = new Date(y, m - 1, d);
+      const dateStr = `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      if (dowSet.has(date.getDay()) && !holidayDateSet.has(dateStr)) {
+        workingDays.push(d);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: { batchId, year: y, month: m, batchDays: batch.days, workingDays },
+    });
+  } catch (error) {
+    console.error("getWorkingDays error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ─── GET /attendance/batch/:batchId/calendar?year=&month= ─────────────────────
+// Lightweight calendar view: returns { "YYYY-MM-DD": { Present, Absent, HalfDay, Leave, total } }
+const getMonthCalendar = async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    const y = parseInt(req.query.year) || new Date().getFullYear();
+    const m = parseInt(req.query.month) || new Date().getMonth() + 1;
+
+    const from = new Date(y, m - 1, 1);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(y, m, 0);
+    to.setHours(23, 59, 59, 999);
+
+    const records = await AttendanceSchema.find({
+      batch: batchId,
+      date: { $gte: from, $lte: to },
+    })
+      .select("date status updatedAt")
+      .lean();
+
+    const calendarMap = {};
+    records.forEach((r) => {
+      // Use LOCAL date parts to avoid UTC-offset mismatch (dates stored at local midnight)
+      const d = r.date;
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (!calendarMap[dateStr]) {
+        calendarMap[dateStr] = { Present: 0, Absent: 0, "Half Day": 0, Leave: 0, total: 0 };
+      }
+      calendarMap[dateStr][r.status] = (calendarMap[dateStr][r.status] || 0) + 1;
+      calendarMap[dateStr].total += 1;
+    });
+
+    res.status(200).json({ success: true, data: calendarMap });
+  } catch (error) {
+    console.error("getMonthCalendar error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ─── GET /attendance/batch/:batchId/history?from=&to=&personType= ─────────────
+// Full history: every record in range, populated with person name/id.
+// Also returns per-person totals for a summary table.
+const getAttendanceHistory = async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    const { from, to, personType } = req.query;
+
+    if (!from || !to) {
+      return res.status(400).json({
+        success: false,
+        message: "from and to query params are required (YYYY-MM-DD)",
+      });
+    }
+
+    const fromDate = new Date(from);
+    fromDate.setHours(0, 0, 0, 0);
+    const toDate = new Date(to);
+    toDate.setHours(23, 59, 59, 999);
+
+    const filter = {
+      batch: batchId,
+      date: { $gte: fromDate, $lte: toDate },
+    };
+    if (personType && personType !== "all") filter.personType = personType;
+
+    const records = await AttendanceSchema.find(filter)
+      .populate({
+        path: "person",
+        select: "studentName registrationNo gender fullName teacherId designation",
+      })
+      .sort({ date: 1, personType: 1 })
+      .lean();
+
+    // Build per-person summary
+    const summaryMap = {};
+    records.forEach((r) => {
+      const pid = String(r.person?._id || r.person);
+      if (!summaryMap[pid]) {
+        const p = r.person || {};
+        summaryMap[pid] = {
+          _id: pid,
+          name: p.studentName || p.fullName || "—",
+          identifier: p.registrationNo || p.teacherId || "—",
+          gender: p.gender || "—",
+          personType: r.personType,
+          Present: 0,
+          Absent: 0,
+          "Half Day": 0,
+          Leave: 0,
+          total: 0,
+        };
+      }
+      summaryMap[pid][r.status] = (summaryMap[pid][r.status] || 0) + 1;
+      summaryMap[pid].total += 1;
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        records,
+        summary: Object.values(summaryMap),
+        total: records.length,
+      },
+    });
+  } catch (error) {
+    console.error("getAttendanceHistory error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ─── POST /attendance/mark-holiday ─────────────────────────────────────────
+// Body: { holidayId }
+// Auto-creates/updates attendance records for all batch members on a holiday date
+const markHolidayAttendance = async (req, res) => {
+  try {
+    const { holidayId } = req.body;
+    if (!holidayId) {
+      return res.status(400).json({ success: false, message: "holidayId is required" });
+    }
+
+    const holiday = await HolidaySchema.findById(holidayId).lean();
+    if (!holiday) {
+      return res.status(404).json({ success: false, message: "Holiday not found" });
+    }
+
+    // Determine affected batch IDs
+    let batchIds = (holiday.affectedBatches || []).map((id) => id.toString());
+    if (batchIds.length === 0) {
+      const allBatches = await BatchSchema.find({}, "_id").lean();
+      batchIds = allBatches.map((b) => b._id.toString());
+    }
+
+    const date = new Date(holiday.date);
+    date.setHours(0, 0, 0, 0);
+
+    const ops = [];
+
+    for (const batchId of batchIds) {
+      const batch = await BatchSchema.findById(batchId, "course").lean();
+      if (!batch) continue;
+
+      // Students enrolled in this batch
+      const enrollments = await EnrollmentSchema.find(
+        { batch: batchId, status: { $in: ["Active", "On Hold"] } },
+        "student"
+      ).lean();
+
+      for (const en of enrollments) {
+        if (!en.student) continue;
+        ops.push({
+          updateOne: {
+            filter: { batch: batchId, date, person: en.student },
+            update: {
+              $set: {
+                batch: batchId,
+                date,
+                person: en.student,
+                personModel: "Admission",
+                personType: "student",
+                status: "Holiday",
+                notes: `Holiday: ${holiday.name}`,
+                markedBy: req.user?._id,
+              },
+            },
+            upsert: true,
+          },
+        });
+      }
+
+      // Teachers assigned to the batch's course
+      const courseId = batch.course;
+      if (courseId) {
+        const teachers = await TeacherSchema.find({ courseId }, "_id").lean();
+        for (const t of teachers) {
+          ops.push({
+            updateOne: {
+              filter: { batch: batchId, date, person: t._id },
+              update: {
+                $set: {
+                  batch: batchId,
+                  date,
+                  person: t._id,
+                  personModel: "Teacher",
+                  personType: "teacher",
+                  status: "Holiday",
+                  notes: `Holiday: ${holiday.name}`,
+                  markedBy: req.user?._id,
+                },
+              },
+              upsert: true,
+            },
+          });
+        }
+      }
+    }
+
+    if (ops.length > 0) {
+      await AttendanceSchema.bulkWrite(ops, { ordered: false });
+    }
+
+    return res.json({
+      success: true,
+      message: `Holiday attendance marked for ${ops.length} record(s) across ${batchIds.length} batch(es)`,
+      totalMarked: ops.length,
+    });
+  } catch (error) {
+    console.error("markHolidayAttendance error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export {
+  bulkMarkAttendance,
+  getAttendanceByBatchAndDate,
+  getPersonAttendance,
+  getBatchMembers,
+  getAttendanceSummary,
+  getWorkingDays,
+  getAttendanceHistory,
+  getMonthCalendar,
+  markHolidayAttendance,
+};
