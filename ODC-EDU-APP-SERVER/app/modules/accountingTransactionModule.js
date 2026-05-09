@@ -1,5 +1,6 @@
 // models/AccountingTransaction.js
 import mongoose from "mongoose";
+import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const AccountingTransactionSchema = new mongoose.Schema(
   {
@@ -32,6 +33,7 @@ const AccountingTransactionSchema = new mongoose.Schema(
     paymentDate: {
       type: Date,
       required: true,
+      set: normalizeDateOnly,
     },
     amount: {
       type: Number,

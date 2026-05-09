@@ -1,5 +1,6 @@
 // modules/fundTransferModule.js
 import mongoose from "mongoose";
+import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const fundTransferSchema = new mongoose.Schema(
   {
@@ -27,6 +28,7 @@ const fundTransferSchema = new mongoose.Schema(
       type: Date,
       required: [true, "Transfer date is required"],
       default: Date.now,
+      set: normalizeDateOnly,
     },
     note: {
       type: String,

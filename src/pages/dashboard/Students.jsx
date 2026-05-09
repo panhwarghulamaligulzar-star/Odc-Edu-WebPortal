@@ -486,19 +486,23 @@ const Students = () => {
   };
 
   const handleBulkDeleteStudents = async () => {
-    if (selectedStudentIds.length === 0) {
+    const normalizedSelectedIds = selectedStudentIds
+      .map((id) => (typeof id === "string" ? id.trim() : String(id || "").trim()))
+      .filter(Boolean);
+
+    if (normalizedSelectedIds.length === 0) {
       message.warning("Please select at least one student");
       return;
     }
     setBulkDeleting(true);
     try {
       const response = await api.post("/student/admissions/bulk-delete", {
-        ids: selectedStudentIds,
+        ids: normalizedSelectedIds,
       });
       if (response.data.success) {
         message.success(
           response.data.message ||
-            `${selectedStudentIds.length} student(s) deleted successfully!`,
+            `${normalizedSelectedIds.length} student(s) deleted successfully!`,
         );
         setSelectedStudentIds([]);
         fetchStudents();
@@ -515,7 +519,12 @@ const Students = () => {
       message.warning("No students available to select");
       return;
     }
-    setSelectedStudentIds(filteredStudents.map((student) => student._id));
+    setSelectedStudentIds(
+      filteredStudents
+        .map((student) => student?._id)
+        .filter(Boolean)
+        .map((id) => (typeof id === "string" ? id.trim() : String(id).trim())),
+    );
   };
 
   const handleRefreshItRegistrationNumbers = async () => {
@@ -1178,8 +1187,15 @@ const Students = () => {
                 className="custom-pagination-table"
                 rowSelection={{
                   selectedRowKeys: selectedStudentIds,
-                  onChange: (newSelectedRowKeys) =>
-                    setSelectedStudentIds(newSelectedRowKeys),
+                  onChange: (newSelectedRowKeys, selectedRows) =>
+                    setSelectedStudentIds(
+                      selectedRows
+                        .map((student) => student?._id)
+                        .filter(Boolean)
+                        .map((id) =>
+                          typeof id === "string" ? id.trim() : String(id).trim(),
+                        ),
+                    ),
                   preserveSelectedRowKeys: true,
                 }}
                 pagination={{

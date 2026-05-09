@@ -37,6 +37,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import academyConfig from "../../../config/academyConfig";
 import odysseyLogo from "../../../assets/images/logos/LOGO.png";
+import { formatDateOnlyForApi } from "../../../utils/date";
 import {
   getAccountingTypes,
   getHeadsOfAccount,
@@ -217,7 +218,7 @@ const Transactions = () => {
 
       const payload = {
         ...values,
-        paymentDate: values.paymentDate.toISOString(),
+        paymentDate: formatDateOnlyForApi(values.paymentDate),
       };
 
       if (editingTxn) {

@@ -5,67 +5,53 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-// Source database URI (remote production)
-const sourceURI = "mongodb+srv://asadalib4_db_user:asadaliEdu25@cluster0.dthjlbf.mongodb.net";
-
-// Backup file path
+const sourceURI = process.env.LIVE_DB_URI || process.env.DEV_DB_URI;
 const backupDir = path.join(process.cwd(), "seeders", "backup");
 const backupFile = path.join(backupDir, "backup.json");
 
 const backupDatabase = async () => {
   try {
-    console.log("🔍 Starting database backup...");
-    console.log(`📡 Connecting to: ${sourceURI}`);
-
-    // Create backup directory if it doesn't exist
-    if (!fs.existsSync(backupDir)) {
-      fs.mkdirSync(backupDir, { recursive: true });
-      console.log(`📁 Created backup directory: ${backupDir}`);
+    if (!sourceURI) {
+      throw new Error(
+        "Missing LIVE_DB_URI in .env. Add your live database connection string before running backup.",
+      );
     }
 
-    // Connect to MongoDB
+    console.log("Starting database backup...");
+    console.log(`Connecting to source database: ${sourceURI}`);
+
+    if (!fs.existsSync(backupDir)) {
+      fs.mkdirSync(backupDir, { recursive: true });
+      console.log(`Created backup directory: ${backupDir}`);
+    }
+
     await mongoose.connect(sourceURI);
-    console.log("✅ Connected to source database!");
+    console.log("Connected to source database.");
 
     const db = mongoose.connection.db;
-
-    // Get all collections
-    console.log("🔎 Fetching all collections...");
     const collections = await db.listCollections().toArray();
-    console.log(`📊 Found ${collections.length} collections`);
+    console.log(`Found ${collections.length} collections`);
 
     const backupData = {};
 
-    // Export each collection
     for (const collection of collections) {
       const collectionName = collection.name;
-      console.log(`\n📤 Exporting collection: ${collectionName}`);
+      console.log(`Exporting collection: ${collectionName}`);
 
       const data = await db.collection(collectionName).find({}).toArray();
       backupData[collectionName] = data;
-      console.log(`   ✅ Exported ${data.length} documents`);
+      console.log(`Exported ${data.length} documents`);
     }
 
-    // Save to JSON file
-    console.log(`\n💾 Saving backup to: ${backupFile}`);
     fs.writeFileSync(backupFile, JSON.stringify(backupData, null, 2));
-    console.log("✅ Backup saved successfully!");
-
-    // Print summary
-    console.log("\n📋 Backup Summary:");
-    console.log("==================");
-    for (const [collection, data] of Object.entries(backupData)) {
-      console.log(`   ${collection}: ${data.length} documents`);
-    }
-
-    console.log(`\n✨ Backup file: ${backupFile}`);
-
+    console.log(`Backup saved successfully to: ${backupFile}`);
   } catch (error) {
-    console.error("❌ Backup error:", error.message);
+    console.error("Backup error:", error.message);
+    process.exitCode = 1;
   } finally {
     await mongoose.disconnect();
-    console.log("\n🔌 Disconnected from database");
-    process.exit(0);
+    console.log("Disconnected from database");
+    process.exit();
   }
 };
 

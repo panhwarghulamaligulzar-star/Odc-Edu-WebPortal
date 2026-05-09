@@ -1,5 +1,6 @@
 // models/Enrollment.js
 import mongoose from "mongoose";
+import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const EnrollmentSchema = new mongoose.Schema(
   {
@@ -24,6 +25,7 @@ const EnrollmentSchema = new mongoose.Schema(
       type: Date,
       required: true,
       default: Date.now,
+      set: normalizeDateOnly,
     },
 
     status: {
@@ -35,6 +37,7 @@ const EnrollmentSchema = new mongoose.Schema(
 
     completionDate: {
       type: Date,
+      set: normalizeDateOnly,
     },
 
     notes: {

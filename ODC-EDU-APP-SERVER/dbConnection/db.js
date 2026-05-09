@@ -2,8 +2,56 @@ import mongoose from "mongoose";
 
 const connectDB = async () => {
   try {
-    await mongoose.connect(process.env.DB_URI);
+    const mongoUri = process.env.DB_URI || process.env.LOCAL_DB_URI;
+
+    if (!mongoUri) {
+      throw new Error(
+        "Missing DB connection string. Add DB_URI or LOCAL_DB_URI to your .env file.",
+      );
+    }
+
+    await mongoose.connect(mongoUri);
     console.log("MongoDB connected successfully!");
+
+    const syncRegistrationNumberIndex = async () => {
+      try {
+        const admissions = mongoose.connection.db.collection("admissions");
+
+        // Remove bad stored values before syncing the index so blank/null values do not collide.
+        await admissions.updateMany(
+          {
+            registrationNo: { $in: [null, "", "null", "undefined"] },
+          },
+          {
+            $unset: { registrationNo: 1 },
+          },
+        );
+
+        const indexes = await admissions.indexes();
+        const registrationIndex = indexes.find(
+          (index) => index.name === "registrationNo_1",
+        );
+
+        if (
+          registrationIndex &&
+          (!registrationIndex.unique || !registrationIndex.sparse)
+        ) {
+          await admissions.dropIndex("registrationNo_1");
+          await admissions.createIndex(
+            { registrationNo: 1 },
+            { name: "registrationNo_1", unique: true, sparse: true },
+          );
+          console.log(
+            "Recreated admissions registrationNo index as unique+sparse.",
+          );
+        }
+      } catch (indexError) {
+        console.warn(
+          "Could not sync admissions registrationNo index:",
+          indexError.message,
+        );
+      }
+    };
 
     // Remove legacy unique indexes so same student can enroll in the same course multiple times.
     const dropLegacyUniqueIndex = async (collectionName, indexName, label) => {
@@ -30,6 +78,7 @@ const connectDB = async () => {
       "student_1_course_1",
       "fee structure",
     );
+    await syncRegistrationNumberIndex();
   } catch (err) {
     console.error("MongoDB connection error:", err.message);
     process.exit(1);

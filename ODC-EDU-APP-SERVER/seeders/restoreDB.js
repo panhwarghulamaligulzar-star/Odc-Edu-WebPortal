@@ -5,79 +5,161 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-// Target database URI (local)
-const targetURI = "mongodb://asad:aliasad@109.199.123.188:27017/asad";
-
-// Backup file path
+const targetURI = process.env.LOCAL_DB_URI || process.env.DB_URI;
 const backupFile = path.join(process.cwd(), "seeders", "backup", "backup.json");
 
-const restoreDatabase = async () => {
-  try {
-    console.log("🔍 Starting database restore...");
-    console.log(`📡 Target database: ${targetURI}`);
+const buildUniqueKey = (document, fields) => {
+  const values = fields.map((field) => {
+    const value = document[field];
+    return `${field}:${JSON.stringify(value)}`;
+  });
 
-    // Check if backup file exists
-    if (!fs.existsSync(backupFile)) {
-      console.error(`❌ Backup file not found: ${backupFile}`);
-      console.log("   Please run: node seeders/backupDB.js first");
-      process.exit(1);
+  return values.join("|");
+};
+
+const removeInBatchDuplicates = async (collection, collectionName, documents) => {
+  let indexes = [];
+
+  try {
+    indexes = await collection.indexes();
+  } catch (error) {
+    if (
+      error.codeName === "NamespaceNotFound" ||
+      error.message.includes("ns does not exist")
+    ) {
+      return { filteredDocuments: documents, skippedCount: 0 };
     }
 
-    // Read backup file
-    console.log(`\n📖 Reading backup file: ${backupFile}`);
-    const backupData = JSON.parse(fs.readFileSync(backupFile, "utf8"));
-    console.log("✅ Backup file loaded successfully!");
+    throw error;
+  }
 
-    // Connect to MongoDB
-    await mongoose.connect(targetURI);
-    console.log("✅ Connected to target database!");
+  const uniqueIndexes = indexes
+    .filter((index) => index.unique)
+    .map((index) => Object.keys(index.key));
 
-    const db = mongoose.connection.db;
+  if (uniqueIndexes.length === 0) {
+    return { filteredDocuments: documents, skippedCount: 0 };
+  }
 
-    // Restore each collection
-    console.log("\n🔄 Restoring collections...");
-    let totalDocuments = 0;
+  const seenKeysByIndex = uniqueIndexes.map(() => new Set());
+  const filteredDocuments = [];
+  let skippedCount = 0;
 
-    for (const [collectionName, documents] of Object.entries(backupData)) {
-      console.log(`\n📥 Restoring collection: ${collectionName}`);
+  for (const document of documents) {
+    let isDuplicate = false;
 
-      // Clear existing data
-      await db.collection(collectionName).deleteMany({});
-      console.log(`   🗑️  Cleared existing documents`);
+    for (let i = 0; i < uniqueIndexes.length; i += 1) {
+      const fields = uniqueIndexes[i];
+      const hasAllFields = fields.every((field) => document[field] !== undefined);
 
-      if (documents.length > 0) {
-        // Insert documents with error handling
-        try {
-          const result = await db.collection(collectionName).insertMany(documents, { ordered: false });
-          console.log(`   ✅ Inserted ${result.insertedCount} documents`);
-          totalDocuments += result.insertedCount;
-        } catch (error) {
-          // Some documents may have failed due to duplicates, but continue
-          console.log(`   ⚠️  Some documents couldn't be inserted (likely duplicates)`);
-          console.log(`   📝 Error: ${error.message}`);
-          // Count how many were inserted before the error
-          const countAfter = await db.collection(collectionName).countDocuments({});
-          totalDocuments += countAfter;
-        }
-      } else {
-        console.log(`   ℹ️  No documents to insert`);
+      if (!hasAllFields) {
+        continue;
+      }
+
+      const uniqueKey = buildUniqueKey(document, fields);
+      if (seenKeysByIndex[i].has(uniqueKey)) {
+        isDuplicate = true;
+        break;
       }
     }
 
-    // Print summary
-    console.log("\n📋 Restore Summary:");
-    console.log("===================");
-    for (const [collection, data] of Object.entries(backupData)) {
-      console.log(`   ${collection}: ${data.length} documents restored`);
+    if (isDuplicate) {
+      skippedCount += 1;
+      continue;
     }
-    console.log(`\n✨ Total documents restored: ${totalDocuments}`);
 
+    filteredDocuments.push(document);
+
+    for (let i = 0; i < uniqueIndexes.length; i += 1) {
+      const fields = uniqueIndexes[i];
+      const hasAllFields = fields.every((field) => document[field] !== undefined);
+
+      if (hasAllFields) {
+        seenKeysByIndex[i].add(buildUniqueKey(document, fields));
+      }
+    }
+  }
+
+  if (skippedCount > 0) {
+    console.log(
+      `Skipped ${skippedCount} duplicate documents in backup for collection: ${collectionName}`,
+    );
+  }
+
+  return { filteredDocuments, skippedCount };
+};
+
+const restoreDatabase = async () => {
+  try {
+    if (!targetURI) {
+      throw new Error(
+        "Missing DB_URI in .env. Add your local database connection string before running restore.",
+      );
+    }
+
+    console.log("Starting database restore...");
+    console.log(`Target database: ${targetURI}`);
+
+    if (!fs.existsSync(backupFile)) {
+      console.error(`Backup file not found: ${backupFile}`);
+      console.log("Please run: node seeders/backupDB.js first");
+      process.exit(1);
+    }
+
+    const backupData = JSON.parse(fs.readFileSync(backupFile, "utf8"));
+    console.log("Backup file loaded successfully.");
+
+    await mongoose.connect(targetURI);
+    console.log("Connected to target database.");
+
+    const db = mongoose.connection.db;
+    let totalDocuments = 0;
+
+    for (const [collectionName, documents] of Object.entries(backupData)) {
+      console.log(`Restoring collection: ${collectionName}`);
+
+      const collection = db.collection(collectionName);
+
+      await collection.deleteMany({});
+      console.log("Cleared existing documents");
+
+      if (documents.length > 0) {
+        const { filteredDocuments } = await removeInBatchDuplicates(
+          collection,
+          collectionName,
+          documents,
+        );
+
+        try {
+          const result = await collection.insertMany(filteredDocuments, {
+            ordered: false,
+          });
+          console.log(`Inserted ${result.insertedCount} documents`);
+          totalDocuments += result.insertedCount;
+        } catch (error) {
+          if (error.code === 11000 || error.writeErrors?.some((item) => item.code === 11000)) {
+            const insertedCount = error.result?.result?.nInserted ?? error.insertedCount ?? 0;
+            console.log(
+              `Duplicate key conflicts were skipped while restoring ${collectionName}. Inserted ${insertedCount} documents.`,
+            );
+            totalDocuments += insertedCount;
+          } else {
+            throw error;
+          }
+        }
+      } else {
+        console.log("No documents to insert");
+      }
+    }
+
+    console.log(`Total documents restored: ${totalDocuments}`);
   } catch (error) {
-    console.error("❌ Restore error:", error.message);
+    console.error("Restore error:", error.message);
+    process.exitCode = 1;
   } finally {
     await mongoose.disconnect();
-    console.log("\n🔌 Disconnected from database");
-    process.exit(0);
+    console.log("Disconnected from database");
+    process.exit();
   }
 };
 

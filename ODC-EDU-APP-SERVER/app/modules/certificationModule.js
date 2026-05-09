@@ -1,5 +1,6 @@
 // models/Certificate.js
 import mongoose from "mongoose";
+import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const CertificateSchema = new mongoose.Schema(
   {
@@ -45,16 +46,19 @@ const CertificateSchema = new mongoose.Schema(
     startingDate: {
       type: Date,
       required: true,
+      set: normalizeDateOnly,
     },
 
     endingDate: {
       type: Date,
       required: true,
+      set: normalizeDateOnly,
     },
 
     issueDate: {
       type: Date,
       default: Date.now,
+      set: normalizeDateOnly,
     },
 
     grade: {

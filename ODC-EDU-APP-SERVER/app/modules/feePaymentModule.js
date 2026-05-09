@@ -1,5 +1,6 @@
 // models/FeePayment.js
 import mongoose from "mongoose";
+import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const FeePaymentSchema = new mongoose.Schema(
   {
@@ -48,6 +49,7 @@ const FeePaymentSchema = new mongoose.Schema(
       type: Date,
       required: true,
       default: Date.now,
+      set: normalizeDateOnly,
     },
 
     paymentMethod: {
@@ -110,6 +112,7 @@ const FeePaymentSchema = new mongoose.Schema(
       },
       refundDate: {
         type: Date,
+        set: normalizeDateOnly,
       },
       refundReason: {
         type: String,

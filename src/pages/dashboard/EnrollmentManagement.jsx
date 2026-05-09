@@ -25,6 +25,7 @@ import api from "../../api/axiosInstance";
 import dayjs from "dayjs";
 import { MdAssignment } from "react-icons/md";
 import EnrollmentFeeConfiguration from "../../components/forms/EnrollmentFeeConfiguration";
+import { formatDateOnlyForApi } from "../../utils/date";
 
 const EnrollmentManagement = () => {
   const [enrollments, setEnrollments] = useState([]);
@@ -113,7 +114,8 @@ const EnrollmentManagement = () => {
         studentId: values.studentId,
         courseId: values.courseId,
         enrollmentDate:
-          values.enrollmentDate?.toISOString() || new Date().toISOString(),
+          formatDateOnlyForApi(values.enrollmentDate) ||
+          formatDateOnlyForApi(dayjs()),
         notes: values.notes,
         // Fee structure data
         admissionFee: values.admissionFee || 0,

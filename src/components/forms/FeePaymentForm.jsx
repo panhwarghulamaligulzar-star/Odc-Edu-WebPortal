@@ -13,6 +13,7 @@ import {
 } from "antd";
 import { getNextVoucherNumber } from "../../services/feeService";
 import dayjs from "dayjs";
+import { formatDateOnlyForApi } from "../../utils/date";
 
 const FeePaymentForm = ({
   form,
@@ -90,7 +91,8 @@ const FeePaymentForm = ({
       ...values,
       voucherNo: voucherNum,
       paymentDate:
-        values.paymentDate?.toISOString() || new Date().toISOString(),
+        formatDateOnlyForApi(values.paymentDate) ||
+        formatDateOnlyForApi(dayjs()),
       installmentNumber: selectedInstallment,
     };
 

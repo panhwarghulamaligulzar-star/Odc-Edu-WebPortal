@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const AnnouncementSchema = new mongoose.Schema(
   {
@@ -18,6 +19,7 @@ const AnnouncementSchema = new mongoose.Schema(
       type: Date,
       required: true,
       default: Date.now,
+      set: normalizeDateOnly,
     },
 
     bannerImage: {

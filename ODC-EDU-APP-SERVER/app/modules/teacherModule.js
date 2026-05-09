@@ -1,5 +1,6 @@
 // models/Teacher.js
 import mongoose from "mongoose";
+import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const TeacherSchema = new mongoose.Schema(
   {
@@ -31,6 +32,7 @@ const TeacherSchema = new mongoose.Schema(
     appointmentDate: {
       type: Date,
       required: true,
+      set: normalizeDateOnly,
     },
 
     contactNo: {

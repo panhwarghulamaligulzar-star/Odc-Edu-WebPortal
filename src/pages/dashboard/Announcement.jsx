@@ -14,6 +14,7 @@ import moment from "moment";
 import { FaEye, FaPlus } from "react-icons/fa";
 import { FiEdit } from "react-icons/fi";
 import { MdDeleteOutline, MdCampaign } from "react-icons/md";
+import { formatDateOnlyForApi } from "../../utils/date";
 import {
   createNewAnnouncement,
   getAllAnnouncement,
@@ -102,7 +103,7 @@ const Announcement = () => {
       const formData = new FormData();
       formData.append("title", values.title.trim());
       formData.append("text", values.text.trim());
-      formData.append("date", values.date.toISOString());
+      formData.append("date", formatDateOnlyForApi(values.date));
       formData.append("isActive", values.isActive ?? true);
       formData.append("bannerImage", uploadedFile);
 
@@ -144,7 +145,7 @@ const Announcement = () => {
       const formData = new FormData();
       formData.append("title", values.title.trim());
       formData.append("text", values.text.trim());
-      formData.append("date", values.date.toISOString());
+      formData.append("date", formatDateOnlyForApi(values.date));
       formData.append("isActive", values.isActive ?? true);
 
       if (uploadedFile) {

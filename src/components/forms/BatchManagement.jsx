@@ -21,6 +21,7 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
+import { formatDateOnlyForApi } from "../../utils/date";
 import {
   createBatch,
   updateBatch,
@@ -101,8 +102,8 @@ const BatchManagement = ({ courseId, courseName }) => {
       const batchData = {
         ...values,
         course: courseId,
-        startDate: values.startDate?.toISOString(),
-        endDate: values.endDate?.toISOString(),
+        startDate: formatDateOnlyForApi(values.startDate),
+        endDate: formatDateOnlyForApi(values.endDate),
       };
 
       let response;

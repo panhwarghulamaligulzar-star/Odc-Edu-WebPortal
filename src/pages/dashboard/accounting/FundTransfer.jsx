@@ -25,6 +25,7 @@ import {
 } from "@ant-design/icons";
 import { ScaleLoader } from "react-spinners";
 import dayjs from "dayjs";
+import { formatDateOnlyForApi } from "../../../utils/date";
 import {
   getPaymentMethods,
   getFundTransfers,
@@ -126,7 +127,7 @@ const FundTransfer = () => {
       setSubmitLoading(true);
       const payload = {
         ...values,
-        transferDate: values.transferDate.toISOString(),
+        transferDate: formatDateOnlyForApi(values.transferDate),
       };
       const res = await createFundTransfer(payload);
       if (res?.success) {

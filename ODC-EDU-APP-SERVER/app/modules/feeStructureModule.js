@@ -1,5 +1,6 @@
 // models/FeeStructure.js
 import mongoose from "mongoose";
+import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const FeeStructureSchema = new mongoose.Schema(
   {
@@ -232,6 +233,7 @@ const FeeStructureSchema = new mongoose.Schema(
         dueDate: {
           type: Date,
           required: true,
+          set: normalizeDateOnly,
         },
         status: {
           type: String,
@@ -245,6 +247,7 @@ const FeeStructureSchema = new mongoose.Schema(
         },
         paidDate: {
           type: Date,
+          set: normalizeDateOnly,
         },
         receiptNumber: {
           type: String,

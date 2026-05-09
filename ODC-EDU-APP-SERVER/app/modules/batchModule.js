@@ -1,5 +1,6 @@
 // models/Batch.js
 import mongoose from "mongoose";
+import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const BatchSchema = new mongoose.Schema(
   {
@@ -44,10 +45,12 @@ const BatchSchema = new mongoose.Schema(
     startDate: {
       type: Date,
       required: true,
+      set: normalizeDateOnly,
     },
 
     endDate: {
       type: Date,
+      set: normalizeDateOnly,
     },
 
     maxStudents: {

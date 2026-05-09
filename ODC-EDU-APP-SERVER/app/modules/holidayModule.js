@@ -1,16 +1,19 @@
 import mongoose from "mongoose";
+import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const HolidaySchema = new mongoose.Schema(
   {
     date: {
       type: Date,
       required: true,
+      set: normalizeDateOnly,
     },
 
     // Optional end date for multi-day holidays (same as date for single-day)
     endDate: {
       type: Date,
       default: null,
+      set: normalizeDateOnly,
     },
 
     name: {

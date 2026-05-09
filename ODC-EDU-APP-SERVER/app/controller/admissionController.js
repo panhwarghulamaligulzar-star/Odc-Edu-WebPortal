@@ -1,7 +1,79 @@
 // controllers/admissionController.js
+import mongoose from "mongoose";
 import AdmissionSchema from "../modules/AdmissionModule.js";
 import * as XLSX from "xlsx";
 import { resyncItRegistrationNumbers } from "../utils/registrationNumberSync.js";
+
+const normalizeText = (value) => {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  const text = String(value).trim();
+  return text === "" ? undefined : text;
+};
+
+const normalizeRegistrationNo = (value) => {
+  const normalized = normalizeText(value);
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (["null", "undefined", "n/a", "-"].includes(normalized.toLowerCase())) {
+    return undefined;
+  }
+
+  return normalized;
+};
+
+const parseExcelDate = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    if (!parsed) {
+      return undefined;
+    }
+
+    return new Date(
+      Date.UTC(parsed.y, parsed.m - 1, parsed.d, parsed.H || 0, parsed.M || 0, parsed.S || 0),
+    );
+  }
+
+  const text = String(value).trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return new Date(`${text}T00:00:00`);
+  }
+
+  if (/^\d{2}[-/]\d{2}[-/]\d{4}$/.test(text)) {
+    const [day, month, year] = text.split(/[-/]/).map(Number);
+    return new Date(year, month - 1, day);
+  }
+
+  const fallback = new Date(text);
+  return Number.isNaN(fallback.getTime()) ? undefined : fallback;
+};
+
+const normalizeBoolean = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  return ["yes", "true", "1"].includes(normalized);
+};
 
 // Create new admission/student
 export const createAdmission = async (req, res) => {
@@ -114,14 +186,29 @@ export const bulkDeleteAdmissions = async (req, res) => {
       });
     }
 
+    const normalizedIds = ids
+      .map((id) => (typeof id === "string" ? id.trim() : String(id || "").trim()))
+      .filter(Boolean);
+
+    const validObjectIds = normalizedIds
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
+
+    if (validObjectIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid student IDs were provided",
+      });
+    }
+
     const result = await AdmissionSchema.deleteMany({
-      _id: { $in: ids },
+      _id: { $in: validObjectIds },
     });
 
     if (result.deletedCount === 0) {
       return res.status(404).json({
         success: false,
-        message: "No students found for provided IDs",
+        message: "No students found for the selected records",
       });
     }
 
@@ -229,10 +316,13 @@ export const bulkImportStudents = async (req, res) => {
     }
 
     // Parse the Excel/CSV file
-    const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+    const workbook = XLSX.read(req.file.buffer, { type: "buffer", cellDates: true });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    const studentsData = XLSX.utils.sheet_to_json(worksheet);
+    const studentsData = XLSX.utils.sheet_to_json(worksheet, {
+      defval: null,
+      raw: false,
+    });
 
     if (!studentsData || studentsData.length === 0) {
       return res.status(400).json({
@@ -248,6 +338,7 @@ export const bulkImportStudents = async (req, res) => {
       errors: [],
     };
     const seenCnicOrBForms = new Set();
+    const seenRegistrationNos = new Set();
 
     // Process each student
     for (const [index, row] of studentsData.entries()) {
@@ -269,95 +360,169 @@ export const bulkImportStudents = async (req, res) => {
         };
 
         // Map fields
-        studentData.studentName = getValue(["Student Name", "studentName", "Name", "name"]);
-        delete studentData.registrationNo;
-        studentData.registrationDate = getValue(["Registration Date", "registrationDate", "Reg Date"]);
-        studentData.gender = getValue(["Gender", "gender"]);
-        studentData.dateOfBirth = getValue(["Date of Birth", "dateOfBirth", "DOB", "dob"]);
-        studentData.religion = getValue(["Religion", "religion"]);
-        studentData.cnicOrBForm = getValue(["CNIC/B-Form", "cnicOrBForm", "CNIC", "BForm", "cnic"]);
-        studentData.caste = getValue(["Caste", "caste"]);
-        studentData.mobileNumber = getValue(["Mobile Number", "mobileNumber", "Mobile", "Phone"]);
-        studentData.disability = getValue(["Disability", "disability"]);
-        studentData.previousSchoolCollege = getValue(["Previous School/College", "previousSchoolCollege", "Previous School"]);
-        studentData.lastClassAttended = getValue(["Last Class Attended", "lastClassAttended", "Last Class"]);
-        studentData.emergencyContactNumber = getValue(["Emergency Contact", "emergencyContactNumber", "Emergency Contact No"]);
-        studentData.permanentAddress = getValue(["Permanent Address", "permanentAddress", "Address"]);
-        studentData.fatherName = getValue(["Father Name", "fatherName", "Father's Name"]);
-        studentData.fatherCnic = getValue(["Father CNIC", "fatherCnic", "Father's CNIC"]);
-        studentData.fatherOccupation = getValue(["Father Occupation", "fatherOccupation", "Father's Occupation"]);
-        studentData.fatherContact = getValue(["Father Contact", "fatherContact", "Father's Contact"]);
-        studentData.motherName = getValue(["Mother Name", "motherName", "Mother's Name"]);
-        studentData.guardianName = getValue(["Guardian Name", "guardianName", "Guardian's Name"]);
-        studentData.guardianContact = getValue(["Guardian Contact", "guardianContact", "Guardian's Contact"]);
-        studentData.whatsappNumber = getValue(["WhatsApp Number", "whatsappNumber", "WhatsApp", "Whatsapp"]);
-        studentData.emailAddress = getValue(["Email", "emailAddress", "Email Address", "E-mail"]);
-        studentData.currentAddress = getValue(["Current Address", "currentAddress"]);
-        studentData.unionCouncil = getValue(["Union Council", "unionCouncil"]);
-        studentData.tehsil = getValue(["Tehsil", "tehsil"]);
-        studentData.district = getValue(["District", "district"]);
-        studentData.reference = getValue(["Reference", "reference"]);
+        studentData.studentName = normalizeText(
+          getValue(["Student Name", "studentName", "Name", "name"]),
+        );
+        studentData.registrationNo = normalizeRegistrationNo(
+          getValue(["Registration No", "registrationNo", "Reg No"]),
+        );
+        studentData.registrationDate = parseExcelDate(
+          getValue(["Registration Date", "registrationDate", "Reg Date"]),
+        );
+        studentData.gender = normalizeText(getValue(["Gender", "gender"]));
+        studentData.dateOfBirth = parseExcelDate(
+          getValue(["Date of Birth", "dateOfBirth", "DOB", "dob"]),
+        );
+        studentData.religion = normalizeText(getValue(["Religion", "religion"]));
+        studentData.cnicOrBForm = normalizeText(
+          getValue(["CNIC/B-Form", "cnicOrBForm", "CNIC", "BForm", "cnic"]),
+        );
+        studentData.caste = normalizeText(getValue(["Caste", "caste"]));
+        studentData.mobileNumber = normalizeText(
+          getValue(["Mobile Number", "mobileNumber", "Mobile", "Phone"]),
+        );
+        studentData.disability = normalizeBoolean(getValue(["Disability", "disability"]));
+        studentData.previousSchoolCollege = normalizeText(
+          getValue(["Previous School/College", "previousSchoolCollege", "Previous School"]),
+        );
+        studentData.lastClassAttended = normalizeText(
+          getValue(["Last Class Attended", "lastClassAttended", "Last Class"]),
+        );
+        studentData.emergencyContactNumber = normalizeText(
+          getValue(["Emergency Contact", "emergencyContactNumber", "Emergency Contact No"]),
+        );
+        studentData.permanentAddress = normalizeText(
+          getValue(["Permanent Address", "permanentAddress", "Address"]),
+        );
+        studentData.fatherName = normalizeText(
+          getValue(["Father Name", "fatherName", "Father's Name"]),
+        );
+        studentData.fatherCnic = normalizeText(
+          getValue(["Father CNIC", "fatherCnic", "Father's CNIC"]),
+        );
+        studentData.fatherOccupation = normalizeText(
+          getValue(["Father Occupation", "fatherOccupation", "Father's Occupation"]),
+        );
+        studentData.fatherContact = normalizeText(
+          getValue(["Father Contact", "fatherContact", "Father's Contact"]),
+        );
+        studentData.motherName = normalizeText(
+          getValue(["Mother Name", "motherName", "Mother's Name"]),
+        );
+        studentData.guardianName = normalizeText(
+          getValue(["Guardian Name", "guardianName", "Guardian's Name"]),
+        );
+        studentData.guardianContact = normalizeText(
+          getValue(["Guardian Contact", "guardianContact", "Guardian's Contact"]),
+        );
+        studentData.whatsappNumber = normalizeText(
+          getValue(["WhatsApp Number", "whatsappNumber", "WhatsApp", "Whatsapp"]),
+        );
+        studentData.emailAddress = normalizeText(
+          getValue(["Email", "emailAddress", "Email Address", "E-mail"]),
+        );
+        studentData.currentAddress = normalizeText(
+          getValue(["Current Address", "currentAddress"]),
+        );
+        studentData.unionCouncil = normalizeText(
+          getValue(["Union Council", "unionCouncil"]),
+        );
+        studentData.tehsil = normalizeText(getValue(["Tehsil", "tehsil"]));
+        studentData.district = normalizeText(getValue(["District", "district"]));
+        studentData.reference = normalizeText(getValue(["Reference", "reference"]));
 
-        // Normalize identifiers
-        if (studentData.cnicOrBForm) {
-          studentData.cnicOrBForm = String(studentData.cnicOrBForm).trim();
-        }
-        if (studentData.mobileNumber) {
-          studentData.mobileNumber = String(studentData.mobileNumber).trim();
-        }
-        
         // Validate required fields
-        if (!studentData.studentName || !studentData.mobileNumber) {
+        if (
+          !studentData.studentName ||
+          !studentData.mobileNumber ||
+          !studentData.gender ||
+          !studentData.dateOfBirth ||
+          !studentData.religion ||
+          !studentData.cnicOrBForm ||
+          !studentData.fatherName ||
+          !studentData.fatherCnic ||
+          !studentData.permanentAddress ||
+          !studentData.emergencyContactNumber ||
+          !studentData.registrationDate
+        ) {
           results.errors.push({
             row: index + 2,
-            error: "Missing required fields (Student Name, Mobile Number)",
+            error:
+              "Missing required fields. Required: Student Name, Mobile Number, Gender, Date of Birth, Religion, CNIC/B-Form, Father Name, Father CNIC, Permanent Address, Emergency Contact, Registration Date",
           });
           continue;
         }
 
-        // Handle disability as boolean
-        if (studentData.disability !== undefined && studentData.disability !== null) {
-          if (typeof studentData.disability === "string") {
-            studentData.disability = studentData.disability.toLowerCase() === "yes" || studentData.disability === "true";
-          }
+        if (!["Male", "Female"].includes(studentData.gender)) {
+          results.errors.push({
+            row: index + 2,
+            error: `Invalid gender value: ${studentData.gender}`,
+          });
+          continue;
         }
 
-        // Handle dates
-        if (studentData.registrationDate && typeof studentData.registrationDate === "number") {
-          // Excel serial date
-          studentData.registrationDate = new Date(Math.round((studentData.registrationDate - 25569) * 86400 * 1000));
+        if (!["Muslim", "Non-Muslim"].includes(studentData.religion)) {
+          results.errors.push({
+            row: index + 2,
+            error: `Invalid religion value: ${studentData.religion}`,
+          });
+          continue;
         }
-        if (studentData.dateOfBirth && typeof studentData.dateOfBirth === "number") {
-          studentData.dateOfBirth = new Date(Math.round((studentData.dateOfBirth - 25569) * 86400 * 1000));
+
+        // Enforce unique Registration No when provided
+        if (studentData.registrationNo) {
+          if (seenRegistrationNos.has(studentData.registrationNo)) {
+            results.skipped++;
+            results.errors.push({
+              row: index + 2,
+              error: `Duplicate Registration No in file: ${studentData.registrationNo}`,
+            });
+            continue;
+          }
+
+          const existingByRegistrationNo = await AdmissionSchema.findOne({
+            registrationNo: studentData.registrationNo,
+          });
+
+          if (existingByRegistrationNo) {
+            results.skipped++;
+            results.errors.push({
+              row: index + 2,
+              error: `Registration No already exists in database: ${studentData.registrationNo}`,
+            });
+            continue;
+          }
+
+          seenRegistrationNos.add(studentData.registrationNo);
+        } else {
+          delete studentData.registrationNo;
         }
 
         // Enforce unique CNIC/B-Form (skip duplicates, do not update)
         let existingByCnic = null;
-        if (studentData.cnicOrBForm) {
-          if (seenCnicOrBForms.has(studentData.cnicOrBForm)) {
-            results.skipped++;
-            results.errors.push({
-              row: index + 2,
-              error: `Duplicate CNIC/B-Form in file: ${studentData.cnicOrBForm}`,
-            });
-            continue;
-          }
-          existingByCnic = await AdmissionSchema.findOne({
-            cnicOrBForm: studentData.cnicOrBForm,
+        if (seenCnicOrBForms.has(studentData.cnicOrBForm)) {
+          results.skipped++;
+          results.errors.push({
+            row: index + 2,
+            error: `Duplicate CNIC/B-Form in file: ${studentData.cnicOrBForm}`,
           });
-          if (existingByCnic) {
-            results.skipped++;
-            results.errors.push({
-              row: index + 2,
-              error: `CNIC/B-Form already exists in database: ${studentData.cnicOrBForm}`,
-            });
-            continue;
-          }
+          continue;
         }
 
-        if (studentData.cnicOrBForm) {
-          seenCnicOrBForms.add(studentData.cnicOrBForm);
+        existingByCnic = await AdmissionSchema.findOne({
+          cnicOrBForm: studentData.cnicOrBForm,
+        });
+
+        if (existingByCnic) {
+          results.skipped++;
+          results.errors.push({
+            row: index + 2,
+            error: `CNIC/B-Form already exists in database: ${studentData.cnicOrBForm}`,
+          });
+          continue;
         }
+
+        seenCnicOrBForms.add(studentData.cnicOrBForm);
 
         const newStudent = new AdmissionSchema(studentData);
         await newStudent.save();

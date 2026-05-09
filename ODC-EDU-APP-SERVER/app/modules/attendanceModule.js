@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const AttendanceSchema = new mongoose.Schema(
   {
@@ -11,6 +12,7 @@ const AttendanceSchema = new mongoose.Schema(
     date: {
       type: Date,
       required: true,
+      set: normalizeDateOnly,
     },
 
     // polymorphic ref: person can be a student (Admission) or teacher (Teacher)

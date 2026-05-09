@@ -1,5 +1,6 @@
 // models/Admission.js
 import mongoose from "mongoose";
+import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const AdmissionSchema = new mongoose.Schema(
   {
@@ -13,6 +14,7 @@ const AdmissionSchema = new mongoose.Schema(
     registrationDate: {
       type: Date,
       required: true,
+      set: normalizeDateOnly,
     },
 
     studentName: {
@@ -30,6 +32,7 @@ const AdmissionSchema = new mongoose.Schema(
     dateOfBirth: {
       type: Date,
       required: true,
+      set: normalizeDateOnly,
     },
 
     caste: {
