@@ -203,14 +203,14 @@ const AdmissionSchema = new mongoose.Schema(
     },
 
     course: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "Course",
     },
 
     // Multiple course enrollments
     enrolledCourses: [
       {
-        type: mongoose.Schema.Types.ObjectId,
+        type: String,
         ref: "Course",
       },
     ],

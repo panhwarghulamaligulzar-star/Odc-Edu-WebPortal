@@ -37,12 +37,13 @@ const BatchManagement = ({ courseId, courseName }) => {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingBatch, setEditingBatch] = useState(null);
   const [form] = Form.useForm();
+  const normalizedCourseId = courseId?._id || courseId?.id || courseId;
 
   useEffect(() => {
-    if (courseId) {
+    if (normalizedCourseId) {
       fetchBatches();
     }
-  }, [courseId]);
+  }, [normalizedCourseId]);
 
   // Auto-refresh batches every 3 seconds to update student counts
   //   useEffect(() => {
@@ -57,7 +58,7 @@ const BatchManagement = ({ courseId, courseName }) => {
   const fetchBatches = async () => {
     setLoading(true);
     try {
-      const response = await getBatchesByCourse(courseId);
+      const response = await getBatchesByCourse(normalizedCourseId);
       if (response.success) {
         setBatches(response.data);
       }
@@ -101,7 +102,7 @@ const BatchManagement = ({ courseId, courseName }) => {
     try {
       const batchData = {
         ...values,
-        course: courseId,
+        course: normalizedCourseId,
         startDate: formatDateOnlyForApi(values.startDate),
         endDate: formatDateOnlyForApi(values.endDate),
       };
@@ -275,117 +276,147 @@ const BatchManagement = ({ courseId, courseName }) => {
           form.resetFields();
         }}
         footer={null}
-        width={600}
+        width={860}
+        centered
+        destroyOnClose
       >
+        <div className="pb-2">
+          <p className="mb-1 text-sm font-medium text-slate-700">
+            {courseName}
+          </p>
+          <p className="m-0 text-xs text-slate-500">
+            Set the batch schedule, capacity, and status for this course.
+          </p>
+        </div>
         <Form
           form={form}
           layout="vertical"
           onFinish={handleSubmit}
           disabled={loading}
+          className="pt-3"
         >
-          <Form.Item
-            name="batchCode"
-            label="Batch Code"
-            rules={[{ required: true, message: "Please enter batch code" }]}
-          >
-            <Input
-              placeholder="e.g., BATCH-2024-01"
-              disabled={!!editingBatch}
-            />
-          </Form.Item>
+          <div className="grid grid-cols-1 gap-x-5 md:grid-cols-2">
+            <Form.Item
+              name="batchCode"
+              label="Batch Code"
+              rules={[{ required: true, message: "Please enter batch code" }]}
+            >
+              <Input
+                placeholder="e.g., BATCH-2024-01"
+                disabled={!!editingBatch}
+                size="large"
+              />
+            </Form.Item>
 
-          <Form.Item
-            name="batchName"
-            label="Batch Name"
-            rules={[{ required: true, message: "Please enter batch name" }]}
-          >
-            <Input placeholder="e.g., Morning Batch January 2024" />
-          </Form.Item>
+            <Form.Item
+              name="batchName"
+              label="Batch Name"
+              rules={[{ required: true, message: "Please enter batch name" }]}
+            >
+              <Input
+                placeholder="e.g., Morning Batch January 2024"
+                size="large"
+              />
+            </Form.Item>
 
-          <Form.Item
-            name="shift"
-            label="Shift"
-            rules={[{ required: true, message: "Please select shift" }]}
-            initialValue="Morning"
-          >
-            <Select>
-              <Option value="Morning">Morning</Option>
-              <Option value="Evening">Evening</Option>
-            </Select>
-          </Form.Item>
+            <Form.Item
+              name="shift"
+              label="Shift"
+              rules={[{ required: true, message: "Please select shift" }]}
+              initialValue="Morning"
+            >
+              <Select size="large">
+                <Option value="Morning">Morning</Option>
+                <Option value="Evening">Evening</Option>
+              </Select>
+            </Form.Item>
 
-          <Form.Item
-            name="days"
-            label="Days"
-            rules={[{ required: true, message: "Please select days" }]}
-            initialValue="Monday to Saturday"
-          >
-            <Select>
-              <Option value="Monday to Saturday">Monday to Saturday</Option>
-              <Option value="Monday to Thursday">Monday to Thursday</Option>
-              <Option value="Saturday & Sunday">Saturday & Sunday</Option>
-            </Select>
-          </Form.Item>
+            <Form.Item
+              name="days"
+              label="Days"
+              rules={[{ required: true, message: "Please select days" }]}
+              initialValue="Monday to Saturday"
+            >
+              <Select size="large">
+                <Option value="Monday to Saturday">Monday to Saturday</Option>
+                <Option value="Monday to Thursday">Monday to Thursday</Option>
+                <Option value="Saturday & Sunday">Saturday & Sunday</Option>
+              </Select>
+            </Form.Item>
 
-          <Form.Item
-            name="hoursPerDay"
-            label="Hours Per Day"
-            rules={[{ required: true, message: "Please select hours per day" }]}
-            initialValue={2}
-          >
-            <Select>
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((hour) => (
-                <Option key={hour} value={hour}>
-                  {hour} Hour{hour > 1 ? "s" : ""}
-                </Option>
-              ))}
-            </Select>
-          </Form.Item>
+            <Form.Item
+              name="hoursPerDay"
+              label="Hours Per Day"
+              rules={[{ required: true, message: "Please select hours per day" }]}
+              initialValue={2}
+            >
+              <Select size="large">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((hour) => (
+                  <Option key={hour} value={hour}>
+                    {hour} Hour{hour > 1 ? "s" : ""}
+                  </Option>
+                ))}
+              </Select>
+            </Form.Item>
 
-          <Form.Item
-            name="startDate"
-            label="Start Date"
-            rules={[{ required: true, message: "Please select start date" }]}
-          >
-            <DatePicker style={{ width: "100%" }} format="DD MMM YYYY" />
-          </Form.Item>
+            <Form.Item
+              name="maxStudents"
+              label="Maximum Students"
+              rules={[
+                { required: true, message: "Please enter maximum students" },
+              ]}
+              initialValue={30}
+            >
+              <InputNumber
+                min={1}
+                max={100}
+                size="large"
+                style={{ width: "100%" }}
+                placeholder="e.g., 30"
+              />
+            </Form.Item>
 
-          <Form.Item name="endDate" label="End Date (Optional)">
-            <DatePicker style={{ width: "100%" }} format="DD MMM YYYY" />
-          </Form.Item>
+            <Form.Item
+              name="startDate"
+              label="Start Date"
+              rules={[{ required: true, message: "Please select start date" }]}
+            >
+              <DatePicker
+                style={{ width: "100%" }}
+                format="DD MMM YYYY"
+                size="large"
+              />
+            </Form.Item>
 
-          <Form.Item
-            name="maxStudents"
-            label="Maximum Students"
-            rules={[
-              { required: true, message: "Please enter maximum students" },
-            ]}
-            initialValue={30}
-          >
-            <InputNumber
-              min={1}
-              max={100}
-              style={{ width: "100%" }}
-              placeholder="e.g., 30"
-            />
-          </Form.Item>
+            <Form.Item name="endDate" label="End Date (Optional)">
+              <DatePicker
+                style={{ width: "100%" }}
+                format="DD MMM YYYY"
+                size="large"
+              />
+            </Form.Item>
 
-          <Form.Item
-            name="status"
-            label="Status"
-            rules={[{ required: true, message: "Please select status" }]}
-            initialValue="Active"
-          >
-            <Select>
-              <Option value="Active">Active</Option>
-              <Option value="Upcoming">Upcoming</Option>
-              <Option value="Completed">Completed</Option>
-              <Option value="Cancelled">Cancelled</Option>
-            </Select>
-          </Form.Item>
+            <Form.Item
+              name="status"
+              label="Status"
+              rules={[{ required: true, message: "Please select status" }]}
+              initialValue="Active"
+            >
+              <Select size="large">
+                <Option value="Active">Active</Option>
+                <Option value="Upcoming">Upcoming</Option>
+                <Option value="Completed">Completed</Option>
+                <Option value="Cancelled">Cancelled</Option>
+              </Select>
+            </Form.Item>
+          </div>
 
           <Form.Item name="description" label="Description">
-            <Input.TextArea rows={3} placeholder="Enter batch description..." />
+            <Input.TextArea
+              rows={4}
+              placeholder="Enter batch description..."
+              style={{ resize: "none" }}
+            />
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 0, textAlign: "right" }}>
@@ -398,7 +429,13 @@ const BatchManagement = ({ courseId, courseName }) => {
               >
                 Cancel
               </Button>
-              <Button className="bg-primary text-[#ffff]" type="primery" htmlType="submit" loading={loading}>
+              <Button
+                className="bg-primary text-[#ffff]"
+                type="primery"
+                htmlType="submit"
+                loading={loading}
+                size="large"
+              >
                 {editingBatch ? "Update" : "Create"}
               </Button>
             </Space>

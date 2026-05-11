@@ -951,13 +951,13 @@ const Courses = () => {
           setSelectedCourse(null);
         }}
         footer={null}
-        width={1200}
+        width={1320}
         centered
         destroyOnClose
       >
         {selectedCourse && (
           <BatchManagement
-            courseId={selectedCourse._id}
+            courseId={selectedCourse._id || selectedCourse.id || selectedCourse.courseId}
             courseName={selectedCourse.courseName}
           />
         )}

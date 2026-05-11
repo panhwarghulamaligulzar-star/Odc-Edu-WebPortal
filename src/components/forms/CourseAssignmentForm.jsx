@@ -144,20 +144,37 @@ const buildInstallments = (
 
   const cleanAdditional = sanitizeAdditionalFees(additionalFees);
   const extraInstallments = [];
+  let extraOffset = 0;
 
-  cleanAdditional.forEach((fee, index) => {
+  cleanAdditional.forEach((fee) => {
     if (fee.paymentMode === "one_time") {
       const componentKey = getFeeComponentKey(fee.feeType);
-      baseInstallments[0].amount = round2(baseInstallments[0].amount + fee.amount);
-      baseInstallments[0].feeComponents[componentKey] = round2(
-        (baseInstallments[0].feeComponents[componentKey] || 0) + fee.amount,
-      );
+      const baseIndex = safeCount + extraOffset;
+      extraInstallments.push({
+        installmentNumber: baseIndex + 1,
+        description: `${fee.title}`,
+        amount: fee.amount,
+        dueDate: addMonths(startDate, baseIndex),
+        status: "Pending",
+        paidAmount: 0,
+        feeComponents: {
+          admissionFee: 0,
+          courseFee: 0,
+          certificateFee: 0,
+          examFee: fee.feeType === "exam" ? fee.amount : 0,
+          registrationFee: fee.feeType === "registration" ? fee.amount : 0,
+          practicalFee: fee.feeType === "practical" ? fee.amount : 0,
+          otherFee: !["exam", "registration", "practical"].includes(fee.feeType) ? fee.amount : 0,
+          [componentKey]: fee.amount,
+        },
+      });
+      extraOffset += 1;
       return;
     }
 
     const first = round2(Math.floor((fee.amount / 2) * 100) / 100);
     const second = round2(fee.amount - first);
-    const baseIndex = safeCount + index * 2;
+    const baseIndex = safeCount + extraOffset;
 
     extraInstallments.push({
       installmentNumber: baseIndex + 1,
@@ -194,6 +211,7 @@ const buildInstallments = (
         otherFee: fee.feeType === "other" ? second : 0,
       },
     });
+    extraOffset += 2;
   });
 
   const combined = [...baseInstallments, ...extraInstallments].map((item, index) => ({
@@ -780,7 +798,7 @@ const CourseAssignmentForm = ({
           <Alert
             type="info"
             showIcon
-            message="For additional fee rows: One-time = merged (not separate in list). Two-installments = shown separately in list with fee title."
+            message="For additional fee rows: One-time = shown as a single separate installment. Two-installments = shown as two separate installments with fee title."
           />
         </Card>
 

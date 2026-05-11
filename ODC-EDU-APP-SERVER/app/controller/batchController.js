@@ -1,6 +1,18 @@
 import BatchSchema from "../modules/batchModule.js";
 import CourseSchema from "../modules/courseModule.js";
 import EnrollmentSchema from "../modules/enrollmentModule.js";
+import mongoose from "mongoose";
+
+const resolveCourse = async (courseRef) => {
+  if (!courseRef) return null;
+
+  if (mongoose.Types.ObjectId.isValid(courseRef)) {
+    const byId = await CourseSchema.findById(courseRef);
+    if (byId) return byId;
+  }
+
+  return CourseSchema.findOne({ courseId: courseRef });
+};
 
 // Create a new batch
 const createBatch = async (req, res) => {
@@ -36,9 +48,9 @@ const createBatch = async (req, res) => {
       });
     }
 
-    // Check if course exists
-    const courseExists = await CourseSchema.findById(course);
-    if (!courseExists) {
+    // Accept either Mongo _id or business courseId from the client
+    const resolvedCourse = await resolveCourse(course);
+    if (!resolvedCourse) {
       return res.status(404).json({
         success: false,
         message: "Course not found",
@@ -46,7 +58,10 @@ const createBatch = async (req, res) => {
     }
 
     // Check if batch code already exists for this course
-    const existingBatch = await BatchSchema.findOne({ batchCode, course });
+    const existingBatch = await BatchSchema.findOne({
+      batchCode,
+      course: resolvedCourse._id,
+    });
     if (existingBatch) {
       return res.status(409).json({
         success: false,
@@ -58,7 +73,7 @@ const createBatch = async (req, res) => {
     const newBatch = new BatchSchema({
       batchName,
       batchCode,
-      course,
+      course: resolvedCourse._id,
       shift,
       days,
       hoursPerDay,
@@ -172,8 +187,19 @@ const getBatchById = async (req, res) => {
 const getBatchesByCourse = async (req, res) => {
   try {
     const { courseId } = req.params;
+    const resolvedCourse = await resolveCourse(courseId);
 
-    const batches = await BatchSchema.find({ course: courseId, isActive: true })
+    if (!resolvedCourse) {
+      return res.status(404).json({
+        success: false,
+        message: "Course not found",
+      });
+    }
+
+    const batches = await BatchSchema.find({
+      course: resolvedCourse._id,
+      isActive: true,
+    })
       .populate("course", "courseName courseId")
       .sort({ startDate: -1 });
 
