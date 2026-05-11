@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     build: {
-      outDir: "ODC-EDU-APP-SERVER/public",
+      outDir: "backend/public",
       emptyOutDir: true,
     },
 

@@ -208,7 +208,7 @@ const handleSubmit = (values) => {
 ## Backend Implementation
 
 ### 1. Enrollment Controller
-**File:** `ODC-EDU-APP-SERVER/app/controller/enrollmentController.js`
+**File:** `backend/app/controller/enrollmentController.js`
 
 The `createEnrollment` function receives custom fees and processes them:
 
@@ -265,7 +265,7 @@ export const createEnrollment = async (req, res) => {
 ## Database Schema
 
 ### FeeStructure Collection
-**File:** `ODC-EDU-APP-SERVER/app/modules/feeStructureModule.js`
+**File:** `backend/app/modules/feeStructureModule.js`
 
 ```javascript
 {
