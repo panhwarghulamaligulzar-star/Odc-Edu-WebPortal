@@ -6,6 +6,7 @@ import CourseSchema from "../modules/courseModule.js";
 import BatchSchema from "../modules/batchModule.js";
 import { calculateInstallmentPlan } from "../utils/installmentCalculator.js";
 import { syncStudentRegistrationNo } from "../utils/registrationNumberSync.js";
+import { generateRegistrationNo } from "../utils/admissionUtils.js";
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const clamp = (value, min, max) =>
