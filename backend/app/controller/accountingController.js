@@ -521,9 +521,8 @@ export const getReceiptDuesOverview = async (req, res) => {
       const courseIdValue = String(
         enrollment.course?._id || enrollment.course || "",
       );
-      const registrationNo = enrollment.student?.registrationNo;
 
-      if (!studentId || !courseIdValue || !registrationNo) {
+      if (!studentId || !courseIdValue) {
         continue;
       }
 
@@ -651,7 +650,6 @@ export const getReceiptDuesOverview = async (req, res) => {
     }).filter(
       (row) =>
         row.student?._id &&
-        row.student?.registrationNo &&
         row.course?._id &&
         row.enrollment,
     );
@@ -781,9 +779,8 @@ export const exportReceiptDues = async (req, res) => {
       const courseIdValue = String(
         enrollment.course?._id || enrollment.course || "",
       );
-      const registrationNo = enrollment.student?.registrationNo;
 
-      if (!studentId || !courseIdValue || !registrationNo) {
+      if (!studentId || !courseIdValue) {
         continue;
       }
 
@@ -903,7 +900,6 @@ export const exportReceiptDues = async (req, res) => {
     }).filter(
       (row) =>
         row.student?._id &&
-        row.student?.registrationNo &&
         row.course?._id &&
         row.enrollment,
     );
