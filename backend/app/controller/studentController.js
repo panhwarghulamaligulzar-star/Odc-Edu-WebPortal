@@ -120,7 +120,46 @@ const getCertificates = async (req, res) => {
 const updateCertificate = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body || {};
+    const updateData = { ...(req.body || {}) };
+
+    if (typeof updateData.skills === "string") {
+      const trimmed = updateData.skills.trim();
+      if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            updateData.skills = parsed.filter(Boolean).join(", ");
+          }
+        } catch {
+          // Keep original string if JSON parsing fails
+        }
+      }
+    } else if (Array.isArray(updateData.skills)) {
+      updateData.skills = updateData.skills.filter(Boolean).join(", ");
+    }
+
+    ["startingDate", "endingDate", "issueDate"].forEach((field) => {
+      if (!updateData[field]) return;
+      const parsedDate = new Date(updateData[field]);
+      if (Number.isNaN(parsedDate.getTime())) {
+        delete updateData[field];
+      } else {
+        updateData[field] = parsedDate;
+      }
+    });
+
+    Object.keys(updateData).forEach((key) => {
+      if (updateData[key] === undefined) {
+        delete updateData[key];
+      }
+    });
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No valid fields provided for update",
+      });
+    }
 
     // Handle image update similar to create
     // if (req.file && req.file.buffer) {
@@ -140,7 +179,11 @@ const updateCertificate = async (req, res) => {
     // }
     // if (updateData.image) delete updateData.image;
 
-    const updatedCertificate = await certificationModule.findByIdAndUpdate(id, updateData, { new: true });
+    const updatedCertificate = await certificationModule.findByIdAndUpdate(
+      id,
+      { $set: updateData },
+      { new: true, runValidators: true },
+    );
     if (!updatedCertificate) {
       return res.status(404).json({
         success: false,

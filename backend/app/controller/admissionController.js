@@ -1,8 +1,11 @@
 // controllers/admissionController.js
 import mongoose from "mongoose";
 import AdmissionSchema from "../modules/AdmissionModule.js";
+import EnrollmentSchema from "../modules/enrollmentModule.js";
+import CourseSchema from "../modules/courseModule.js";
+import BatchSchema from "../modules/batchModule.js";
+import FeeStructureSchema from "../modules/feeStructureModule.js";
 import * as XLSX from "xlsx";
-import { resyncItRegistrationNumbers } from "../utils/registrationNumberSync.js";
 
 const normalizeText = (value) => {
   if (value === undefined || value === null) {
@@ -73,6 +76,103 @@ const normalizeBoolean = (value) => {
 
   const normalized = String(value).trim().toLowerCase();
   return ["yes", "true", "1"].includes(normalized);
+};
+
+const normalizeNumber = (value, fallback = 0) => {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const normalizeStatus = (value) => {
+  const status = normalizeText(value);
+  if (!status) return "Active";
+
+  const lowered = status.toLowerCase();
+  if (lowered === "active") return "Active";
+  if (lowered === "completed") return "Completed";
+  if (lowered === "dropped") return "Dropped";
+  if (lowered === "on hold" || lowered === "onhold") return "On Hold";
+  return "Active";
+};
+
+const getRowValue = (row, possibleKeys = []) => {
+  for (const key of possibleKeys) {
+    const match = Object.keys(row).find(
+      (k) => k.toLowerCase().trim() === key.toLowerCase().trim(),
+    );
+
+    if (match && row[match] !== undefined && row[match] !== null && row[match] !== "") {
+      return row[match];
+    }
+  }
+  return null;
+};
+
+const resolveCourseFromRow = async (row) => {
+  const rawCourseId = normalizeText(
+    getRowValue(row, ["Course ID", "courseId", "CourseId"]),
+  );
+  const rawCourseName = normalizeText(
+    getRowValue(row, ["Course Name", "courseName", "Course"]),
+  );
+
+  if (!rawCourseId && !rawCourseName) {
+    return null;
+  }
+
+  let course = null;
+
+  if (rawCourseId) {
+    course = await CourseSchema.findOne({
+      $or: [{ _id: rawCourseId }, { courseId: rawCourseId }],
+    }).lean();
+  }
+
+  if (!course && rawCourseName) {
+    const escaped = rawCourseName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    course = await CourseSchema.findOne({
+      courseName: { $regex: `^${escaped}$`, $options: "i" },
+    }).lean();
+  }
+
+  return course;
+};
+
+const resolveBatchFromRow = async (row, courseId) => {
+  if (!courseId) return null;
+
+  const rawBatchCode = normalizeText(
+    getRowValue(row, ["Batch Code", "batchCode", "BatchCode"]),
+  );
+  const rawBatchName = normalizeText(
+    getRowValue(row, ["Batch Name", "batchName", "Batch"]),
+  );
+
+  if (!rawBatchCode && !rawBatchName) {
+    return null;
+  }
+
+  const query = { course: courseId };
+
+  if (rawBatchCode) {
+    const byCode = await BatchSchema.findOne({ ...query, batchCode: rawBatchCode }).lean();
+    if (byCode) return byCode;
+  }
+
+  if (rawBatchName) {
+    const escaped = rawBatchName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const byName = await BatchSchema.findOne({
+      ...query,
+      batchName: { $regex: `^${escaped}$`, $options: "i" },
+    }).lean();
+    if (byName) return byName;
+  }
+
+  return null;
 };
 
 // Create new admission/student
@@ -334,6 +434,8 @@ export const bulkImportStudents = async (req, res) => {
     const results = {
       imported: 0,
       updated: 0,
+      coursesAssigned: 0,
+      courseSkipped: 0,
       skipped: 0,
       errors: [],
     };
@@ -345,91 +447,78 @@ export const bulkImportStudents = async (req, res) => {
       try {
         // Map Excel columns to schema fields (case-insensitive)
         const studentData = {};
-        
-        // Helper to find matching key (case-insensitive)
-        const getValue = (possibleKeys) => {
-          for (const key of possibleKeys) {
-            const match = Object.keys(row).find(
-              (k) => k.toLowerCase().trim() === key.toLowerCase().trim()
-            );
-            if (match && row[match] !== undefined && row[match] !== null && row[match] !== "") {
-              return row[match];
-            }
-          }
-          return null;
-        };
 
         // Map fields
         studentData.studentName = normalizeText(
-          getValue(["Student Name", "studentName", "Name", "name"]),
+          getRowValue(row, ["Student Name", "studentName", "Name", "name"]),
         );
         studentData.registrationNo = normalizeRegistrationNo(
-          getValue(["Registration No", "registrationNo", "Reg No"]),
+          getRowValue(row, ["Registration No", "registrationNo", "Reg No"]),
         );
         studentData.registrationDate = parseExcelDate(
-          getValue(["Registration Date", "registrationDate", "Reg Date"]),
+          getRowValue(row, ["Registration Date", "registrationDate", "Reg Date"]),
         );
-        studentData.gender = normalizeText(getValue(["Gender", "gender"]));
+        studentData.gender = normalizeText(getRowValue(row, ["Gender", "gender"]));
         studentData.dateOfBirth = parseExcelDate(
-          getValue(["Date of Birth", "dateOfBirth", "DOB", "dob"]),
+          getRowValue(row, ["Date of Birth", "dateOfBirth", "DOB", "dob"]),
         );
-        studentData.religion = normalizeText(getValue(["Religion", "religion"]));
+        studentData.religion = normalizeText(getRowValue(row, ["Religion", "religion"]));
         studentData.cnicOrBForm = normalizeText(
-          getValue(["CNIC/B-Form", "cnicOrBForm", "CNIC", "BForm", "cnic"]),
+          getRowValue(row, ["CNIC/B-Form", "cnicOrBForm", "CNIC", "BForm", "cnic"]),
         );
-        studentData.caste = normalizeText(getValue(["Caste", "caste"]));
+        studentData.caste = normalizeText(getRowValue(row, ["Caste", "caste"]));
         studentData.mobileNumber = normalizeText(
-          getValue(["Mobile Number", "mobileNumber", "Mobile", "Phone"]),
+          getRowValue(row, ["Mobile Number", "mobileNumber", "Mobile", "Phone"]),
         );
-        studentData.disability = normalizeBoolean(getValue(["Disability", "disability"]));
+        studentData.disability = normalizeBoolean(getRowValue(row, ["Disability", "disability"]));
         studentData.previousSchoolCollege = normalizeText(
-          getValue(["Previous School/College", "previousSchoolCollege", "Previous School"]),
+          getRowValue(row, ["Previous School/College", "previousSchoolCollege", "Previous School"]),
         );
         studentData.lastClassAttended = normalizeText(
-          getValue(["Last Class Attended", "lastClassAttended", "Last Class"]),
+          getRowValue(row, ["Last Class Attended", "lastClassAttended", "Last Class"]),
         );
         studentData.emergencyContactNumber = normalizeText(
-          getValue(["Emergency Contact", "emergencyContactNumber", "Emergency Contact No"]),
+          getRowValue(row, ["Emergency Contact", "emergencyContactNumber", "Emergency Contact No"]),
         );
         studentData.permanentAddress = normalizeText(
-          getValue(["Permanent Address", "permanentAddress", "Address"]),
+          getRowValue(row, ["Permanent Address", "permanentAddress", "Address"]),
         );
         studentData.fatherName = normalizeText(
-          getValue(["Father Name", "fatherName", "Father's Name"]),
+          getRowValue(row, ["Father Name", "fatherName", "Father's Name"]),
         );
         studentData.fatherCnic = normalizeText(
-          getValue(["Father CNIC", "fatherCnic", "Father's CNIC"]),
+          getRowValue(row, ["Father CNIC", "fatherCnic", "Father's CNIC"]),
         );
         studentData.fatherOccupation = normalizeText(
-          getValue(["Father Occupation", "fatherOccupation", "Father's Occupation"]),
+          getRowValue(row, ["Father Occupation", "fatherOccupation", "Father's Occupation"]),
         );
         studentData.fatherContact = normalizeText(
-          getValue(["Father Contact", "fatherContact", "Father's Contact"]),
+          getRowValue(row, ["Father Contact", "fatherContact", "Father's Contact"]),
         );
         studentData.motherName = normalizeText(
-          getValue(["Mother Name", "motherName", "Mother's Name"]),
+          getRowValue(row, ["Mother Name", "motherName", "Mother's Name"]),
         );
         studentData.guardianName = normalizeText(
-          getValue(["Guardian Name", "guardianName", "Guardian's Name"]),
+          getRowValue(row, ["Guardian Name", "guardianName", "Guardian's Name"]),
         );
         studentData.guardianContact = normalizeText(
-          getValue(["Guardian Contact", "guardianContact", "Guardian's Contact"]),
+          getRowValue(row, ["Guardian Contact", "guardianContact", "Guardian's Contact"]),
         );
         studentData.whatsappNumber = normalizeText(
-          getValue(["WhatsApp Number", "whatsappNumber", "WhatsApp", "Whatsapp"]),
+          getRowValue(row, ["WhatsApp Number", "whatsappNumber", "WhatsApp", "Whatsapp"]),
         );
         studentData.emailAddress = normalizeText(
-          getValue(["Email", "emailAddress", "Email Address", "E-mail"]),
+          getRowValue(row, ["Email", "emailAddress", "Email Address", "E-mail"]),
         );
         studentData.currentAddress = normalizeText(
-          getValue(["Current Address", "currentAddress"]),
+          getRowValue(row, ["Current Address", "currentAddress"]),
         );
         studentData.unionCouncil = normalizeText(
-          getValue(["Union Council", "unionCouncil"]),
+          getRowValue(row, ["Union Council", "unionCouncil"]),
         );
-        studentData.tehsil = normalizeText(getValue(["Tehsil", "tehsil"]));
-        studentData.district = normalizeText(getValue(["District", "district"]));
-        studentData.reference = normalizeText(getValue(["Reference", "reference"]));
+        studentData.tehsil = normalizeText(getRowValue(row, ["Tehsil", "tehsil"]));
+        studentData.district = normalizeText(getRowValue(row, ["District", "district"]));
+        studentData.reference = normalizeText(getRowValue(row, ["Reference", "reference"]));
 
         // Validate required fields
         if (
@@ -525,7 +614,164 @@ export const bulkImportStudents = async (req, res) => {
         seenCnicOrBForms.add(studentData.cnicOrBForm);
 
         const newStudent = new AdmissionSchema(studentData);
-        await newStudent.save();
+        const savedStudent = await newStudent.save();
+
+        // Optional: assign course and batch from the same import row
+        const course = await resolveCourseFromRow(row);
+        if (course) {
+          const batch = await resolveBatchFromRow(row, course._id);
+          const enrollmentDate =
+            parseExcelDate(
+              getRowValue(row, [
+                "Enrollment Date",
+                "enrollmentDate",
+                "Course Enrollment Date",
+              ]),
+            ) || studentData.registrationDate || new Date();
+
+          const existingEnrollment = await EnrollmentSchema.findOne({
+            student: savedStudent._id,
+            course: course._id,
+          }).lean();
+
+          if (existingEnrollment) {
+            results.courseSkipped += 1;
+          } else {
+            if (batch && batch.currentStudents >= batch.maxStudents) {
+              results.courseSkipped += 1;
+              results.errors.push({
+                row: index + 2,
+                error: `Batch is full for course ${course.courseName} (${batch.batchName})`,
+              });
+            } else {
+              const enrollment = await new EnrollmentSchema({
+                student: savedStudent._id,
+                course: course._id,
+                batch: batch?._id || null,
+                enrollmentDate,
+                status: normalizeStatus(getRowValue(row, ["Enrollment Status", "status"])),
+                notes: normalizeText(getRowValue(row, ["Enrollment Notes", "notes"])),
+              }).save();
+
+              if (batch) {
+                await BatchSchema.findByIdAndUpdate(batch._id, {
+                  $inc: { currentStudents: 1 },
+                });
+              }
+
+              const admissionFee = normalizeNumber(
+                getRowValue(row, ["Admission Fee", "admissionFee"]),
+                course.admissionFee || 0,
+              );
+              const courseFee = normalizeNumber(
+                getRowValue(row, ["Course Fee", "courseFee"]),
+                course.courseFee || 0,
+              );
+              const certificateFee = normalizeNumber(
+                getRowValue(row, ["Certificate Fee", "certificateFee"]),
+                course.certificateFee || 0,
+              );
+              const examFee = normalizeNumber(
+                getRowValue(row, ["Exam Fee", "examFee"]),
+                course.examFee || 0,
+              );
+              const registrationFee = normalizeNumber(
+                getRowValue(row, ["Registration Fee", "registrationFee"]),
+                course.registrationFee || 0,
+              );
+              const practicalFee = normalizeNumber(
+                getRowValue(row, ["Practical Fee", "practicalFee"]),
+                course.practicalFee || 0,
+              );
+              const otherFee = normalizeNumber(
+                getRowValue(row, ["Other Fee", "otherFee"]),
+                course.otherFee || 0,
+              );
+              const discount = Math.max(
+                0,
+                normalizeNumber(getRowValue(row, ["Discount", "discount"]), 0),
+              );
+              const totalFee = Math.max(
+                0,
+                admissionFee +
+                  courseFee +
+                  certificateFee +
+                  examFee +
+                  registrationFee +
+                  practicalFee +
+                  otherFee -
+                  discount,
+              );
+
+              const paidAmount = Math.max(
+                0,
+                normalizeNumber(getRowValue(row, ["Paid Amount", "paidAmount"]), 0),
+              );
+              const dueDate =
+                parseExcelDate(getRowValue(row, ["Due Date", "dueDate"])) || enrollmentDate;
+
+              await new FeeStructureSchema({
+                student: savedStudent._id,
+                course: course._id,
+                enrollment: enrollment._id,
+                admissionFee,
+                courseFee,
+                certificateFee,
+                examFee,
+                registrationFee,
+                practicalFee,
+                otherFee,
+                discount,
+                discountPercentage: 0,
+                paymentPlanType: "full_payment",
+                discountOnAdmission: 0,
+                discountOnCourseFee: discount,
+                discountType: discount > 0 ? "courseFee" : "none",
+                totalFee,
+                paidAmount,
+                remainingAmount: Math.max(0, totalFee - paidAmount),
+                installmentEnabled: false,
+                numberOfInstallments: 1,
+                installmentAmount: totalFee,
+                installments: [
+                  {
+                    installmentNumber: 1,
+                    description: "Full Payment",
+                    feeComponents: {
+                      admissionFee,
+                      courseFee,
+                      certificateFee,
+                      examFee,
+                      registrationFee,
+                      practicalFee,
+                      otherFee,
+                    },
+                    amount: totalFee,
+                    dueDate,
+                    status: paidAmount >= totalFee ? "Paid" : "Pending",
+                    paidAmount,
+                    paidDate: paidAmount > 0 ? new Date() : null,
+                  },
+                ],
+                feeStatus:
+                  paidAmount <= 0
+                    ? "Unpaid"
+                    : paidAmount >= totalFee
+                      ? "Paid"
+                      : "Partial",
+                notes: normalizeText(getRowValue(row, ["Fee Notes", "feeNotes"])),
+                systemGrantedNumber: savedStudent.registrationNo || null,
+              }).save();
+
+              await AdmissionSchema.findByIdAndUpdate(savedStudent._id, {
+                $addToSet: { enrolledCourses: course._id },
+              });
+
+              results.coursesAssigned += 1;
+            }
+          }
+        }
+
         results.imported++;
       } catch (err) {
         results.errors.push({
@@ -537,7 +783,7 @@ export const bulkImportStudents = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: `Bulk import completed: ${results.imported} imported, ${results.skipped} skipped`,
+      message: `Bulk import completed: ${results.imported} imported, ${results.coursesAssigned} course assignment(s), ${results.skipped} skipped`,
       data: results,
     });
   } catch (error) {
@@ -552,12 +798,14 @@ export const bulkImportStudents = async (req, res) => {
 
 export const refreshItRegistrationNumbers = async (req, res) => {
   try {
-    const result = await resyncItRegistrationNumbers();
-
     res.status(200).json({
       success: true,
-      message: `IT registration numbers refreshed. ${result.itStudents} IT student(s) sequenced and ${result.clearedCount} non-IT registration number(s) cleared.`,
-      data: result,
+      message:
+        "Registration number auto-refresh is disabled. Registration numbers are now only saved from student/import data.",
+      data: {
+        updatedCount: 0,
+        clearedCount: 0,
+      },
     });
   } catch (error) {
     console.error("Error refreshing IT registration numbers:", error);
