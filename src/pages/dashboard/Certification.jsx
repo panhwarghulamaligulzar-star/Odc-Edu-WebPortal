@@ -560,7 +560,7 @@ const Certification = () => {
   // };
 
   const handleDownloadExcel = () => {
-    const dataToExport = filteredCertifications.map((cert) => ({
+    const dataToExport = certifications.map((cert) => ({
       courseId: cert.courseId,
       registrationNo: cert.registrationNo,
       certificateNo: cert.certificateNo,

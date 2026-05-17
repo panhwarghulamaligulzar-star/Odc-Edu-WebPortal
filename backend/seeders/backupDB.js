@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const sourceURI = process.env.LIVE_DB_URI || process.env.DEV_DB_URI;
+const sourceURI = process.env.LOCAL_DB_URI || process.env.DEV_DB_URI;
 const backupDir = path.join(process.cwd(), "seeders", "backup");
 const backupFile = path.join(backupDir, "backup.json");
 
@@ -13,7 +13,7 @@ const backupDatabase = async () => {
   try {
     if (!sourceURI) {
       throw new Error(
-        "Missing LIVE_DB_URI in .env. Add your live database connection string before running backup.",
+        "Missing LOCAL_DB_URI in .env. Add your live database connection string before running backup.",
       );
     }
 

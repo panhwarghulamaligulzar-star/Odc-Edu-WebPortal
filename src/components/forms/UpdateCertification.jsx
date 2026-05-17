@@ -1,7 +1,6 @@
-import { Button, DatePicker, Form, Input, Select, Upload, message } from 'antd';
+import { Button, DatePicker, Form, Input, message } from 'antd';
 import React, { useEffect, useState } from 'react';
 import dayjs from 'dayjs';
-import { UploadOutlined } from '@ant-design/icons';
 import { createCertification, updateCertification } from '../../services/certificationService';
 import LoaderSpnar from '../../components/loader/loaderSpnar';
 
@@ -12,6 +11,13 @@ const UpdateCertification = ({ selectedRecord, modalType, setIsModalVisible, get
   );
   const [uploadedFile, setUploadedFile] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  const normalizeSkillsValue = (skillsValue) => {
+    if (Array.isArray(skillsValue)) {
+      return skillsValue.filter(Boolean).join(', ');
+    }
+    return String(skillsValue || '').trim();
+  };
 
   // console.log("selectedRecord", selectedRecord)
 
@@ -123,25 +129,22 @@ const UpdateCertification = ({ selectedRecord, modalType, setIsModalVisible, get
     setLoading(true);
     
     try {
-      const formData = new FormData();
-       formData.append("registrationNo", values.registrationNo);
-      formData.append("courseId", values.courseId);
-      formData.append("certificateNo", values.certificateNo);
-      formData.append("fatherName", values.fatherName);
-      formData.append("course", values.course);
-      formData.append("duration", values.duration);
-      formData.append("startingDate", values.startingDate.format("YYYY-MM-DD"));
-      formData.append("endingDate", values.endingDate.format("YYYY-MM-DD"));
-      formData.append("issueDate", values.issueDate.format("YYYY-MM-DD"));
-      formData.append("grade", String(values.grade).trim());
-      formData.append("skills", JSON.stringify(values.skills || []));
-      formData.append("remarks", values.remarks);
+      const payload = {
+        registrationNo: String(values.registrationNo || '').trim(),
+        courseId: String(values.courseId || '').trim(),
+        certificateNo: String(values.certificateNo || '').trim(),
+        studentName: String(values.studentName || '').trim(),
+        fatherName: String(values.fatherName || '').trim(),
+        course: String(values.course || '').trim(),
+        duration: String(values.duration || '').trim(),
+        startingDate: values.startingDate?.format("YYYY-MM-DD"),
+        endingDate: values.endingDate?.format("YYYY-MM-DD"),
+        issueDate: values.issueDate?.format("YYYY-MM-DD"),
+        grade: String(values.grade || '').trim(),
+        skills: normalizeSkillsValue(values.skills),
+      };
 
-      // if (uploadedFile) {
-      //   formData.append("image", uploadedFile);
-      // }
-
-      const response = await updateCertification(selectedRecord._id, formData);
+      const response = await updateCertification(selectedRecord._id, payload);
       // ✅ Show success message
       if(response?.success==true){
         setIsModalVisible(false);

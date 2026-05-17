@@ -49,7 +49,6 @@ import {
   FaChalkboardTeacher,
   FaFileImport,
   FaFileExcel,
-  FaSync,
 } from "react-icons/fa";
 import api from "../../api/axiosInstance";
 import dayjs from "dayjs";
@@ -258,7 +257,6 @@ const Students = () => {
   const [tablePage, setTablePage] = useState(1);
   const [selectedStudentIds, setSelectedStudentIds] = useState([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [refreshingRegNos, setRefreshingRegNos] = useState(false);
 
   useEffect(() => {
     fetchStudents();
@@ -525,26 +523,6 @@ const Students = () => {
         .filter(Boolean)
         .map((id) => (typeof id === "string" ? id.trim() : String(id).trim())),
     );
-  };
-
-  const handleRefreshItRegistrationNumbers = async () => {
-    setRefreshingRegNos(true);
-    try {
-      const response = await api.post("/student/admissions/refresh-it-registration-nos");
-      if (response.data.success) {
-        message.success(
-          response.data.message || "IT registration numbers refreshed successfully",
-        );
-        await fetchStudents();
-      }
-    } catch (error) {
-      message.error(
-        error.response?.data?.message ||
-          "Failed to refresh IT registration numbers",
-      );
-    } finally {
-      setRefreshingRegNos(false);
-    }
   };
 
   const handleUnlinkCourse = async (enrollmentId, studentName, courseName) => {
@@ -871,6 +849,161 @@ const Students = () => {
   };
 
   // Handle bulk import of students from CSV/Excel
+  const downloadImportTemplate = () => {
+    const headers = [
+      "Student Name",
+      "Registration No",
+      "Registration Date",
+      "Gender",
+      "Date of Birth",
+      "Religion",
+      "CNIC/B-Form",
+      "Mobile Number",
+      "Father Name",
+      "Father CNIC",
+      "Father Contact",
+      "Emergency Contact",
+      "Permanent Address",
+      "Course Name",
+      "Course ID",
+      "Batch Name",
+      "Batch Code",
+      "Enrollment Date",
+      "Enrollment Status",
+      "Admission Fee",
+      "Course Fee",
+      "Certificate Fee",
+      "Exam Fee",
+      "Registration Fee",
+      "Practical Fee",
+      "Other Fee",
+      "Discount",
+      "Paid Amount",
+      "Due Date",
+      "Enrollment Notes",
+      "Fee Notes",
+    ];
+
+    const rows = filteredStudents.flatMap((student) => {
+      const baseStudentCols = [
+        student.studentName || "",
+        student.registrationNo || "",
+        student.registrationDate ? dayjs(student.registrationDate).format("YYYY-MM-DD") : "",
+        student.gender || "",
+        student.dateOfBirth ? dayjs(student.dateOfBirth).format("YYYY-MM-DD") : "",
+        student.religion || "",
+        student.cnicOrBForm || "",
+        student.mobileNumber || "",
+        student.fatherName || "",
+        student.fatherCnic || "",
+        student.fatherContact || "",
+        student.emergencyContactNumber || "",
+        student.permanentAddress || "",
+      ];
+
+      const enrollments = Array.isArray(student.enrollments) ? student.enrollments : [];
+      if (enrollments.length === 0) {
+        return [[
+          ...baseStudentCols,
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+        ]];
+      }
+
+      return enrollments.map((enrollment) => {
+        const fs = enrollment.feeStructure || {};
+        return [
+          ...baseStudentCols,
+          enrollment.course?.courseName || "",
+          enrollment.course?.courseId || "",
+          enrollment.batch?.batchName || "",
+          enrollment.batch?.batchCode || "",
+          enrollment.enrollmentDate
+            ? dayjs(enrollment.enrollmentDate).format("YYYY-MM-DD")
+            : "",
+          enrollment.status || "Active",
+          fs.admissionFee ?? enrollment.course?.admissionFee ?? "",
+          fs.courseFee ?? enrollment.course?.courseFee ?? "",
+          fs.certificateFee ?? enrollment.course?.certificateFee ?? "",
+          fs.examFee ?? enrollment.course?.examFee ?? "",
+          fs.registrationFee ?? enrollment.course?.registrationFee ?? "",
+          fs.practicalFee ?? enrollment.course?.practicalFee ?? "",
+          fs.otherFee ?? enrollment.course?.otherFee ?? "",
+          fs.discount ?? "",
+          fs.paidAmount ?? "",
+          fs.installments?.[0]?.dueDate
+            ? dayjs(fs.installments[0].dueDate).format("YYYY-MM-DD")
+            : "",
+          enrollment.notes || "",
+          fs.notes || "",
+        ];
+      });
+    });
+
+    const exportRows = rows.length > 0 ? rows : [[
+      "Ali Raza",
+      "0091",
+      "2026-05-17",
+      "Male",
+      "2010-01-20",
+      "Muslim",
+      "4210112345678",
+      "03001234567",
+      "Ahmed Raza",
+      "4210111111111",
+      "03007654321",
+      "03009998888",
+      "Main Road, Khipro",
+      "English Language",
+      "",
+      "English 2:00 to 4:00",
+      "",
+      "2026-05-17",
+      "Active",
+      "1000",
+      "5000",
+      "1000",
+      "0",
+      "0",
+      "0",
+      "0",
+      "500",
+      "1000",
+      "2026-06-10",
+      "Imported from CSV",
+      "First installment received",
+    ]];
+
+    const csvContent = [headers, ...exportRows]
+      .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", "students-course-import-template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const handleBulkImport = async (file) => {
     try {
       setImporting(true);
@@ -881,7 +1014,7 @@ const Students = () => {
       });
       if (response.data.success) {
         message.success(
-          `Import completed: ${response.data.data.imported} new students added, ${response.data.data.updated} students updated`,
+          `Import completed: ${response.data.data.imported} students and ${response.data.data.coursesAssigned || 0} course assignment(s) added`,
         );
         setImportResult(response.data.data);
         fetchStudents();
@@ -976,16 +1109,6 @@ const Students = () => {
               </p>
             </div>
             <div className="flex gap-1">
-              <Button
-                type="default"
-                icon={<FaSync />}
-                onClick={handleRefreshItRegistrationNumbers}
-                size="large"
-                className="btn-lg"
-                loading={refreshingRegNos}
-              >
-                Refresh IT Reg Nos
-              </Button>
               <Button
                 type="default"
                 size="large"
@@ -1284,21 +1407,17 @@ const Students = () => {
                         >
                           {record.studentName}
                         </div>
-                        {/* Show registration number only when student has an IT & Vocational enrollment */}
-                        {record.registrationNo &&
-                          record.enrollments?.some(
-                            (e) => e.course?.courseCategory === "IT & Vocational"
-                          ) && (
-                            <div
-                              style={{
-                                fontSize: "12px",
-                                color: "#667eea",
-                                fontWeight: "500",
-                              }}
-                            >
-                              {record.registrationNo}
-                            </div>
-                          )}
+                        {record.registrationNo && (
+                          <div
+                            style={{
+                              fontSize: "12px",
+                              color: "#667eea",
+                              fontWeight: "500",
+                            }}
+                          >
+                            {record.registrationNo}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1820,7 +1939,7 @@ const Students = () => {
                     <span className="text-md !text-[14px] opacity-40">
                       Registration No{" "}
                       <span style={{ fontSize: "11px", color: "#999" }}>
-                        (assigned when enrolling in IT & Vocational courses)
+                        (optional, usually imported from Excel/CSV)
                       </span>
                     </span>
                   }
@@ -1828,7 +1947,7 @@ const Students = () => {
                 >
                   <Input
                     size="large"
-                    placeholder="Will be auto-assigned when enrolled in IT & Vocational courses"
+                    placeholder="Leave empty if not provided in import file"
                     disabled
                     className="form-input !font-ArialLight"
                   />
@@ -2495,7 +2614,7 @@ const Students = () => {
             }}
           >
             <FaFileExcel style={{ fontSize: "24px" }} />
-            Import Students from Excel/CSV
+            Import Students + Course Assignments
           </div>
         }
         open={importModalVisible}
@@ -2551,6 +2670,19 @@ const Students = () => {
               <FaFileImport style={{ marginRight: "8px" }} />
               {importing ? "Importing..." : "Select File"}
             </Button>
+            <Button
+              onClick={downloadImportTemplate}
+              style={{
+                marginLeft: "10px",
+                height: "40px",
+                borderColor: "#107c41",
+                color: "#107c41",
+                fontWeight: "600",
+              }}
+            >
+              <FaFileDownload style={{ marginRight: "8px" }} />
+              Download Template
+            </Button>
           </div>
 
           <div
@@ -2579,17 +2711,11 @@ const Students = () => {
                 color: "#6B7280",
               }}
             >
-              <li>Student Name (Required)</li>
-              <li>Mobile Number (Required)</li>
-              <li>Gender</li>
-              <li>Date of Birth</li>
-              <li>Religion</li>
-              <li>CNIC/B-Form</li>
-              <li>Father Name</li>
-              <li>Father CNIC</li>
-              <li>Father Contact</li>
-              <li>Permanent Address</li>
-              <li>Emergency Contact</li>
+              <li>Student Name, Mobile Number, Gender, Date of Birth, Religion</li>
+              <li>CNIC/B-Form, Father Name, Father CNIC, Permanent Address, Emergency Contact</li>
+              <li>Course Name or Course ID (optional but needed for course assignment)</li>
+              <li>Batch Name or Batch Code (optional)</li>
+              <li>Registration No is optional and only saved if provided in file</li>
             </ul>
           </div>
 
@@ -2618,7 +2744,10 @@ const Students = () => {
                 <strong>{importResult.imported}</strong> new students imported
               </p>
               <p style={{ margin: "4px 0", fontSize: "13px", color: "#374151" }}>
-                <strong>{importResult.updated}</strong> students updated
+                <strong>{importResult.coursesAssigned || 0}</strong> course assignments created
+              </p>
+              <p style={{ margin: "4px 0", fontSize: "13px", color: "#374151" }}>
+                <strong>{importResult.courseSkipped || 0}</strong> course assignments skipped
               </p>
               {importResult.errors?.length > 0 && (
                 <div style={{ marginTop: "12px" }}>

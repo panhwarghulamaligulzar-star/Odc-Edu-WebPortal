@@ -5,8 +5,6 @@ import AdmissionSchema from "../modules/AdmissionModule.js";
 import CourseSchema from "../modules/courseModule.js";
 import BatchSchema from "../modules/batchModule.js";
 import { calculateInstallmentPlan } from "../utils/installmentCalculator.js";
-import { syncStudentRegistrationNo } from "../utils/registrationNumberSync.js";
-import { generateRegistrationNo } from "../utils/admissionUtils.js";
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const clamp = (value, min, max) =>
@@ -319,59 +317,19 @@ export const createEnrollment = async (req, res) => {
       });
     }
 
-    // Assign registration number ONLY for IT & Vocational courses.
-    // The number is globally sequential across all IT & Vocational students.
-    // Students enrolled in Coaching courses never receive a number.
-    let systemGrantedNumber = null;
+    // Do not auto-generate registration numbers during course assignment.
+    // Keep registrationNo exactly as provided on student record/import.
+    await AdmissionSchema.findByIdAndUpdate(studentId, {
+      $addToSet: { enrolledCourses: courseId },
+    });
 
-    if (course.courseCategory === "IT & Vocational") {
-      const hasValidRegNo = student.registrationNo &&
-                            student.registrationNo !== "null" &&
-                            String(student.registrationNo).trim() !== "";
-
-      if (hasValidRegNo) {
-        // Student already has a number from a previous IT & Vocational enrollment — reuse it
-        systemGrantedNumber = student.registrationNo;
-        await AdmissionSchema.findByIdAndUpdate(
-          studentId,
-          { $addToSet: { enrolledCourses: courseId } }
-        );
-      } else {
-        // First IT & Vocational course for this student — generate the next global number.
-        // Retry up to 10 times to handle concurrent request race conditions (E11000).
-        let assigned = false;
-        for (let attempt = 0; attempt < 10 && !assigned; attempt++) {
-          const newRegNo = await generateRegistrationNo();
-          try {
-            await AdmissionSchema.findByIdAndUpdate(
-              studentId,
-              { registrationNo: newRegNo, $addToSet: { enrolledCourses: courseId } },
-              { new: true }
-            );
-            systemGrantedNumber = newRegNo;
-            assigned = true;
-          } catch (dupErr) {
-            // E11000 means another concurrent request claimed this exact number.
-            // generateRegistrationNo() will now read the newly saved number as max
-            // and return the next one on the following iteration.
-            if (dupErr.code !== 11000 || !dupErr.keyPattern?.registrationNo) {
-              throw dupErr;
-            }
-          }
-        }
-        if (!assigned) {
-          throw new Error("Failed to assign a unique registration number after 10 attempts");
-        }
-      }
-    } else {
-      // Coaching or other category — no number assigned, just record the course
-      await AdmissionSchema.findByIdAndUpdate(
-        studentId,
-        { $addToSet: { enrolledCourses: courseId } }
-      );
-    }
-
-    systemGrantedNumber = await syncStudentRegistrationNo(studentId);
+    const hasRegistrationNo =
+      !!student.registrationNo &&
+      student.registrationNo !== "null" &&
+      String(student.registrationNo).trim() !== "";
+    const systemGrantedNumber = hasRegistrationNo
+      ? String(student.registrationNo).trim()
+      : null;
 
     // Calculate flexible fee + installment plan
     const selectedAdmissionFee = round2(admissionFee ?? course.admissionFee ?? 0);
@@ -771,8 +729,6 @@ export const updateEnrollmentStatus = async (req, res) => {
       );
     }
 
-    await syncStudentRegistrationNo(updatedEnrollment.student?._id || existingEnrollment.student);
-
     res.status(200).json({
       success: true,
       message: "Enrollment updated successfully",
@@ -889,8 +845,6 @@ export const deleteEnrollment = async (req, res) => {
 
     // Delete the enrollment
     await EnrollmentSchema.findByIdAndDelete(enrollmentId);
-
-    await syncStudentRegistrationNo(enrollment.student);
 
     res.status(200).json({
       success: true,
