@@ -22,6 +22,7 @@ import {
   deleteAnnouncement,
 } from "../../services/announcement";
 import { ScaleLoader } from "react-spinners";
+import { useModulePermissions } from "../../hooks/usePermissions";
 
 // ==================== CONSTANTS ====================
 const MODAL_TYPES = {
@@ -37,6 +38,7 @@ const IMAGE_CONSTRAINTS = {
 
 // ==================== MAIN COMPONENT ====================
 const Announcement = () => {
+  const permissions = useModulePermissions("announcements");
   // State Management
   const [form] = Form.useForm();
   const [announcements, setAnnouncements] = useState([]);
@@ -85,6 +87,10 @@ const Announcement = () => {
    * Create a new announcement
    */
   const handleCreateAnnouncement = async (values) => {
+    if (!permissions.create) {
+      message.warning("You do not have permission to create announcements.");
+      return;
+    }
     try {
       // Validation
       if (!values.date || !values.title?.trim() || !values.text?.trim()) {
@@ -129,6 +135,10 @@ const Announcement = () => {
    * Update an existing announcement
    */
   const handleUpdateAnnouncement = async (values) => {
+    if (!permissions.update) {
+      message.warning("You do not have permission to update announcements.");
+      return;
+    }
     try {
       if (!selectedAnnouncement?._id && !selectedAnnouncement?.id) {
         message.error("No announcement selected for update");
@@ -176,6 +186,10 @@ const Announcement = () => {
    * Delete an announcement with confirmation
    */
   const handleDeleteAnnouncement = (announcement) => {
+    if (!permissions.delete) {
+      message.warning("You do not have permission to delete announcements.");
+      return;
+    }
     const announcementId = announcement._id || announcement.id;
 
     if (!announcementId) {
@@ -219,6 +233,14 @@ const Announcement = () => {
    * Open modal for create/edit/view operations
    */
   const openModal = (type, announcement = null) => {
+    if (type === MODAL_TYPES.CREATE && !permissions.create) {
+      message.warning("You do not have permission to create announcements.");
+      return;
+    }
+    if (type === MODAL_TYPES.EDIT && !permissions.update) {
+      message.warning("You do not have permission to edit announcements.");
+      return;
+    }
     setModalType(type);
     setSelectedAnnouncement(announcement);
 
@@ -448,20 +470,24 @@ const Announcement = () => {
             >
               <FaEye className="text-gray-600" />
             </button>
-            <button
-              onClick={() => openModal(MODAL_TYPES.EDIT, item)}
-              className="btn-md-cricle !w-[30px] !h-[30px]"
-              title="Edit"
-            >
-              <FiEdit className="text-gray-600" />
-            </button>
-            <button
-              onClick={() => handleDeleteAnnouncement(item)}
-              className="btn-md-cricle !w-[30px] !h-[30px]"
-              title="Delete"
-            >
-              <MdDeleteOutline className="text-gray-600" />
-            </button>
+            {permissions.update && (
+              <button
+                onClick={() => openModal(MODAL_TYPES.EDIT, item)}
+                className="btn-md-cricle !w-[30px] !h-[30px]"
+                title="Edit"
+              >
+                <FiEdit className="text-gray-600" />
+              </button>
+            )}
+            {permissions.delete && (
+              <button
+                onClick={() => handleDeleteAnnouncement(item)}
+                className="btn-md-cricle !w-[30px] !h-[30px]"
+                title="Delete"
+              >
+                <MdDeleteOutline className="text-gray-600" />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -515,14 +541,16 @@ const Announcement = () => {
             </p>
           </div>
         </div>
-        <Button
-          type="default"
-          icon={<FaPlus />}
-          onClick={() => openModal(MODAL_TYPES.CREATE)}
-          className="btn-lg hover:!bg-blue-900 hover:!text-[#ffff] !w-[240px]"
-        >
-          Create New Announcement
-        </Button>
+        {permissions.create && (
+          <Button
+            type="default"
+            icon={<FaPlus />}
+            onClick={() => openModal(MODAL_TYPES.CREATE)}
+            className="btn-lg hover:!bg-blue-900 hover:!text-[#ffff] !w-[240px]"
+          >
+            Create New Announcement
+          </Button>
+        )}
       </div>
 
       {/* Table Header - Desktop Only */}

@@ -9,6 +9,7 @@ import {
   deactivateBatch,
 } from "../controller/batchController.js";
 import authMiddleware from "../midlewear/authMiddleware.js";
+import authorize from "../midlewear/authorize.js";
 
 const router = express.Router();
 
@@ -16,24 +17,24 @@ const router = express.Router();
 router.use(authMiddleware);
 
 // Create a new batch
-router.post("/", createBatch);
+router.post("/", authorize("courses", "create"), createBatch);
 
 // Get all batches (with optional filters)
-router.get("/", getAllBatches);
+router.get("/", authorize("courses", "view"), getAllBatches);
 
 // Get batches by course
-router.get("/course/:courseId", getBatchesByCourse);
+router.get("/course/:courseId", authorize("courses", "view"), getBatchesByCourse);
 
 // Get batch by ID
-router.get("/:id", getBatchById);
+router.get("/:id", authorize("courses", "view"), getBatchById);
 
 // Update batch
-router.put("/:id", updateBatch);
+router.put("/:id", authorize("courses", "update"), updateBatch);
 
 // Delete batch
-router.delete("/:id", deleteBatch);
+router.delete("/:id", authorize("courses", "delete"), deleteBatch);
 
 // Deactivate batch
-router.patch("/:id/deactivate", deactivateBatch);
+router.patch("/:id/deactivate", authorize("courses", "update"), deactivateBatch);
 
 export default router;

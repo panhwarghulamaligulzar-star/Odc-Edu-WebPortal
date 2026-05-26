@@ -1,13 +1,18 @@
-import UserAuth from "../modules/userAuthModal.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import Role from "../modules/roleModule.js";
+import UserAuth from "../modules/userAuthModal.js";
+import {
+  buildPermissionsMap,
+  resolveRoleForUser,
+  serializeRoleForClient,
+} from "../utils/rbac.js";
 
 const createUser = async (req, res) => {
   try {
-    const { name, role, password } = req.body;
+    const { name, roleId, role, password, isSuperAdmin = false } = req.body;
     const email = req.body.email?.trim().toLowerCase();
-    // console.log(name, email,role, password)
-    // Check if user already exists
+
     const existingUser = await UserAuth.findOne({ email });
     if (existingUser) {
       return res.status(400).send({
@@ -16,25 +21,45 @@ const createUser = async (req, res) => {
       });
     }
 
-    // hash password before saving
+    let assignedRole = null;
+    if (roleId) {
+      assignedRole = await Role.findById(roleId);
+      if (!assignedRole) {
+        return res.status(400).send({
+          status: "error",
+          message: "Selected role does not exist",
+        });
+      }
+    }
+
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
     const image = req.file ? req.file.buffer.toString("base64") : null;
 
-    const createUser = new UserAuth({
+    const createdUser = new UserAuth({
       name,
       email,
-      role,
+      role: assignedRole?._id?.toString() || role || null,
+      legacyRole: assignedRole?.name || role || "",
       password: hashedPassword,
       profile: image,
+      isSuperAdmin: Boolean(isSuperAdmin),
+      isActive: true,
     });
 
-    // console.log("createUser", createUser)
-    await createUser.save();
+    await createdUser.save();
+
     res.send({
       status: "success",
       message: "User created successfully!",
-      user: createUser,
+      user: {
+        _id: createdUser._id,
+        name: createdUser.name,
+        email: createdUser.email,
+        role: assignedRole?.name || role || "",
+        isSuperAdmin: createdUser.isSuperAdmin,
+        isActive: createdUser.isActive,
+      },
     });
   } catch (error) {
     res.status(500).send({
@@ -45,69 +70,97 @@ const createUser = async (req, res) => {
   }
 };
 
-//===user login=====//
-
 const userLogin = async (req, res) => {
   try {
     const password = req.body.password;
     const email = req.body.email?.trim().toLowerCase();
-    console.log("🔐 Login attempt received");
-    console.log("📋 Request body:", req.body);
 
-    // Validate input
     if (!email || !password) {
-      console.log("❌ Missing email or password");
       return res.status(400).json({
         status: "error",
         message: "Email and password are required",
       });
     }
 
-    console.log(`🔎 Searching for user with email: ${email}`);
-
-    // check email
     const user = await UserAuth.findOne({ email });
     if (!user) {
-      console.log(`❌ No user found with email: ${email}`);
       return res.status(400).json({
         status: "error",
         message: "Invalid email or password",
       });
     }
 
-    console.log(`✅ User found: ${user.email} (Role: ${user.role})`);
-    console.log("🔑 Comparing passwords...");
+    if (user.isSuperAdmin && user.isActive === false) {
+      user.isActive = true;
+      await user.save();
+    }
 
-    // check password
+    if (user.isActive === false) {
+      return res.status(403).json({
+        status: "error",
+        message: "Your account is inactive. Please contact the super admin.",
+      });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      console.log("❌ Password mismatch");
+      user.failedLoginAttempts = Number(user.failedLoginAttempts || 0) + 1;
+
+      if (!user.isSuperAdmin && user.failedLoginAttempts >= 3) {
+        user.isActive = false;
+        await user.save();
+
+        return res.status(403).json({
+          status: "error",
+          message:
+            "Your account is inactive. Please contact the super admin.",
+        });
+      }
+
+      await user.save();
+
       return res.status(400).json({
         status: "error",
-        message: "Invalid email or password",
+        message: `Invalid email or password. ${Math.max(
+          0,
+          3 - Number(user.failedLoginAttempts || 0),
+        )} attempts remaining.`,
       });
     }
 
-    console.log("✅ Password matched!");
-    console.log("🎟️  Generating JWT token...");
+    if (user.failedLoginAttempts) {
+      user.failedLoginAttempts = 0;
+    }
 
-    // generate JWT token
+    const resolvedRole = await resolveRoleForUser(user);
+    const permissions = buildPermissionsMap(user, resolvedRole);
+
     const token = jwt.sign(
-      { id: user._id, email: user.email },
+      {
+        _id: user._id,
+        id: user._id,
+        email: user.email,
+        isSuperAdmin: user.isSuperAdmin,
+        role: serializeRoleForClient(user, resolvedRole),
+      },
       process.env.JWT_SECRET,
       { expiresIn: "1h" },
     );
 
-    console.log("✅ Token generated successfully");
-    console.log(`🎉 Login successful for ${email}`);
+    user.lastLogin = new Date();
+    await user.save();
 
     const safeUser = {
       _id: user._id,
       name: user.name,
       email: user.email,
-      role: user.role,
+      role: serializeRoleForClient(user, resolvedRole),
       profile: user.profile,
       details: user.details,
+      isSuperAdmin: user.isSuperAdmin,
+      isActive: user.isActive,
+      permissions,
+      lastLogin: user.lastLogin,
     };
 
     res.status(200).json({
@@ -118,8 +171,6 @@ const userLogin = async (req, res) => {
       token,
     });
   } catch (err) {
-    console.error("❌ Login error:", err.message);
-    console.error("📍 Error details:", err);
     res.status(500).json({
       status: "error",
       message: err.message,

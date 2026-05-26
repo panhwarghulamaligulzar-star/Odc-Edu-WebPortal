@@ -57,6 +57,7 @@ import "jspdf-autotable";
 import { MdPeople } from "react-icons/md";
 import academyConfig from "../../config/academyConfig";
 import odysseyLogo from "../../assets/images/logos/LOGO.png";
+import { useModulePermissions } from "../../hooks/usePermissions";
 
 const { TextArea } = Input;
 const { Option } = Select;
@@ -224,6 +225,7 @@ const drawFields = (doc, fields, x, y, colWidth, rowH = 7) => {
 // ─── Students Component ────────────────────────────────────────────────────────
 const Students = () => {
   const navigate = useNavigate();
+  const permissions = useModulePermissions("students");
   const [students, setStudents] = useState([]);
   const [filteredStudents, setFilteredStudents] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -403,6 +405,10 @@ const Students = () => {
   };
 
   const handleCreateStudent = async (values) => {
+    if (!permissions.create) {
+      message.error("You do not have permission to create students");
+      return;
+    }
     setLoading(true);
     try {
       const formData = new FormData();
@@ -435,6 +441,10 @@ const Students = () => {
   };
 
   const handleEditStudent = async (values) => {
+    if (!permissions.update) {
+      message.error("You do not have permission to update students");
+      return;
+    }
     setLoading(true);
     try {
       const formData = new FormData();
@@ -471,6 +481,10 @@ const Students = () => {
   };
 
   const handleDeleteStudent = async (studentId) => {
+    if (!permissions.delete) {
+      message.error("You do not have permission to delete students");
+      return;
+    }
     try {
       const response = await api.delete(`/student/admission/${studentId}`);
       if (response.data.success) {
@@ -484,6 +498,10 @@ const Students = () => {
   };
 
   const handleBulkDeleteStudents = async () => {
+    if (!permissions.delete) {
+      message.error("You do not have permission to delete students");
+      return;
+    }
     const normalizedSelectedIds = selectedStudentIds
       .map((id) => (typeof id === "string" ? id.trim() : String(id || "").trim()))
       .filter(Boolean);
@@ -575,6 +593,10 @@ const Students = () => {
   };
 
   const openEditModal = (student) => {
+    if (!permissions.update) {
+      message.error("You do not have permission to update students");
+      return;
+    }
     setEditMode(true);
     setEditingStudent(student);
     form.setFieldsValue({
@@ -589,6 +611,10 @@ const Students = () => {
   };
 
   const openCourseAssignModal = (student) => {
+    if (!permissions.create) {
+      message.error("You do not have permission to assign courses");
+      return;
+    }
     setSelectedStudent(student);
     setEditingEnrollment(null);
     courseForm.resetFields();
@@ -596,17 +622,29 @@ const Students = () => {
   };
 
   const openEditCourseModal = (student, enrollment) => {
+    if (!permissions.update) {
+      message.error("You do not have permission to update assigned courses");
+      return;
+    }
     setSelectedStudent(student);
     setEditingEnrollment(enrollment);
     setCourseModalVisible(true);
   };
 
   const openFeeProfileModal = (student) => {
+    if (!permissions.view) {
+      message.error("You do not have permission to view fee profiles");
+      return;
+    }
     setSelectedStudent(student);
     setFeeProfileModalVisible(true);
   };
 
   const handleAssignCourse = async (values) => {
+    if (!(editingEnrollment ? permissions.update : permissions.create)) {
+      message.error("You do not have permission for this course assignment action");
+      return;
+    }
     setLoading(true);
     try {
       const totalDiscount =
@@ -675,6 +713,10 @@ const Students = () => {
 
   // ─── DOWNLOAD STUDENT PROFILE PDF ─────────────────────────────────────────────
   const downloadStudentPDF = async (student) => {
+    if (!permissions.print) {
+      message.error("You do not have permission to download student reports");
+      return;
+    }
     try {
       const logoDataUrl = await loadLogoBase64(odysseyLogo);
       const doc        = new jsPDF({ unit: "mm", format: "a4" });
@@ -1005,6 +1047,10 @@ const Students = () => {
   };
 
   const handleBulkImport = async (file) => {
+    if (!permissions.import) {
+      message.error("You do not have permission to import students");
+      return;
+    }
     try {
       setImporting(true);
       const formData = new FormData();
@@ -1029,6 +1075,10 @@ const Students = () => {
   };
 
   const triggerFileInput = () => {
+    if (!permissions.import) {
+      message.error("You do not have permission to import students");
+      return;
+    }
     if (fileInputRef.current) {
       fileInputRef.current.click();
     }
@@ -1127,54 +1177,60 @@ const Students = () => {
               >
                 Clear Selection
               </Button>
-              <Popconfirm
-                title="Delete Selected Students"
-                description={`Are you sure you want to delete ${selectedStudentIds.length} selected student(s)?`}
-                onConfirm={handleBulkDeleteStudents}
-                okText="Yes"
-                cancelText="No"
-                okButtonProps={{ danger: true, loading: bulkDeleting }}
-                disabled={selectedStudentIds.length === 0 || loading}
-              >
-                <Button
-                  danger
-                  icon={<FaTrash />}
-                  size="large"
-                  className="btn-lg"
-                  loading={bulkDeleting}
+              {permissions.delete && (
+                <Popconfirm
+                  title="Delete Selected Students"
+                  description={`Are you sure you want to delete ${selectedStudentIds.length} selected student(s)?`}
+                  onConfirm={handleBulkDeleteStudents}
+                  okText="Yes"
+                  cancelText="No"
+                  okButtonProps={{ danger: true, loading: bulkDeleting }}
                   disabled={selectedStudentIds.length === 0 || loading}
                 >
-                  Delete Selected
+                  <Button
+                    danger
+                    icon={<FaTrash />}
+                    size="large"
+                    className="btn-lg"
+                    loading={bulkDeleting}
+                    disabled={selectedStudentIds.length === 0 || loading}
+                  >
+                    Delete Selected
+                  </Button>
+                </Popconfirm>
+              )}
+              {permissions.import && (
+                <Button
+                  type="default"
+                  icon={<FaFileImport />}
+                  onClick={() => setImportModalVisible(true)}
+                  size="large"
+                  className="btn-lg"
+                  style={{
+                    background: "#107c41",
+                    borderColor: "#107c41",
+                    color: "white",
+                  }}
+                >
+                  Import Excel/CSV
                 </Button>
-              </Popconfirm>
-              <Button
-                type="default"
-                icon={<FaFileImport />}
-                onClick={() => setImportModalVisible(true)}
-                size="large"
-                className="btn-lg"
-                style={{
-                  background: "#107c41",
-                  borderColor: "#107c41",
-                  color: "white",
-                }}
-              >
-                Import Excel/CSV
-              </Button>
-              <Button
-                type="primary"
-                icon={<FaUserPlus />}
-                onClick={() => {
-                  setModalVisible(true);
-                  setEditMode(false);
-                  form.resetFields();
-                }}
-                size="large"
-                className="btn-lg"
-                style={{ marginRight: 10 }}
-              >
-                Add New Student
-              </Button>
+              )}
+              {permissions.create && (
+                <Button
+                  type="primary"
+                  icon={<FaUserPlus />}
+                  onClick={() => {
+                    setModalVisible(true);
+                    setEditMode(false);
+                    form.resetFields();
+                  }}
+                  size="large"
+                  className="btn-lg"
+                  style={{ marginRight: 10 }}
+                >
+                  Add New Student
+                </Button>
+              )}
             </div>
           </div>
 
@@ -1666,24 +1722,26 @@ const Students = () => {
                                     marginTop: "8px",
                                   }}
                                 >
-                                  <Button
-                                    type="primary"
-                                    size="small"
-                                    icon={<FaEdit />}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openEditCourseModal(record, enrollment);
-                                    }}
-                                    style={{
-                                      background: "#667eea",
-                                      borderColor: "#667eea",
-                                      fontSize: "11px",
-                                      height: "24px",
-                                      flex: 1,
-                                    }}
-                                  >
-                                    Edit
-                                  </Button>
+                                  {permissions.update && (
+                                    <Button
+                                      type="primary"
+                                      size="small"
+                                      icon={<FaEdit />}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openEditCourseModal(record, enrollment);
+                                      }}
+                                      style={{
+                                        background: "#667eea",
+                                        borderColor: "#667eea",
+                                        fontSize: "11px",
+                                        height: "24px",
+                                        flex: 1,
+                                      }}
+                                    >
+                                      Edit
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
                             </Tooltip>
@@ -1735,19 +1793,21 @@ const Students = () => {
                           size="small"
                         />
                       </Tooltip>
-                      <Tooltip title="Assign Course">
-                        <Button
-                          type="primary"
-                          icon={<FaGraduationCap />}
-                          onClick={() => openCourseAssignModal(record)}
-                          style={{
-                            background: "#4ECDC4",
-                            borderColor: "#4ECDC4",
-                            borderRadius: "8px",
-                          }}
-                          size="small"
-                        />
-                      </Tooltip>
+                      {permissions.create && (
+                        <Tooltip title="Assign Course">
+                          <Button
+                            type="primary"
+                            icon={<FaGraduationCap />}
+                            onClick={() => openCourseAssignModal(record)}
+                            style={{
+                              background: "#4ECDC4",
+                              borderColor: "#4ECDC4",
+                              borderRadius: "8px",
+                            }}
+                            size="small"
+                          />
+                        </Tooltip>
+                      )}
                       <Tooltip title="Fee Profile">
                         <Button
                           icon={<FaDollarSign />}
@@ -1760,43 +1820,49 @@ const Students = () => {
                           size="small"
                         />
                       </Tooltip>
-                      <Tooltip title="Download PDF">
-                        <Button
-                          icon={<FaFileDownload />}
-                          onClick={() => downloadStudentPDF(record)}
-                          style={{ borderRadius: "8px" }}
-                          size="small"
-                        />
-                      </Tooltip>
-                      <Tooltip title="Edit Student">
-                        <Button
-                          icon={<FaEdit />}
-                          onClick={() => openEditModal(record)}
-                          style={{
-                            borderColor: "#667eea",
-                            color: "#667eea",
-                            borderRadius: "8px",
-                          }}
-                          size="small"
-                        />
-                      </Tooltip>
-                      <Popconfirm
-                        title="Delete Student"
-                        description="Are you sure you want to delete this student?"
-                        onConfirm={() => handleDeleteStudent(record._id)}
-                        okText="Yes"
-                        cancelText="No"
-                        okButtonProps={{ danger: true }}
-                      >
-                        <Tooltip title="Delete Student">
+                      {permissions.print && (
+                        <Tooltip title="Download PDF">
                           <Button
-                            danger
-                            icon={<FaTrash />}
+                            icon={<FaFileDownload />}
+                            onClick={() => downloadStudentPDF(record)}
                             style={{ borderRadius: "8px" }}
                             size="small"
                           />
                         </Tooltip>
-                      </Popconfirm>
+                      )}
+                      {permissions.update && (
+                        <Tooltip title="Edit Student">
+                          <Button
+                            icon={<FaEdit />}
+                            onClick={() => openEditModal(record)}
+                            style={{
+                              borderColor: "#667eea",
+                              color: "#667eea",
+                              borderRadius: "8px",
+                            }}
+                            size="small"
+                          />
+                        </Tooltip>
+                      )}
+                      {permissions.delete && (
+                        <Popconfirm
+                          title="Delete Student"
+                          description="Are you sure you want to delete this student?"
+                          onConfirm={() => handleDeleteStudent(record._id)}
+                          okText="Yes"
+                          cancelText="No"
+                          okButtonProps={{ danger: true }}
+                        >
+                          <Tooltip title="Delete Student">
+                            <Button
+                              danger
+                              icon={<FaTrash />}
+                              style={{ borderRadius: "8px" }}
+                              size="small"
+                            />
+                          </Tooltip>
+                        </Popconfirm>
+                      )}
                     </Space>
                   )}
                 />
@@ -2451,18 +2517,20 @@ const Students = () => {
         open={feeProfileModalVisible}
         onCancel={() => setFeeProfileModalVisible(false)}
         footer={
-          <Button
-            type="primary"
-            icon={<FaFileDownload />}
-            onClick={() => downloadFeePDF(selectedStudent)}
-            style={{
-              background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-              border: "none",
-              borderRadius: "6px",
-            }}
-          >
-            Download Fee Report
-          </Button>
+          permissions.print ? (
+            <Button
+              type="primary"
+              icon={<FaFileDownload />}
+              onClick={() => downloadFeePDF(selectedStudent)}
+              style={{
+                background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                border: "none",
+                borderRadius: "6px",
+              }}
+            >
+              Download Fee Report
+            </Button>
+          ) : null
         }
         width={1200}
         centered
@@ -2813,6 +2881,10 @@ const Students = () => {
 
 // ─── FEE PDF (per-enrollment pages) ───────────────────────────────────────────
 const downloadFeePDF = async (student) => {
+  if (!permissions.print) {
+    message.error("You do not have permission to download fee reports");
+    return;
+  }
   if (!student?.enrollments || student.enrollments.length === 0) {
     message.warning("No enrollments found for this student");
     return;

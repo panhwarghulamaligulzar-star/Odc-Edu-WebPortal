@@ -9,7 +9,7 @@ const AppHeader = ({ isSidebarCollapsed, toggleSidebar }) => {
 const [dropdownOpen, setDropdownOpen] = useState(false);
 const navigate = useNavigate()
 
-  const {adminInfo,setAppMinMaxWidth,appMinMixView}=useZustandStore();
+  const {adminInfo,setAppMinMaxWidth,appMinMixView,isSuperAdmin}=useZustandStore();
 const handleLogout = () => {
   const { clearToken, } = useZustandStore.getState();
   clearToken();
@@ -52,7 +52,7 @@ const getProfileImageSrc = (profile) => {
            </div>
           {/* Right: User Profile */}
           <div className="relative flex gap-[10px] ">
-            <NavLink to="/dashboard/settings">
+            <NavLink to={isSuperAdmin ? "/dashboard/app-settings" : "/dashboard/settings"}>
              <div
               className="btn-md-cricle cursor-pointer" >
               <FaCog className="text-gray-700 text-xl" />

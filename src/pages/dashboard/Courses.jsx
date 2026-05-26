@@ -43,8 +43,10 @@ import {
   deleteCourse,
 } from "../../services/feeService";
 import { EditIcon, GraduationCap } from "lucide-react";
+import { useModulePermissions } from "../../hooks/usePermissions";
 
 const Courses = () => {
+  const permissions = useModulePermissions("courses");
   const [openModal, setOpenModal] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editingCourse, setEditingCourse] = useState(null);
@@ -77,6 +79,10 @@ const Courses = () => {
   };
 
   const handleCreateCourse = async (values) => {
+    if (!permissions.create) {
+      message.warning("You do not have permission to create courses.");
+      return;
+    }
     setLoading(true);
     try {
       const response = await createCourseAPI(values);
@@ -94,6 +100,10 @@ const Courses = () => {
   };
 
   const handleEditCourse = async (values) => {
+    if (!permissions.update) {
+      message.warning("You do not have permission to update courses.");
+      return;
+    }
     setLoading(true);
     try {
       const response = await updateCourse(editingCourse._id, values);
@@ -113,6 +123,10 @@ const Courses = () => {
   };
 
   const handleDeleteCourse = async (courseId) => {
+    if (!permissions.delete) {
+      message.warning("You do not have permission to delete courses.");
+      return;
+    }
     try {
       const response = await deleteCourse(courseId);
       if (response.success) {
@@ -131,11 +145,19 @@ const Courses = () => {
   };
 
   const openBatchModal = (course) => {
+    if (!permissions.update) {
+      message.warning("You do not have permission to manage course batches.");
+      return;
+    }
     setSelectedCourse(course);
     setBatchModalVisible(true);
   };
 
   const openEditModal = (course) => {
+    if (!permissions.update) {
+      message.warning("You do not have permission to edit courses.");
+      return;
+    }
     setEditMode(true);
     setEditingCourse(course);
     form.setFieldsValue({
@@ -153,6 +175,10 @@ const Courses = () => {
   };
 
   const openCreateModal = () => {
+    if (!permissions.create) {
+      message.warning("You do not have permission to create courses.");
+      return;
+    }
     setEditMode(false);
     setEditingCourse(null);
     form.resetFields();
@@ -207,15 +233,17 @@ const Courses = () => {
             </p>
           </div>
         </div>
-        <Button
-          onClick={openCreateModal}
-          type="primary"
-          icon={<FaPlus />}
-          size="large"
-          className="btn-lg"
-        >
-          Create New Course
-        </Button>
+        {permissions.create && (
+          <Button
+            onClick={openCreateModal}
+            type="primary"
+            icon={<FaPlus />}
+            size="large"
+            className="btn-lg"
+          >
+            Create New Course
+          </Button>
+        )}
       </div>
 
       <div className="p-2 pb-[30px]">
@@ -485,88 +513,94 @@ const Courses = () => {
                   >
                     {/* Left Icons */}
                     <div style={{ display: "flex", gap: "8px" }}>
-                      <Tooltip title="Manage Batches">
+                      {permissions.update && (
+                        <Tooltip title="Manage Batches">
+                          <div
+                            onClick={() => openBatchModal(course)}
+                            style={{
+                              width: "32px",
+                              height: "32px",
+                              borderRadius: "6px",
+                              background: "rgba(59, 130, 246, 0.15)",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              cursor: "pointer",
+                              color: "#3B82F6",
+                              fontSize: "14px",
+                              transition: "all 0.2s ease",
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background =
+                                "rgba(59, 130, 246, 0.25)";
+                              e.currentTarget.style.transform = "scale(1.05)";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background =
+                                "rgba(59, 130, 246, 0.15)";
+                              e.currentTarget.style.transform = "scale(1)";
+                            }}
+                          >
+                            <FaUsers />
+                          </div>
+                        </Tooltip>
+                      )}
+                      {permissions.update && (
                         <div
-                          onClick={() => openBatchModal(course)}
+                          onClick={() => openEditModal(course)}
                           style={{
                             width: "32px",
                             height: "32px",
                             borderRadius: "6px",
-                            background: "rgba(59, 130, 246, 0.15)",
+                            background: "rgba(102, 126, 234, 0.15)",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
                             cursor: "pointer",
-                            color: "#3B82F6",
+                            color: "#667eea",
                             fontSize: "14px",
                             transition: "all 0.2s ease",
                           }}
                           onMouseEnter={(e) => {
                             e.currentTarget.style.background =
-                              "rgba(59, 130, 246, 0.25)";
-                            e.currentTarget.style.transform = "scale(1.05)";
+                              "rgba(102, 126, 234, 0.25)";
                           }}
                           onMouseLeave={(e) => {
                             e.currentTarget.style.background =
-                              "rgba(59, 130, 246, 0.15)";
-                            e.currentTarget.style.transform = "scale(1)";
+                              "rgba(102, 126, 234, 0.15)";
                           }}
                         >
-                          <FaUsers />
+                          <FaEdit />
                         </div>
-                      </Tooltip>
-                      <div
-                        onClick={() => openEditModal(course)}
-                        style={{
-                          width: "32px",
-                          height: "32px",
-                          borderRadius: "6px",
-                          background: "rgba(102, 126, 234, 0.15)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          cursor: "pointer",
-                          color: "#667eea",
-                          fontSize: "14px",
-                          transition: "all 0.2s ease",
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background =
-                            "rgba(102, 126, 234, 0.25)";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background =
-                            "rgba(102, 126, 234, 0.15)";
-                        }}
-                      >
-                        <FaEdit />
-                      </div>
-                      <Popconfirm
-                        title="Delete Course"
-                        description="Are you sure you want to delete this course?"
-                        onConfirm={() => handleDeleteCourse(course._id)}
-                        okText="Yes"
-                        cancelText="No"
-                        okButtonProps={{ danger: true }}
-                      >
-                        <div
-                          style={{
-                            width: "32px",
-                            height: "32px",
-                            borderRadius: "6px",
-                            background: "#FEF2F2",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            cursor: "pointer",
-                            color: "#EF4444",
-                            fontSize: "14px",
-                            transition: "all 0.2s ease",
-                          }}
+                      )}
+                      {permissions.delete && (
+                        <Popconfirm
+                          title="Delete Course"
+                          description="Are you sure you want to delete this course?"
+                          onConfirm={() => handleDeleteCourse(course._id)}
+                          okText="Yes"
+                          cancelText="No"
+                          okButtonProps={{ danger: true }}
                         >
-                          <FaTrash />
-                        </div>
-                      </Popconfirm>
+                          <div
+                            style={{
+                              width: "32px",
+                              height: "32px",
+                              borderRadius: "6px",
+                              background: "#FEF2F2",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              cursor: "pointer",
+                              color: "#EF4444",
+                              fontSize: "14px",
+                              transition: "all 0.2s ease",
+                            }}
+                          >
+                            <FaTrash />
+                          </div>
+                        </Popconfirm>
+                      )}
                     </div>
                   </div>
                 </div>

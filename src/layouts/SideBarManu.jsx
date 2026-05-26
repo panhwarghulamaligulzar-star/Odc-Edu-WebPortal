@@ -1,58 +1,59 @@
-import React, { useState } from "react";
-
-import { NavLink } from "react-router-dom";
+import React, { useMemo, useState } from "react";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import {
-  MdDashboard,
-  MdSchool,
-  MdSettings,
-  MdAdminPanelSettings,
   MdAccountBalance,
   MdKeyboardArrowDown,
   MdKeyboardArrowRight,
-  MdOutlineCategory,
-  MdReceipt,
-  MdSwapHoriz,
   MdMenuBook,
+  MdOutlineManageAccounts,
+  MdOutlineCategory,
+  MdOutlineSecurity,
+  MdOutlineTune,
+  MdReceipt,
+  MdSettings,
+  MdSwapHoriz,
   MdTrendingUp,
-  MdFactCheck,
 } from "react-icons/md";
-import { HiOutlineBookOpen } from "react-icons/hi";
-import { LiaChalkboardTeacherSolid } from "react-icons/lia";
-import { PiStudentThin } from "react-icons/pi";
-import { GrAnnounce } from "react-icons/gr";
-// import logo from '../assets/images/logos/odc_logo.png';
-import logo from "../assets/images/logos/ODC-PNG.jpg";
 import useZustandStore from "../stores/zustandStore";
+import { DASHBOARD_MODULE_LINKS } from "../config/rbac";
+import { getSidebarLogo } from "../utils/branding";
 
 const SideBarManu = () => {
-  const { appMinMixView } = useZustandStore();
+  const { appMinMixView, permissions, isSuperAdmin, adminInfo, appSettings } = useZustandStore();
   const [accountingOpen, setAccountingOpen] = useState(false);
-  const navLinks = [
-    { icon: MdDashboard, title: "Dashboard", path: "/dashboard" },
-    { icon: HiOutlineBookOpen, title: "Courses", path: "/dashboard/courses" },
-    {
-      icon: LiaChalkboardTeacherSolid,
-      title: "Employees",
-      path: "/dashboard/teachers",
+  const [superAdminOpen, setSuperAdminOpen] = useState(true);
+  const location = useLocation();
+  const superAdminMode =
+    isSuperAdmin === true || adminInfo?.userData?.isSuperAdmin === true;
+  const currentSection = new URLSearchParams(location.search).get("section") || "roles";
+
+  const navLinks = useMemo(
+    () => {
+      const links = DASHBOARD_MODULE_LINKS.filter(
+        (item) =>
+          item.key !== "accounting" &&
+          item.key !== "super-admin" &&
+          item.key !== "app-settings",
+      );
+
+      if (superAdminMode) {
+        return links
+          .filter((item) => item.key === "dashboard")
+          .map((item) => ({
+            ...item,
+            path: "/dashboard/super-admin?section=overview",
+          }));
+      }
+
+      return links.filter((item) => {
+        if (item.superAdminOnly) return superAdminMode;
+        return permissions?.[item.key]?.view === true;
+      });
     },
-    { icon: PiStudentThin, title: "Students", path: "/dashboard/students" },
-    {
-      icon: MdFactCheck,
-      title: "Attendance",
-      path: "/dashboard/attendance",
-    },
-    {
-      icon: MdSchool,
-      title: "Certifications",
-      path: "/dashboard/certification",
-    },
-    // Accounting accordion is rendered inline below
-    {
-      icon: GrAnnounce,
-      title: "Announcements ",
-      path: "/dashboard/announcements",
-    },
-  ];
+    [superAdminMode, permissions],
+  );
+
+  const showAccounting = !superAdminMode && permissions?.accounting?.view === true;
 
   const accountingLinks = [
     {
@@ -92,140 +93,169 @@ const SideBarManu = () => {
     },
   ];
 
-  const bottomManu = [
+  const superAdminLinks = [
     {
-      icon: MdAdminPanelSettings,
-      title: "Admin Info",
-      path: "/dashboard/settings",
+      key: "roles",
+      title: "Roles & Users",
+      path: "/dashboard/super-admin?section=roles",
+      icon: MdOutlineManageAccounts,
+    },
+    {
+      key: "permissions",
+      title: "Permissions",
+      path: "/dashboard/super-admin?section=permissions",
+      icon: MdOutlineTune,
+    },
+    {
+      key: "app-settings",
+      title: "App Settings",
+      path: "/dashboard/app-settings",
+      icon: MdSettings,
     },
   ];
+
   return (
     <div className="h-full shadow-lg bg-primary text-white flex flex-col">
-      {/* Logo */}
-      <div className="p-6 flex justify-center  items-center flex-col gap-[15px]">
+      <div className="p-6 flex justify-center items-center flex-col gap-[15px]">
         <img
-          src={logo}
+          src={getSidebarLogo(appSettings)}
           alt="ODC Logo"
-          className="w-[120px] h-[120px] rounded-full  object-contain"
+          className="w-[120px] h-[120px] rounded-full object-contain"
         />
-        {/* <h4 className="h4 text-secondary opacity-55">CMS</h4> */}
       </div>
-      <div className="bg-[#0e215fc7] w-full h-[2px] mb-[10px] mt-[-12px]"></div>
-      {/* Menu */}
-      <nav className="w-full h-full flex flex-col justify-between px-4 my-[10px]">
-        {/* TOP MENU */}
+      <div className="bg-[#0e215fc7] w-full h-[2px] mb-[10px] mt-[-12px]" />
+      <nav className="w-full h-full flex flex-col px-4 my-[10px] overflow-y-auto">
         <ul className="space-y-[0px]">
-          {navLinks.map((link, index) => (
-            <React.Fragment key={index}>
-              <li>
+          {navLinks.map((link) => {
+            const Icon = link.icon;
+            return (
+              <li key={link.key}>
                 <NavLink
                   to={link.path}
                   end={link.path === "/dashboard"}
                   className={({ isActive }) =>
-                    `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border 
-            hover:bg-[#0e215fc7] 
-            ${appMinMixView ? "w-[60px]" : "w-full"} 
-            ${
-              isActive
-                ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
-                : "bg-transparent border-primary"
-            }`
+                    `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border hover:bg-[#0e215fc7] ${
+                      appMinMixView ? "w-[60px]" : "w-full"
+                    } ${
+                      isActive
+                        ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
+                        : "bg-transparent border-primary"
+                    }`
                   }
                 >
-                  <link.icon size={25} />
+                  <Icon size={22} />
                   {!appMinMixView && (
-                    <span className="text-[14px] text-accent">
-                      {link.title}
-                    </span>
+                    <span className="text-[14px] text-accent">{link.label}</span>
                   )}
                 </NavLink>
               </li>
-              {/* Accounting accordion — inserted after Certifications (index 4) */}
-              {index === 4 && (
-                <li>
-                  <button
-                    onClick={() => setAccountingOpen((prev) => !prev)}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 border w-full
-                      hover:bg-[#0e215fc7] bg-transparent border-primary`}
-                  >
-                    <MdAccountBalance size={25} className="text-secondary" />
-                    {!appMinMixView && (
-                      <>
-                        <span className="text-[14px] text-secondary font-semibold flex-1 text-left">
-                          Accounting
-                        </span>
-                        {accountingOpen ? (
-                          <MdKeyboardArrowDown
-                            size={18}
-                            className="text-accent"
-                          />
-                        ) : (
-                          <MdKeyboardArrowRight
-                            size={18}
-                            className="text-accent"
-                          />
-                        )}
-                      </>
-                    )}
-                  </button>
-                  {accountingOpen && (
-                    <ul className="mt-1 space-y-1 pl-3">
-                      {accountingLinks.map((aLink, aIndex) => (
-                        <li key={aIndex}>
-                          <NavLink
-                            to={aLink.path}
-                            className={({ isActive }) =>
-                              `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border
-                              hover:bg-[#0e215fc7]
-                              ${appMinMixView ? "w-[60px]" : "w-full"}
-                              ${
-                                isActive
-                                  ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
-                                  : "bg-transparent border-primary"
-                              }`
-                            }
-                          >
-                            <aLink.icon size={20} />
-                            {!appMinMixView && (
-                              <span className="text-[13px] text-accent">
-                                {aLink.title}
-                              </span>
-                            )}
-                          </NavLink>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              )}
-            </React.Fragment>
-          ))}
-        </ul>
+            );
+          })}
 
-        {/* BOTTOM MENU */}
-        <ul className="space-y-2 mb-4">
-          {bottomManu.map((items, index) => (
-            <li key={index}>
-              <NavLink
-                to={items.path}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 border 
-            hover:bg-[#0e215fc7] 
-            ${appMinMixView ? "w-[60px]" : "w-full"} 
-            ${
-              isActive
-                ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
-                : "bg-transparent border-primary"
-            }`
-                }
+          {superAdminMode && (
+            <li className="mb-2 mt-2">
+              <button
+                onClick={() => setSuperAdminOpen((prev) => !prev)}
+                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 border w-full hover:bg-[#0e215fc7] ${
+                  location.pathname === "/dashboard/super-admin" ||
+                  location.pathname === "/dashboard/app-settings"
+                    ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
+                    : "bg-transparent border-primary"
+                }`}
               >
-                <items.icon size={25} />
+                <MdOutlineSecurity size={23} className="text-accent shrink-0" />
                 {!appMinMixView && (
-                  <span className="text-[14px] text-accent">{items.title}</span>
+                  <>
+                    <span className="text-[14px] text-accent font-semibold flex-1 text-left">
+                      Roles & Permissions
+                    </span>
+                    {superAdminOpen ? (
+                      <MdKeyboardArrowDown size={18} className="text-accent" />
+                    ) : (
+                      <MdKeyboardArrowRight size={18} className="text-accent" />
+                    )}
+                  </>
                 )}
-              </NavLink>
+              </button>
+
+              {superAdminOpen && !appMinMixView && (
+                <ul className="mt-2 space-y-1 pl-4">
+                  {superAdminLinks.map((item) => {
+                    const active =
+                      item.key === "app-settings"
+                        ? location.pathname === "/dashboard/app-settings"
+                        : location.pathname === "/dashboard/super-admin" &&
+                          currentSection === item.key;
+                    const ItemIcon = item.icon;
+
+                    return (
+                      <li key={item.key}>
+                        <Link
+                          to={item.path}
+                          className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border ${
+                            active
+                              ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
+                              : "bg-transparent border-primary hover:bg-[#0e215fc7]"
+                          }`}
+                        >
+                          <ItemIcon size={18} className="text-accent shrink-0" />
+                          <span className="text-[13px] text-accent">{item.title}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </li>
-          ))}
+          )}
+
+          {showAccounting && (
+            <li>
+              <button
+                onClick={() => setAccountingOpen((prev) => !prev)}
+                className="flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 border w-full hover:bg-[#0e215fc7] bg-transparent border-primary"
+              >
+                <MdAccountBalance size={25} className="text-secondary" />
+                {!appMinMixView && (
+                  <>
+                    <span className="text-[14px] text-secondary font-semibold flex-1 text-left">
+                      Accounting
+                    </span>
+                    {accountingOpen ? (
+                      <MdKeyboardArrowDown size={18} className="text-accent" />
+                    ) : (
+                      <MdKeyboardArrowRight size={18} className="text-accent" />
+                    )}
+                  </>
+                )}
+              </button>
+              {accountingOpen && (
+                <ul className="mt-1 space-y-1 pl-3">
+                  {accountingLinks.map((aLink) => (
+                    <li key={aLink.path}>
+                      <NavLink
+                        to={aLink.path}
+                        className={({ isActive }) =>
+                          `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border hover:bg-[#0e215fc7] ${
+                            appMinMixView ? "w-[60px]" : "w-full"
+                          } ${
+                            isActive
+                              ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
+                              : "bg-transparent border-primary"
+                          }`
+                        }
+                      >
+                        <aLink.icon size={20} />
+                        {!appMinMixView && (
+                          <span className="text-[13px] text-accent">{aLink.title}</span>
+                        )}
+                      </NavLink>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          )}
         </ul>
       </nav>
     </div>

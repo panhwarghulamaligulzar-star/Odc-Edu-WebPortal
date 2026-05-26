@@ -4,6 +4,8 @@
  * Used in receipts, PDFs, and other documents
  */
 
+export const defaultAcademyLogo = "/src/assets/images/logos/LOGO.png";
+
 export const academyConfig = {
   name: "ODYSSEY ACADEMY KHIPRO",
   shortName: "ODYSSEY",
@@ -12,7 +14,7 @@ export const academyConfig = {
   email: "askodysseyacademy@gmail.com",
   phone: "+923492425428",
   website: "www.odysseyacademykhipro.com",
-  logo: "/src/assets/images/logos/LOGO.png", // Path to academy logo
+  logo: defaultAcademyLogo, // Fallback academy logo
   
   // Colors for branding
   colors: {

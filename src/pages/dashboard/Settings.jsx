@@ -28,6 +28,8 @@ import useZustandStore from "../../stores/zustandStore";
 
 const Settings = () => {
   const { adminInfo } = useZustandStore();
+  const hasFullUserAccess =
+    adminInfo?.userData?.isSuperAdmin || adminInfo?.userData?.role === "admin";
   const location = useLocation();
   const pathname = location.pathname;
   const title = pathname.split("/").filter(Boolean).pop();
@@ -73,7 +75,7 @@ const Settings = () => {
     const fetchAdmins = async () => {
       await getAllAdminsData();
 
-      if (adminInfo?.userData?.role === "admin") {
+      if (hasFullUserAccess) {
         // Super admin sees all records
         setFilteredAdmins(admins);
       } else {
@@ -86,7 +88,7 @@ const Settings = () => {
     };
 
     fetchAdmins();
-  }, [adminInfo, admins.length]);
+  }, [adminInfo, admins.length, hasFullUserAccess]);
   // Search functionality
   const handleSearch = (e) => {
     const value = e.target.value;
@@ -189,7 +191,7 @@ const Settings = () => {
 
   let columns = [];
 
-  if (adminInfo?.userData?.role === "admin") {
+  if (hasFullUserAccess) {
     // SUPER ADMIN — full access
     columns = [
       {
@@ -300,11 +302,13 @@ const Settings = () => {
             <Popconfirm
               title="Are you sure?"
               onConfirm={() => handleDeleteAdmin(record._id)}
+              disabled={record.isSuperAdmin}
             >
               <Button
                 danger
                 icon={<FaTrash />}
                 size="small"
+                disabled={record.isSuperAdmin}
                 className="flex items-center gap-1"
               >
                 Delete
@@ -420,7 +424,7 @@ const Settings = () => {
                 </p>
               </div>
             </div>
-            {adminInfo?.userData?.role === "admin" && (
+            {hasFullUserAccess && (
               <Button
                 type="primary"
                 icon={<FaPlus />}
@@ -432,7 +436,7 @@ const Settings = () => {
               </Button>
             )}
           </div>
-          {adminInfo?.userData?.role === "admin" && (
+          {hasFullUserAccess && (
             <div className="mb-4">
               <Input
                 placeholder="Search by name or email..."

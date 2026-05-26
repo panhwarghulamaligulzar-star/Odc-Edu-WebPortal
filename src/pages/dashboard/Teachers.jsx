@@ -40,8 +40,10 @@ import {
 import dayjs from "dayjs";
 import odcLogo from "../../assets/images/logos/new logo.png";
 import { MdPeopleAlt } from "react-icons/md";
+import { useModulePermissions } from "../../hooks/usePermissions";
 
 const Teachers = () => {
+  const permissions = useModulePermissions("employees");
   const [openModal, setOpenModal] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState(null);
@@ -93,6 +95,10 @@ const Teachers = () => {
   };
 
   const handleCreateTeacher = async (values) => {
+    if (!permissions.create) {
+      message.warning("You do not have permission to create employees.");
+      return;
+    }
     setLoading(true);
     try {
       const response = await createTeacher(values);
@@ -110,6 +116,10 @@ const Teachers = () => {
   };
 
   const handleEditTeacher = async (values) => {
+    if (!permissions.update) {
+      message.warning("You do not have permission to update employees.");
+      return;
+    }
     setLoading(true);
     try {
       const response = await updateTeacher(editingTeacher._id, values);
@@ -129,6 +139,10 @@ const Teachers = () => {
   };
 
   const handleDeleteTeacher = async (teacherId) => {
+    if (!permissions.delete) {
+      message.warning("You do not have permission to delete employees.");
+      return;
+    }
     try {
       const response = await deleteTeacher(teacherId);
       if (response.success) {
@@ -141,6 +155,10 @@ const Teachers = () => {
   };
 
   const openEditModal = (teacher) => {
+    if (!permissions.update) {
+      message.warning("You do not have permission to edit employees.");
+      return;
+    }
     console.log("Editing teacher:", teacher);
     setEditMode(true);
     setEditingTeacher(teacher);
@@ -170,6 +188,10 @@ const Teachers = () => {
   };
 
   const openCreateModal = () => {
+    if (!permissions.create) {
+      message.warning("You do not have permission to create employees.");
+      return;
+    }
     setEditMode(false);
     setEditingTeacher(null);
     form.resetFields();
@@ -177,6 +199,10 @@ const Teachers = () => {
   };
 
   const openIdCardModal = (teacher) => {
+    if (!permissions.print) {
+      message.warning("You do not have permission to print employee cards.");
+      return;
+    }
     console.log("Selected teacher for detail view:", teacher);
     setSelectedTeacher(teacher);
     setShowIdCard(true);
@@ -208,7 +234,7 @@ const Teachers = () => {
           setEditingTeacher(null);
           form.resetFields();
         }}
-        maskClosable
+        mask={{ closable: true }}
         footer={null}
         width={900}
         centered
@@ -243,15 +269,17 @@ const Teachers = () => {
             </p>
           </div>
         </div>
-        <Button
-          onClick={openCreateModal}
-          type="primary"
-          icon={<FaPlus />}
-          size="large"
-          className="btn-lg"
-        >
-          Create Employee
-        </Button>
+        {permissions.create && (
+          <Button
+            onClick={openCreateModal}
+            type="primary"
+            icon={<FaPlus />}
+            size="large"
+            className="btn-lg"
+          >
+            Create Employee
+          </Button>
+        )}
       </div>
 
       <div className="p-2">
@@ -605,52 +633,58 @@ const Teachers = () => {
                       zIndex: 10,
                     }}
                   >
-                    <Button
-                      type="primary"
-                      icon={<FaPrint />}
-                      onClick={() => openIdCardModal(teacher)}
-                      style={{
-                        background: "#01134C",
-                        borderColor: "#01134C",
-                        fontWeight: "600",
-                        fontSize: "11px",
-                        height: "30px",
-                      }}
-                      size="small"
-                    >
-                      View Details
-                    </Button>
-                    <div className="flex gap-[10px]">
+                    {permissions.print && (
                       <Button
-                        icon={<FaEdit />}
-                        onClick={() => openEditModal(teacher)}
-                        size="small"
+                        type="primary"
+                        icon={<FaPrint />}
+                        onClick={() => openIdCardModal(teacher)}
                         style={{
-                          background: "white",
+                          background: "#01134C",
                           borderColor: "#01134C",
-                          color: "#01134C",
+                          fontWeight: "600",
+                          fontSize: "11px",
                           height: "30px",
-                          width: "30px",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
                         }}
-                      />
-                      <Popconfirm
-                        title="Delete Teacher"
-                        description="Are you sure you want to delete this teacher?"
-                        onConfirm={() => handleDeleteTeacher(teacher._id)}
-                        okText="Yes"
-                        cancelText="No"
-                        okButtonProps={{ danger: true }}
+                        size="small"
                       >
+                        View Details
+                      </Button>
+                    )}
+                    <div className="flex gap-[10px]">
+                      {permissions.update && (
                         <Button
-                          danger
-                          icon={<FaTrash />}
+                          icon={<FaEdit />}
+                          onClick={() => openEditModal(teacher)}
                           size="small"
-                          style={{ width: "30px", height: "30px" }}
+                          style={{
+                            background: "white",
+                            borderColor: "#01134C",
+                            color: "#01134C",
+                            height: "30px",
+                            width: "30px",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                          }}
                         />
-                      </Popconfirm>
+                      )}
+                      {permissions.delete && (
+                        <Popconfirm
+                          title="Delete Teacher"
+                          description="Are you sure you want to delete this teacher?"
+                          onConfirm={() => handleDeleteTeacher(teacher._id)}
+                          okText="Yes"
+                          cancelText="No"
+                          okButtonProps={{ danger: true }}
+                        >
+                          <Button
+                            danger
+                            icon={<FaTrash />}
+                            size="small"
+                            style={{ width: "30px", height: "30px" }}
+                          />
+                        </Popconfirm>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -670,7 +704,7 @@ const Teachers = () => {
         footer={null}
         width={700}
         centered
-        bodyStyle={{ padding: "0" }}
+        styles={{ body: { padding: "0" } }}
       >
         {selectedTeacher && (
           <div

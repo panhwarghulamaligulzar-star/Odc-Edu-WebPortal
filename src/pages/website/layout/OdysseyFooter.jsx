@@ -1,11 +1,16 @@
 import React, { useState } from 'react';
 import { MapPin, Phone, Mail, Facebook, Linkedin, Youtube, Instagram, Twitter, MessageCircle, X } from 'lucide-react';
-import odcLogo from "../../../assets/images/logos/new logo.png"
 import navtticLogo from "../../../assets/images/logos/sindh-logo.png"
+import useZustandStore from "../../../stores/zustandStore";
+import { getBrandLogo, getSchoolName, getSchoolTagline } from "../../../utils/branding";
 
 
 export default function OdysseyFooter() {
+  const { appSettings } = useZustandStore();
   const [showChat, setShowChat] = useState(false);
+  const address = appSettings?.address || "Yaseen Khan Street, Near Kanji Kapra Market, Khipro";
+  const phone = appSettings?.phone || "(+92) 349-2425428";
+  const email = appSettings?.email || "askodysseyacademy@gmail.com";
 
   return (
     <footer className="bg-gradient-to-br from-[#0a1e4a] via-[#0d2556] to-[#0a1e4a] text-white">
@@ -17,7 +22,7 @@ export default function OdysseyFooter() {
             <div className="flex items-center gap-4">
               {/* Left Logo */}
               <div className="relative w-20 h-20 sm:w-24 sm:h-24 flex-shrink-0">
-                <img src={odcLogo} className='w-[100px] h-100px' alt=''/>
+                <img src={getBrandLogo(appSettings)} className='w-[100px] h-100px object-contain' alt={getSchoolName(appSettings)}/>
                 </div>
                   {/* Right Logo */}
               <div className="w-20 h-20 sm:w-24 sm:h-24 bg-white rounded-full flex items-center justify-center flex-shrink-0">
@@ -28,8 +33,8 @@ export default function OdysseyFooter() {
             
 
             <div>
-              <h2 className="text-2xl sm:text-3xl font-bold mb-2">ODYSSEY ACADEMY</h2>
-              <p className="text-sm sm:text-base text-gray-300 mb-1">Institute of Technical & Vocational Education</p>
+              <h2 className="text-2xl sm:text-3xl font-bold mb-2">{getSchoolName(appSettings)}</h2>
+              <p className="text-sm sm:text-base text-gray-300 mb-1">{getSchoolTagline(appSettings) || "Institute of Technical & Vocational Education"}</p>
             </div>
 
             <p className="text-sm sm:text-base text-gray-300 leading-relaxed">
@@ -47,8 +52,7 @@ export default function OdysseyFooter() {
                   <MapPin className="w-5 h-5 text-white" />
                 </div>
                 <div className="flex-1">
-                  <p className="text-sm sm:text-base">Yaseen Khan Street,</p>
-                  <p className="text-sm sm:text-base">Near Kanji Kapra Market, Khipro</p>
+                  <p className="text-sm sm:text-base">{address}</p>
                 </div>
               </div>
 
@@ -56,8 +60,8 @@ export default function OdysseyFooter() {
                 <div className="bg-white/10 p-2 rounded-lg group-hover:bg-white/20 transition-colors">
                   <Phone className="w-5 h-5 text-white" />
                 </div>
-                <a href="tel:+923492425428" className="text-sm sm:text-base hover:text-yellow-400 transition-colors">
-                  (+92) 349-2425428
+                <a href={`tel:${phone}`} className="text-sm sm:text-base hover:text-yellow-400 transition-colors">
+                  {phone}
                 </a>
               </div>
 
@@ -65,8 +69,8 @@ export default function OdysseyFooter() {
                 <div className="bg-white/10 p-2 rounded-lg group-hover:bg-white/20 transition-colors">
                   <Mail className="w-5 h-5 text-white" />
                 </div>
-                <a href="mailto:askodysseyacademy@gmail.com" className="text-sm sm:text-base hover:text-yellow-400 transition-colors break-all">
-                  askodysseyacademy@gmail.com
+                <a href={`mailto:${email}`} className="text-sm sm:text-base hover:text-yellow-400 transition-colors break-all">
+                  {email}
                 </a>
               </div>
             </div>

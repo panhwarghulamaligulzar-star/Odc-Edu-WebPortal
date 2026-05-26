@@ -19,6 +19,8 @@ import batchRoute from "./app/routes/batchRoute.js";
 import accountingRoute from "./app/routes/accountingRoute.js";
 import attendanceRoute from "./app/routes/attendanceRoute.js";
 import holidayRoute from "./app/routes/holidayRoute.js";
+import roleRoutes from "./app/routes/roleRoutes.js";
+import appSettingsRoutes from "./app/routes/appSettingsRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,6 +65,12 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // optional, if you receive form data
 
+const uploadsDir = path.resolve(__dirname, process.env.UPLOADS_DIR || "./uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+app.use("/uploads", express.static(uploadsDir));
+
 // ===== Request Logger =====
 app.use((req, res, next) => {
   console.log(`\n📨 [${new Date().toISOString()}] ${req.method} ${req.path}`);
@@ -98,6 +106,8 @@ app.use("/batch", batchRoute);
 app.use("/accounting", accountingRoute);
 app.use("/attendance", attendanceRoute);
 app.use("/holiday", holidayRoute);
+app.use("/roles", roleRoutes);
+app.use("/settings", appSettingsRoutes);
 
 // ===== Serve Static Files (Built Frontend) AFTER API ROUTES =====
 const publicPath = path.join(__dirname, "public");
@@ -121,6 +131,9 @@ if (publicExists) {
       req.path.startsWith("/accounting") ||
       req.path.startsWith("/attendance") ||
       req.path.startsWith("/holiday") ||
+      req.path.startsWith("/roles") ||
+      req.path.startsWith("/settings") ||
+      req.path.startsWith("/uploads") ||
       req.path.startsWith("/health")
     ) {
       return next();

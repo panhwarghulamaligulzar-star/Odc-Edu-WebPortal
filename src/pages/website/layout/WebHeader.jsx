@@ -1,36 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Mail, Phone, MapPin, Facebook, Instagram, Youtube, Twitter, Linkedin, Menu, X } from 'lucide-react';
-import logo from "../../../assets/images/logos/new logo.png"
 import { NavLink } from 'react-router-dom';
+import useZustandStore from '../../../stores/zustandStore';
+import { getBrandLogo, getSchoolName, getSchoolTagline } from '../../../utils/branding';
 
 // ============================================================================
 // DATA ARRAYS - Configuration for all links and social media
 // ============================================================================
-
-// Contact information for top bar
-const contactInfo = [
-  {
-    id: 'email',
-    icon: Mail,
-    href: 'mailto:askodysseyacademy@gmail.com',
-    text: 'askodysseyacademy@gmail.com',
-    ariaLabel: 'Email us'
-  },
-  {
-    id: 'phone',
-    icon: Phone,
-    href: 'tel:+923492425428',
-    text: '(+92) 349-2425428',
-    ariaLabel: 'Call us'
-  }
-];
-
-// Location information
-const locationData = {
-  href: 'https://www.google.com/maps/search/?api=1&query=Yaseen+Khan+Street,+Near+Kanji+Kapra+Market,+Khipro',
-  text: 'Yaseen Khan Street, Near Kanji Kapra Market, Khipro',
-  ariaLabel: 'View location on map'
-};
 
 // Social media links
 const socialLinks = [
@@ -101,6 +77,7 @@ const coursesDropdown = [
 // ============================================================================
 
 const WebHeader = () => {
+  const { appSettings } = useZustandStore();
   const [menuOpen, setMenuOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(null);
   const [mobileCoursesOpen, setMobileCoursesOpen] = useState(false); // 🔥 ADDED (Only addition)
@@ -119,6 +96,31 @@ const WebHeader = () => {
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  const contactInfo = [
+    {
+      id: 'email',
+      icon: Mail,
+      href: `mailto:${appSettings?.email || 'askodysseyacademy@gmail.com'}`,
+      text: appSettings?.email || 'askodysseyacademy@gmail.com',
+      ariaLabel: 'Email us'
+    },
+    {
+      id: 'phone',
+      icon: Phone,
+      href: `tel:${appSettings?.phone || '+923492425428'}`,
+      text: appSettings?.phone || '(+92) 349-2425428',
+      ariaLabel: 'Call us'
+    }
+  ];
+
+  const locationData = {
+    href: appSettings?.address
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(appSettings.address)}`
+      : 'https://www.google.com/maps/search/?api=1&query=Yaseen+Khan+Street,+Near+Kanji+Kapra+Market,+Khipro',
+    text: appSettings?.address || 'Yaseen Khan Street, Near Kanji Kapra Market, Khipro',
+    ariaLabel: 'View location on map'
+  };
 
   return (
     <div className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
@@ -156,7 +158,7 @@ const WebHeader = () => {
           }`}>
             
             <NavLink to="/" className="text-center lg:text-left flex gap-[10px] justify-start items-center">
-              <img src={logo} alt="Odyssey Academy Logo" className={`transition-all duration-300 ${
+              <img src={getBrandLogo(appSettings)} alt={getSchoolName(appSettings)} className={`transition-all duration-300 ${
                 isScrolled ? 'w-[60px] h-[60px] lg:w-[70px] lg:h-[70px]' : 'w-[90px] h-[90px] lg:w-[100px] lg:h-[100px]'
               }`} />
 
@@ -164,13 +166,13 @@ const WebHeader = () => {
                 <h2 className={`hidden lg:block font-bold text-primary font-Arial transition-all duration-300 ${
                   isScrolled ? 'text-[28px]' : 'text-[40px]'
                 }`}>
-                  ODYSSEY ACADEMY
+                  {getSchoolName(appSettings).toUpperCase()}
                 </h2>
 
                 <h6 className={`h5 hidden lg:block ml-[06px] mt-[-10px] transition-all duration-300 ${
                   isScrolled ? '!text-[14px]' : '!text-[18px]'
                 }`}>
-                  institute of Technical & Vocational Education
+                  {getSchoolTagline(appSettings) || "Institute of Technical & Vocational Education"}
                 </h6>
               </div>
             </NavLink>

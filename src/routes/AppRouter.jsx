@@ -2,7 +2,6 @@ import {
   BrowserRouter as Router,
   Routes,
   Route,
-  Navigate,
 } from "react-router-dom";
 
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -11,7 +10,6 @@ import Certification from "../pages/dashboard/Certification";
 import Settings from "../pages/dashboard/Settings";
 import ProtectedRoute from "../pages/auth/ProtectedRoute";
 import Login from "../pages/auth/Login";
-import useZustandStore from "../stores/zustandStore";
 import Announcement from "../pages/dashboard/Announcement";
 import HomePage from "../pages/website/pages/HomePage";
 import Certifications from "../pages/website/pages/Certifications";
@@ -41,9 +39,11 @@ import ProfitLoss from "../pages/dashboard/accounting/ProfitLoss";
 import Receipt from "../pages/dashboard/accounting/Receipt";
 import Attendance from "../pages/dashboard/Attendance";
 import HolidayManagement from "../pages/dashboard/HolidayManagement";
+import SuperAdmin from "../pages/dashboard/SuperAdmin";
+import AppSettingsPage from "../pages/dashboard/AppSettingsPage";
+import NoAccess from "../pages/dashboard/NoAccess";
 
 function AppRouter() {
-  const { token } = useZustandStore();
   return (
     <Router>
       <Routes>
@@ -78,25 +78,28 @@ function AppRouter() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<Dashboard />} />
-          <Route path="courses" element={<Courses />} />
-          <Route path="teachers" element={<Teachers />} />
-          <Route path="students" element={<Students />} />
-          <Route path="students/:id" element={<StudentProfile />} />
-          <Route path="certification" element={<Certification />} />
-          <Route path="settings" element={<Settings />} />
-          <Route path="announcements" element={<Announcement />} />
+          <Route index element={<ProtectedRoute moduleKey="dashboard"><Dashboard /></ProtectedRoute>} />
+          <Route path="courses" element={<ProtectedRoute moduleKey="courses"><Courses /></ProtectedRoute>} />
+          <Route path="teachers" element={<ProtectedRoute moduleKey="employees"><Teachers /></ProtectedRoute>} />
+          <Route path="students" element={<ProtectedRoute moduleKey="students"><Students /></ProtectedRoute>} />
+          <Route path="students/:id" element={<ProtectedRoute moduleKey="students"><StudentProfile /></ProtectedRoute>} />
+          <Route path="certification" element={<ProtectedRoute moduleKey="certifications"><Certification /></ProtectedRoute>} />
+          <Route path="settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+          <Route path="no-access" element={<ProtectedRoute><NoAccess /></ProtectedRoute>} />
+          <Route path="super-admin" element={<ProtectedRoute superAdminOnly><SuperAdmin /></ProtectedRoute>} />
+          <Route path="app-settings" element={<ProtectedRoute superAdminOnly><AppSettingsPage /></ProtectedRoute>} />
+          <Route path="announcements" element={<ProtectedRoute moduleKey="announcements"><Announcement /></ProtectedRoute>} />
           {/* Accounting Module */}
-          <Route path="accounting/heads" element={<HeadsOfAccount />} />
-          <Route path="accounting/banks" element={<Banks />} />
-          <Route path="accounting/transactions" element={<Transactions />} />
-          <Route path="accounting/receipt" element={<Receipt />} />
-          <Route path="accounting/fund-transfer" element={<FundTransfer />} />
-          <Route path="accounting/ledger" element={<Ledger />} />
-          <Route path="accounting/profit-loss" element={<ProfitLoss />} />
+          <Route path="accounting/heads" element={<ProtectedRoute moduleKey="accounting"><HeadsOfAccount /></ProtectedRoute>} />
+          <Route path="accounting/banks" element={<ProtectedRoute moduleKey="accounting"><Banks /></ProtectedRoute>} />
+          <Route path="accounting/transactions" element={<ProtectedRoute moduleKey="accounting"><Transactions /></ProtectedRoute>} />
+          <Route path="accounting/receipt" element={<ProtectedRoute moduleKey="accounting"><Receipt /></ProtectedRoute>} />
+          <Route path="accounting/fund-transfer" element={<ProtectedRoute moduleKey="accounting"><FundTransfer /></ProtectedRoute>} />
+          <Route path="accounting/ledger" element={<ProtectedRoute moduleKey="accounting"><Ledger /></ProtectedRoute>} />
+          <Route path="accounting/profit-loss" element={<ProtectedRoute moduleKey="accounting"><ProfitLoss /></ProtectedRoute>} />
           {/* Attendance Module */}
-          <Route path="attendance" element={<Attendance />} />
-          <Route path="attendance/holidays" element={<HolidayManagement />} />
+          <Route path="attendance" element={<ProtectedRoute moduleKey="attendance"><Attendance /></ProtectedRoute>} />
+          <Route path="attendance/holidays" element={<ProtectedRoute moduleKey="attendance"><HolidayManagement /></ProtectedRoute>} />
         </Route>
       </Routes>
     </Router>
