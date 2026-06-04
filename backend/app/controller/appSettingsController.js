@@ -60,6 +60,7 @@ const updateAppSettings = async (req, res) => {
       "email",
       "website",
       "maintenanceMode",
+      "showAccountingBalancesToUsers",
     ];
 
     allowedFields.forEach((field) => {

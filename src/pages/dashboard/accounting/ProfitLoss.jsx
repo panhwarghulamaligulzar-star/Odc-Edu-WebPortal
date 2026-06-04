@@ -12,6 +12,7 @@ import {
   Select,
   Tooltip,
   message,
+  Alert,
 } from "antd";
 import {
   ArrowUpOutlined,
@@ -25,6 +26,8 @@ import dayjs from "dayjs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { getProfitLoss } from "../../../services/accountingService";
+import useZustandStore from "../../../stores/zustandStore";
+import { canViewAccountingBalances } from "../../../utils/accountingAccess";
 
 const { RangePicker } = DatePicker;
 const { Option } = Select;
@@ -97,8 +100,18 @@ const ProfitLoss = () => {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   const [txnType, setTxnType] = useState("all"); // "all" | "income" | "expense"
+  const { appSettings, isSuperAdmin, adminInfo } = useZustandStore();
+  const balancesVisible = canViewAccountingBalances({
+    appSettings,
+    isSuperAdmin,
+    adminInfo,
+  });
 
   const fetchData = useCallback(async () => {
+    if (!balancesVisible) {
+      setData(null);
+      return;
+    }
     if (!dateRange || !dateRange[0] || !dateRange[1]) return;
     setLoading(true);
     try {
@@ -112,7 +125,7 @@ const ProfitLoss = () => {
     } finally {
       setLoading(false);
     }
-  }, [dateRange]);
+  }, [dateRange, balancesVisible]);
 
   useEffect(() => {
     fetchData();
@@ -343,6 +356,16 @@ const ProfitLoss = () => {
 
   return (
     <div className="w-full space-y-5">
+      {!balancesVisible ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="Profit and loss totals are hidden by the super admin."
+          description="Accounting users can continue operational work, but monthly financial summaries are restricted."
+        />
+      ) : null}
+      {!balancesVisible ? null : (
+      <>
       {/* ── Page Header ─────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
@@ -651,6 +674,8 @@ const ProfitLoss = () => {
             </div>
           </Card>
         </>
+      )}
+      </>
       )}
     </div>
   );

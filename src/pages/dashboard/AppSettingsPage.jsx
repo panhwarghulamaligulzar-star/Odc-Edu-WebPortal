@@ -306,6 +306,13 @@ const AppSettingsPage = () => {
                   <Form.Item name="maintenanceMode" label="Maintenance Mode" valuePropName="checked">
                     <Switch className="theme-switch" />
                   </Form.Item>
+                  <Form.Item
+                    name="showAccountingBalancesToUsers"
+                    label="Show Accounting Balances To Accounting Users"
+                    valuePropName="checked"
+                  >
+                    <Switch className="theme-switch" />
+                  </Form.Item>
                   <p className="text-sm text-gray-500">
                     Import/export and reset actions can now use the stored JSON payload from these settings.
                   </p>
@@ -315,7 +322,7 @@ const AppSettingsPage = () => {
           ]}
         />
 
-        <div className="flex justify-end">
+        <div className="mt-6 flex justify-end">
           <Button
             type="primary"
             htmlType="submit"

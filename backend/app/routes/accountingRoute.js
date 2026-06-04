@@ -2,6 +2,8 @@
 import express from "express";
 import authMiddleware from "../midlewear/authMiddleware.js";
 import authorize from "../midlewear/authorize.js";
+import requireAuth from "../midlewear/requireAuth.js";
+import superAdminOnly from "../midlewear/superAdminOnly.js";
 import {
   getAccountingTypes,
   getHeadsOfAccount,
@@ -26,6 +28,7 @@ import {
   getMonthlySummary,
   getReceiptDuesOverview,
   exportReceiptDues,
+  getSuperAdminFinanceMonitor,
 } from "../controller/accountingController.js";
 
 const accountingRoute = express.Router();
@@ -66,6 +69,15 @@ accountingRoute.get("/profit-loss", authMiddleware, authorize("accounting", "vie
 
 // Monthly Summary
 accountingRoute.get("/monthly-summary", authMiddleware, authorize("accounting", "view"), getMonthlySummary);
+
+// Super Admin Finance Monitor
+accountingRoute.get(
+  "/super-admin/monitor",
+  authMiddleware,
+  requireAuth,
+  superAdminOnly,
+  getSuperAdminFinanceMonitor,
+);
 
 // Receipt / Dues Tracking
 accountingRoute.get("/receipts/dues", authMiddleware, authorize("accounting", "view"), getReceiptDuesOverview);

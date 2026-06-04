@@ -32,6 +32,8 @@ import {
   createFundTransfer,
   deleteFundTransfer,
 } from "../../../services/accountingService";
+import useZustandStore from "../../../stores/zustandStore";
+import { canViewAccountingBalances } from "../../../utils/accountingAccess";
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -60,6 +62,12 @@ const FundTransfer = () => {
   // Balance warning state derived from form "fromMethod" selection
   const [selectedFrom, setSelectedFrom] = useState(null);
   const [form] = Form.useForm();
+  const { appSettings, isSuperAdmin, adminInfo } = useZustandStore();
+  const balancesVisible = canViewAccountingBalances({
+    appSettings,
+    isSuperAdmin,
+    adminInfo,
+  });
 
   // ── Load payment methods once ──────────────────────────────
   useEffect(() => {
@@ -244,7 +252,7 @@ const FundTransfer = () => {
   ];
 
   // Selected from-balance for amount validation
-  const fromBalance = selectedFrom?.currentBalance || 0;
+  const fromBalance = balancesVisible ? selectedFrom?.currentBalance || 0 : 0;
 
   return (
     <div className="p-6">
@@ -272,46 +280,33 @@ const FundTransfer = () => {
       </div>
 
       {/* ── Summary card row ──────────────────────────────── */}
-      <Row gutter={16} className="mb-5">
-        <Col xs={24} sm={8}>
-          <div
-            className="rounded-xl p-5"
-            style={{ backgroundColor: "#01134C" }}
-          >
-            <Statistic
-              title={
-                <span
-                  style={{ color: "#E8FC0A", fontSize: 12, fontWeight: 600 }}
-                >
-                  TOTAL TRANSFERRED
-                </span>
-              }
-              value={totalTransferred}
-              prefix={<SwapOutlined style={{ color: "#fff" }} />}
-              valueStyle={{ color: "#fff", fontWeight: 700 }}
-              formatter={(v) => formatCurrency(v)}
-            />
-          </div>
-        </Col>
-
-        {/* Live balances for all accounts */}
-        {methods.map((m) => (
-          <Col xs={24} sm={8} key={m._id}>
-            <div className="bg-white rounded-xl shadow-soft p-5">
+      {balancesVisible ? (
+        <Row gutter={16} className="mb-5">
+          <Col xs={24} sm={8}>
+            <div className="rounded-xl p-5" style={{ backgroundColor: "#01134C" }}>
               <Statistic
-                title={
-                  <span className="text-muted text-xs font-semibold">
-                    {m.name.toUpperCase()}
-                  </span>
-                }
-                value={m.currentBalance}
-                valueStyle={{ color: "#01134C", fontWeight: 700 }}
+                title={<span style={{ color: "#E8FC0A", fontSize: 12, fontWeight: 600 }}>TOTAL TRANSFERRED</span>}
+                value={totalTransferred}
+                prefix={<SwapOutlined style={{ color: "#fff" }} />}
+                valueStyle={{ color: "#fff", fontWeight: 700 }}
                 formatter={(v) => formatCurrency(v)}
               />
             </div>
           </Col>
-        ))}
-      </Row>
+          {methods.map((m) => (
+            <Col xs={24} sm={8} key={m._id}>
+              <div className="bg-white rounded-xl shadow-soft p-5">
+                <Statistic
+                  title={<span className="text-muted text-xs font-semibold">{m.name.toUpperCase()}</span>}
+                  value={m.currentBalance}
+                  valueStyle={{ color: "#01134C", fontWeight: 700 }}
+                  formatter={(v) => formatCurrency(v)}
+                />
+              </div>
+            </Col>
+          ))}
+        </Row>
+      ) : null}
 
       {/* ── Table ─────────────────────────────────────────── */}
       <div className="bg-white rounded-xl shadow-soft overflow-hidden">
@@ -362,7 +357,7 @@ const FundTransfer = () => {
             message={
               <span>
                 Available in <strong>{selectedFrom.name}</strong>:{" "}
-                <strong>{formatCurrency(fromBalance)}</strong>
+                <strong>{balancesVisible ? formatCurrency(fromBalance) : "Hidden"}</strong>
               </span>
             }
           />
@@ -380,9 +375,11 @@ const FundTransfer = () => {
                   {methods.map((m) => (
                     <Option key={m._id} value={m._id}>
                       {m.name}{" "}
-                      <span className="text-muted text-xs">
-                        ({formatCurrency(m.currentBalance)})
-                      </span>
+                      {balancesVisible && m.currentBalance !== null ? (
+                        <span className="text-muted text-xs">
+                          ({formatCurrency(m.currentBalance)})
+                        </span>
+                      ) : null}
                     </Option>
                   ))}
                 </Select>
@@ -430,7 +427,11 @@ const FundTransfer = () => {
                     validator(_, value) {
                       if (!value || value <= 0)
                         return Promise.reject(new Error("Amount must be > 0"));
-                      if (selectedFrom && value > selectedFrom.currentBalance) {
+                      if (
+                        balancesVisible &&
+                        selectedFrom &&
+                        value > selectedFrom.currentBalance
+                      ) {
                         return Promise.reject(
                           new Error(
                             `Exceeds balance of ${formatCurrency(selectedFrom.currentBalance)}`,
@@ -445,7 +446,7 @@ const FundTransfer = () => {
                 <InputNumber
                   style={{ width: "100%" }}
                   min={1}
-                  max={fromBalance || undefined}
+                  max={balancesVisible ? fromBalance || undefined : undefined}
                   placeholder="0"
                   formatter={(v) =>
                     `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",")

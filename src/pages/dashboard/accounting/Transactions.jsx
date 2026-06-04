@@ -48,6 +48,8 @@ import {
   updateTransaction,
   deleteTransaction,
 } from "../../../services/accountingService";
+import useZustandStore from "../../../stores/zustandStore";
+import { canViewAccountingBalances } from "../../../utils/accountingAccess";
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -103,6 +105,12 @@ const Transactions = () => {
   const [previewTitle, setPreviewTitle] = useState("");
   const [exportData, setExportData] = useState([]);
   const [exportLoading, setExportLoading] = useState(false);
+  const { appSettings, isSuperAdmin, adminInfo } = useZustandStore();
+  const balancesVisible = canViewAccountingBalances({
+    appSettings,
+    isSuperAdmin,
+    adminInfo,
+  });
 
   // ── Load reference data on mount ──────────────────────────
   useEffect(() => {
@@ -132,16 +140,21 @@ const Transactions = () => {
         if (filterDates?.[0]) params.dateFrom = filterDates[0].toISOString();
         if (filterDates?.[1]) params.dateTo = filterDates[1].toISOString();
 
-        const [txnRes, sumRes] = await Promise.all([
-          getTransactions(params),
-          getTransactionSummary({
-            ...(filterMethods.length && {
-              paymentMethod: filterMethods.join(","),
-            }),
-            ...(filterDates?.[0] && { dateFrom: filterDates[0].toISOString() }),
-            ...(filterDates?.[1] && { dateTo: filterDates[1].toISOString() }),
-          }),
-        ]);
+        const txnPromise = getTransactions(params);
+        const sumPromise = balancesVisible
+          ? getTransactionSummary({
+              ...(filterMethods.length && {
+                paymentMethod: filterMethods.join(","),
+              }),
+              ...(filterDates?.[0] && { dateFrom: filterDates[0].toISOString() }),
+              ...(filterDates?.[1] && { dateTo: filterDates[1].toISOString() }),
+            })
+          : Promise.resolve({
+              success: true,
+              data: { totalIncome: 0, totalExpense: 0, netBalance: 0 },
+            });
+
+        const [txnRes, sumRes] = await Promise.all([txnPromise, sumPromise]);
 
         if (txnRes?.success) {
           setTransactions(txnRes.data);
@@ -159,7 +172,7 @@ const Transactions = () => {
         setLoading(false);
       }
     },
-    [filterType, filterHead, filterMethods, filterDates, pagination.pageSize],
+    [filterType, filterHead, filterMethods, filterDates, pagination.pageSize, balancesVisible],
   );
 
   useEffect(() => {
@@ -670,64 +683,46 @@ const Transactions = () => {
       </div>
 
       {/* ── Summary Cards ─────────────────────────────────── */}
-      <Row gutter={16} className="mb-5">
-        <Col xs={24} sm={8}>
-          <div className="bg-white rounded-xl shadow-soft p-5">
-            <Statistic
-              title={
-                <span className="text-muted text-xs font-semibold">
-                  TOTAL INCOME
-                </span>
-              }
-              value={summary.totalIncome}
-              precision={0}
-              prefix={<ArrowUpOutlined className="text-green-500" />}
-              valueStyle={{ color: "#16a34a", fontWeight: 700 }}
-              formatter={(v) => formatCurrency(v)}
-            />
-          </div>
-        </Col>
-        <Col xs={24} sm={8}>
-          <div className="bg-white rounded-xl shadow-soft p-5">
-            <Statistic
-              title={
-                <span className="text-muted text-xs font-semibold">
-                  TOTAL EXPENSE
-                </span>
-              }
-              value={summary.totalExpense}
-              precision={0}
-              prefix={<ArrowDownOutlined className="text-red-500" />}
-              valueStyle={{ color: "#dc2626", fontWeight: 700 }}
-              formatter={(v) => formatCurrency(v)}
-            />
-          </div>
-        </Col>
-        <Col xs={24} sm={8}>
-          <div
-            className="rounded-xl p-5"
-            style={{ backgroundColor: "#01134C" }}
-          >
-            <Statistic
-              title={
-                <span
-                  style={{ color: "#E8FC0A", fontSize: 12, fontWeight: 600 }}
-                >
-                  NET BALANCE
-                </span>
-              }
-              value={summary.netBalance}
-              precision={0}
-              prefix={<DollarOutlined style={{ color: "#fff" }} />}
-              valueStyle={{
-                color: summary.netBalance >= 0 ? "#fff" : "#fca5a5",
-                fontWeight: 700,
-              }}
-              formatter={(v) => formatCurrency(v)}
-            />
-          </div>
-        </Col>
-      </Row>
+      {balancesVisible ? (
+        <Row gutter={16} className="mb-5">
+          <Col xs={24} sm={8}>
+            <div className="bg-white rounded-xl shadow-soft p-5">
+              <Statistic
+                title={<span className="text-muted text-xs font-semibold">TOTAL INCOME</span>}
+                value={summary.totalIncome}
+                precision={0}
+                prefix={<ArrowUpOutlined className="text-green-500" />}
+                valueStyle={{ color: "#16a34a", fontWeight: 700 }}
+                formatter={(v) => formatCurrency(v)}
+              />
+            </div>
+          </Col>
+          <Col xs={24} sm={8}>
+            <div className="bg-white rounded-xl shadow-soft p-5">
+              <Statistic
+                title={<span className="text-muted text-xs font-semibold">TOTAL EXPENSE</span>}
+                value={summary.totalExpense}
+                precision={0}
+                prefix={<ArrowDownOutlined className="text-red-500" />}
+                valueStyle={{ color: "#dc2626", fontWeight: 700 }}
+                formatter={(v) => formatCurrency(v)}
+              />
+            </div>
+          </Col>
+          <Col xs={24} sm={8}>
+            <div className="rounded-xl p-5" style={{ backgroundColor: "#01134C" }}>
+              <Statistic
+                title={<span style={{ color: "#E8FC0A", fontSize: 12, fontWeight: 600 }}>NET BALANCE</span>}
+                value={summary.netBalance}
+                precision={0}
+                prefix={<DollarOutlined style={{ color: "#fff" }} />}
+                valueStyle={{ color: summary.netBalance >= 0 ? "#fff" : "#fca5a5", fontWeight: 700 }}
+                formatter={(v) => formatCurrency(v)}
+              />
+            </div>
+          </Col>
+        </Row>
+      ) : null}
 
       {/* ── Filters ───────────────────────────────────────── */}
       <div className="bg-white rounded-xl shadow-soft p-4 mb-4 flex flex-wrap gap-3 items-center">
@@ -1013,9 +1008,11 @@ const Transactions = () => {
                   {methods.map((m) => (
                     <Option key={m._id} value={m._id}>
                       {m.name}{" "}
-                      <span className="text-muted text-xs">
-                        ({formatCurrency(m.currentBalance)})
-                      </span>
+                      {balancesVisible && m.currentBalance !== null ? (
+                        <span className="text-muted text-xs">
+                          ({formatCurrency(m.currentBalance)})
+                        </span>
+                      ) : null}
                     </Option>
                   ))}
                 </Select>

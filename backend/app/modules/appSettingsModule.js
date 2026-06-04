@@ -20,6 +20,7 @@ const appSettingsSchema = new mongoose.Schema(
     email: { type: String, default: "" },
     website: { type: String, default: "" },
     maintenanceMode: { type: Boolean, default: false },
+    showAccountingBalancesToUsers: { type: Boolean, default: false },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true },

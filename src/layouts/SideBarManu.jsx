@@ -26,6 +26,9 @@ const SideBarManu = () => {
   const superAdminMode =
     isSuperAdmin === true || adminInfo?.userData?.isSuperAdmin === true;
   const currentSection = new URLSearchParams(location.search).get("section") || "roles";
+  const isSuperAdminSectionActive =
+    (location.pathname === "/dashboard/super-admin" && currentSection !== "overview") ||
+    location.pathname === "/dashboard/app-settings";
 
   const navLinks = useMemo(
     () => {
@@ -107,10 +110,10 @@ const SideBarManu = () => {
       icon: MdOutlineTune,
     },
     {
-      key: "app-settings",
-      title: "App Settings",
-      path: "/dashboard/app-settings",
-      icon: MdSettings,
+      key: "finance",
+      title: "Finance Monitor",
+      path: "/dashboard/super-admin?section=finance",
+      icon: MdAccountBalance,
     },
   ];
 
@@ -128,26 +131,51 @@ const SideBarManu = () => {
         <ul className="space-y-[0px]">
           {navLinks.map((link) => {
             const Icon = link.icon;
+            const isSuperAdminDashboardLink =
+              superAdminMode && link.key === "dashboard";
+            const isActive = isSuperAdminDashboardLink
+              ? location.pathname === "/dashboard/super-admin" &&
+                currentSection === "overview"
+              : undefined;
+
             return (
               <li key={link.key}>
-                <NavLink
-                  to={link.path}
-                  end={link.path === "/dashboard"}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border hover:bg-[#0e215fc7] ${
+                {isSuperAdminDashboardLink ? (
+                  <Link
+                    to={link.path}
+                    className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border hover:bg-[#0e215fc7] ${
                       appMinMixView ? "w-[60px]" : "w-full"
                     } ${
                       isActive
                         ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
                         : "bg-transparent border-primary"
-                    }`
-                  }
-                >
-                  <Icon size={22} />
-                  {!appMinMixView && (
-                    <span className="text-[14px] text-accent">{link.label}</span>
-                  )}
-                </NavLink>
+                    }`}
+                  >
+                    <Icon size={22} />
+                    {!appMinMixView && (
+                      <span className="text-[14px] text-accent">{link.label}</span>
+                    )}
+                  </Link>
+                ) : (
+                  <NavLink
+                    to={link.path}
+                    end={link.path === "/dashboard"}
+                    className={({ isActive: navIsActive }) =>
+                      `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border hover:bg-[#0e215fc7] ${
+                        appMinMixView ? "w-[60px]" : "w-full"
+                      } ${
+                        navIsActive
+                          ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
+                          : "bg-transparent border-primary"
+                      }`
+                    }
+                  >
+                    <Icon size={22} />
+                    {!appMinMixView && (
+                      <span className="text-[14px] text-accent">{link.label}</span>
+                    )}
+                  </NavLink>
+                )}
               </li>
             );
           })}
@@ -157,8 +185,7 @@ const SideBarManu = () => {
               <button
                 onClick={() => setSuperAdminOpen((prev) => !prev)}
                 className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 border w-full hover:bg-[#0e215fc7] ${
-                  location.pathname === "/dashboard/super-admin" ||
-                  location.pathname === "/dashboard/app-settings"
+                  isSuperAdminSectionActive
                     ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
                     : "bg-transparent border-primary"
                 }`}
@@ -257,6 +284,22 @@ const SideBarManu = () => {
             </li>
           )}
         </ul>
+
+        {superAdminMode && !appMinMixView && (
+          <div className="mt-auto pt-4">
+            <Link
+              to="/dashboard/app-settings"
+              className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border ${
+                location.pathname === "/dashboard/app-settings"
+                  ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
+                  : "bg-transparent border-primary hover:bg-[#0e215fc7]"
+              }`}
+            >
+              <MdSettings size={18} className="text-accent shrink-0" />
+              <span className="text-[13px] text-accent">App Settings</span>
+            </Link>
+          </div>
+        )}
       </nav>
     </div>
   );

@@ -7,7 +7,61 @@ import FundTransfer from "../modules/fundTransferModule.js";
 import FeeStructure from "../modules/feeStructureModule.js";
 import FeePayment from "../modules/feePaymentModule.js";
 import Enrollment from "../modules/enrollmentModule.js";
+import AppSettings from "../modules/appSettingsModule.js";
 import PDFKit from "pdfkit";
+
+const getAccountingVisibilitySettings = async () => {
+  const settings = await AppSettings.findOne().lean();
+  return settings || { showAccountingBalancesToUsers: false };
+};
+
+const canViewAccountingBalances = async (req) => {
+  if (req.currentUser?.isSuperAdmin || req.user?.isSuperAdmin) {
+    return true;
+  }
+
+  const settings = await getAccountingVisibilitySettings();
+  return settings.showAccountingBalancesToUsers === true;
+};
+
+const denyRestrictedAccountingAccess = (res) =>
+  res.status(403).json({
+    success: false,
+    message:
+      "This financial summary is restricted to the super admin. Ask the super admin to enable accounting balance visibility if needed.",
+  });
+
+const sanitizeTransferBalanceFields = (transfer, balancesVisible) => {
+  const data = transfer?.toObject ? transfer.toObject() : transfer;
+
+  if (!balancesVisible) {
+    if (data?.fromMethod) data.fromMethod.currentBalance = null;
+    if (data?.toMethod) data.toMethod.currentBalance = null;
+  }
+
+  return data;
+};
+
+const getMonthRange = (monthValue) => {
+  const now = new Date();
+  const [yearPart, monthPart] = String(
+    monthValue || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`,
+  )
+    .split("-")
+    .map((value) => Number(value));
+
+  const year = Number.isFinite(yearPart) ? yearPart : now.getFullYear();
+  const monthIndex = Number.isFinite(monthPart) ? Math.max(1, monthPart) - 1 : now.getMonth();
+  const start = new Date(year, monthIndex, 1);
+  const end = new Date(year, monthIndex + 1, 1);
+
+  return {
+    start,
+    end,
+    monthKey: `${year}-${String(monthIndex + 1).padStart(2, "0")}`,
+    label: start.toLocaleString("en-US", { month: "long", year: "numeric" }),
+  };
+};
 
 // ============================================================
 // ACCOUNTING TYPES
@@ -167,13 +221,23 @@ export const deleteHeadOfAccount = async (req, res) => {
 // GET /accounting/payment-methods
 export const getPaymentMethods = async (req, res) => {
   try {
+    const balancesVisible = await canViewAccountingBalances(req);
     const methods = await PaymentMethod.find({ isActive: true }).sort({
       isDefault: -1,
       name: 1,
     });
+    const data = methods.map((method) => {
+      const methodData = method.toObject();
+      if (!balancesVisible) {
+        methodData.openingBalance = null;
+        methodData.currentBalance = null;
+      }
+      return methodData;
+    });
     res.status(200).json({
       success: true,
-      data: methods,
+      data,
+      meta: { balancesVisible },
       message: "Payment methods retrieved successfully",
     });
   } catch (error) {
@@ -321,6 +385,11 @@ const adjustBalance = async (paymentMethodId, amount, direction) => {
 // GET /accounting/monthly-summary — income & expense grouped by month (last N months)
 export const getMonthlySummary = async (req, res) => {
   try {
+    const balancesVisible = await canViewAccountingBalances(req);
+    if (!balancesVisible) {
+      return denyRestrictedAccountingAccess(res);
+    }
+
     const months = parseInt(req.query.months) || 12;
     const now = new Date();
     const from = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1);
@@ -1229,6 +1298,11 @@ export const exportReceiptDues = async (req, res) => {
 // GET /accounting/profit-loss — P&L by head, with transactions list
 export const getProfitLoss = async (req, res) => {
   try {
+    const balancesVisible = await canViewAccountingBalances(req);
+    if (!balancesVisible) {
+      return denyRestrictedAccountingAccess(res);
+    }
+
     const { dateFrom, dateTo } = req.query;
 
     const matchFilter = {};
@@ -1336,6 +1410,11 @@ export const getProfitLoss = async (req, res) => {
 // GET /accounting/transactions/summary
 export const getTransactionSummary = async (req, res) => {
   try {
+    const balancesVisible = await canViewAccountingBalances(req);
+    if (!balancesVisible) {
+      return denyRestrictedAccountingAccess(res);
+    }
+
     const { paymentMethod, dateFrom, dateTo } = req.query;
     const matchFilter = {};
     if (paymentMethod) {
@@ -1646,6 +1725,7 @@ const generateTransferNo = async () => {
 // GET /accounting/fund-transfers
 export const getFundTransfers = async (req, res) => {
   try {
+    const balancesVisible = await canViewAccountingBalances(req);
     const {
       page = 1,
       limit = 20,
@@ -1683,8 +1763,12 @@ export const getFundTransfers = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: transfers,
-      summary: { totalTransferred },
+      data: transfers.map((transfer) =>
+        sanitizeTransferBalanceFields(transfer, balancesVisible),
+      ),
+      summary: {
+        totalTransferred: balancesVisible ? totalTransferred : null,
+      },
       pagination: {
         total,
         page: Number(page),
@@ -1702,6 +1786,7 @@ export const getFundTransfers = async (req, res) => {
 // POST /accounting/fund-transfers
 export const createFundTransfer = async (req, res) => {
   try {
+    const balancesVisible = await canViewAccountingBalances(req);
     const {
       fromMethod: fromId,
       toMethod: toId,
@@ -1739,7 +1824,9 @@ export const createFundTransfer = async (req, res) => {
     if (from.currentBalance < amount) {
       return res.status(400).json({
         success: false,
-        message: `Insufficient balance. ${from.name} has PKR ${from.currentBalance.toLocaleString()}`,
+        message: balancesVisible
+          ? `Insufficient balance. ${from.name} has PKR ${from.currentBalance.toLocaleString()}`
+          : "Insufficient balance in the selected source account",
       });
     }
 
@@ -1767,7 +1854,7 @@ export const createFundTransfer = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      data: transfer,
+      data: sanitizeTransferBalanceFields(transfer, balancesVisible),
       message: "Fund transfer created successfully",
     });
   } catch (error) {
@@ -1820,6 +1907,11 @@ export const deleteFundTransfer = async (req, res) => {
 // Optional query: dateFrom, dateTo
 export const getLedger = async (req, res) => {
   try {
+    const balancesVisible = await canViewAccountingBalances(req);
+    if (!balancesVisible) {
+      return denyRestrictedAccountingAccess(res);
+    }
+
     const { paymentMethodId } = req.params;
     const { dateFrom, dateTo } = req.query;
 
@@ -1928,6 +2020,236 @@ export const getLedger = async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching ledger:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+export const getSuperAdminFinanceMonitor = async (req, res) => {
+  try {
+    const { start, end, monthKey, label } = getMonthRange(req.query.month);
+    const months = Math.min(Math.max(parseInt(req.query.months, 10) || 6, 1), 12);
+
+    const [paymentMethods, incomeType, expenseType] = await Promise.all([
+      PaymentMethod.find({ isActive: true }).lean(),
+      AccountingType.findOne({ name: "Income" }).lean(),
+      AccountingType.findOne({ name: "Expense" }).lean(),
+    ]);
+
+    const [feePayments, transactions, installmentSummary, monthWise, recentPayments] =
+      await Promise.all([
+        FeePayment.aggregate([
+          {
+            $match: {
+              status: { $in: ["Completed", "Pending", "Refunded"] },
+              paymentDate: { $gte: start, $lt: end },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalCollected: { $sum: "$amount" },
+              paymentsCount: { $sum: 1 },
+              installmentPaidAmount: {
+                $sum: {
+                  $cond: [{ $ifNull: ["$installmentNumber", false] }, "$amount", 0],
+                },
+              },
+              installmentPaidCount: {
+                $sum: {
+                  $cond: [{ $ifNull: ["$installmentNumber", false] }, 1, 0],
+                },
+              },
+            },
+          },
+        ]),
+        AccountingTransaction.aggregate([
+          { $match: { paymentDate: { $gte: start, $lt: end } } },
+          {
+            $group: {
+              _id: "$type",
+              total: { $sum: "$amount" },
+              count: { $sum: 1 },
+            },
+          },
+        ]),
+        FeeStructure.aggregate([
+          { $unwind: "$installments" },
+          {
+            $match: {
+              "installments.dueDate": { $gte: start, $lt: end },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalInstallmentAmount: { $sum: "$installments.amount" },
+              totalPaidAmount: { $sum: "$installments.paidAmount" },
+              paidCount: {
+                $sum: {
+                  $cond: [{ $eq: ["$installments.status", "Paid"] }, 1, 0],
+                },
+              },
+              partialCount: {
+                $sum: {
+                  $cond: [{ $eq: ["$installments.status", "Partial"] }, 1, 0],
+                },
+              },
+              pendingCount: {
+                $sum: {
+                  $cond: [{ $eq: ["$installments.status", "Pending"] }, 1, 0],
+                },
+              },
+              overdueCount: {
+                $sum: {
+                  $cond: [{ $eq: ["$installments.status", "Overdue"] }, 1, 0],
+                },
+              },
+            },
+          },
+        ]),
+        Promise.all(
+          Array.from({ length: months }).map(async (_, index) => {
+            const monthStart = new Date(start.getFullYear(), start.getMonth() - (months - 1 - index), 1);
+            const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 1);
+
+            const [monthFeePayments, monthTransactions, monthInstallments] = await Promise.all([
+              FeePayment.aggregate([
+                {
+                  $match: {
+                    status: { $in: ["Completed", "Pending", "Refunded"] },
+                    paymentDate: { $gte: monthStart, $lt: monthEnd },
+                  },
+                },
+                { $group: { _id: null, total: { $sum: "$amount" } } },
+              ]),
+              AccountingTransaction.aggregate([
+                { $match: { paymentDate: { $gte: monthStart, $lt: monthEnd } } },
+                { $group: { _id: "$type", total: { $sum: "$amount" } } },
+              ]),
+              FeeStructure.aggregate([
+                { $unwind: "$installments" },
+                {
+                  $match: {
+                    "installments.dueDate": { $gte: monthStart, $lt: monthEnd },
+                  },
+                },
+                {
+                  $group: {
+                    _id: null,
+                    totalInstallments: { $sum: "$installments.amount" },
+                    pendingAmount: {
+                      $sum: {
+                        $max: [
+                          { $subtract: ["$installments.amount", "$installments.paidAmount"] },
+                          0,
+                        ],
+                      },
+                    },
+                  },
+                },
+              ]),
+            ]);
+
+            const income =
+              monthTransactions.find(
+                (item) => String(item._id) === String(incomeType?._id),
+              )?.total || 0;
+            const expense =
+              monthTransactions.find(
+                (item) => String(item._id) === String(expenseType?._id),
+              )?.total || 0;
+
+            return {
+              month: monthStart.toLocaleString("en-US", {
+                month: "short",
+                year: "numeric",
+              }),
+              feeCollected: monthFeePayments[0]?.total || 0,
+              income,
+              expense,
+              net: income - expense,
+              installmentAmount: monthInstallments[0]?.totalInstallments || 0,
+              pendingInstallmentAmount: monthInstallments[0]?.pendingAmount || 0,
+            };
+          }),
+        ),
+        FeePayment.find({
+          status: { $in: ["Completed", "Pending", "Refunded"] },
+          paymentDate: { $gte: start, $lt: end },
+        })
+          .populate("student", "registrationNo studentName")
+          .populate("course", "courseName courseId")
+          .sort({ paymentDate: -1, createdAt: -1 })
+          .limit(10)
+          .lean(),
+      ]);
+
+    const transactionIncome =
+      transactions.find((item) => String(item._id) === String(incomeType?._id))
+        ?.total || 0;
+    const transactionExpense =
+      transactions.find((item) => String(item._id) === String(expenseType?._id))
+        ?.total || 0;
+
+    const installmentTotals = installmentSummary[0] || {};
+    const totalInstallmentAmount = installmentTotals.totalInstallmentAmount || 0;
+    const totalInstallmentPaidAmount = installmentTotals.totalPaidAmount || 0;
+    const totalPendingInstallmentAmount = Math.max(
+      totalInstallmentAmount - totalInstallmentPaidAmount,
+      0,
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        period: {
+          month: monthKey,
+          label,
+          start,
+          end: new Date(end.getTime() - 1),
+        },
+        settings: {
+          showAccountingBalancesToUsers:
+            (await getAccountingVisibilitySettings()).showAccountingBalancesToUsers === true,
+        },
+        balances: {
+          totalOpeningBalance: paymentMethods.reduce(
+            (sum, item) => sum + Number(item.openingBalance || 0),
+            0,
+          ),
+          totalCurrentBalance: paymentMethods.reduce(
+            (sum, item) => sum + Number(item.currentBalance || 0),
+            0,
+          ),
+          accountsCount: paymentMethods.length,
+        },
+        feePayments: {
+          totalCollected: feePayments[0]?.totalCollected || 0,
+          paymentsCount: feePayments[0]?.paymentsCount || 0,
+          installmentPaidAmount: feePayments[0]?.installmentPaidAmount || 0,
+          installmentPaidCount: feePayments[0]?.installmentPaidCount || 0,
+        },
+        installments: {
+          totalInstallmentAmount,
+          totalInstallmentPaidAmount,
+          totalPendingInstallmentAmount,
+          paidCount: installmentTotals.paidCount || 0,
+          partialCount: installmentTotals.partialCount || 0,
+          pendingCount: installmentTotals.pendingCount || 0,
+          overdueCount: installmentTotals.overdueCount || 0,
+        },
+        accounting: {
+          totalIncome: transactionIncome,
+          totalExpense: transactionExpense,
+          netBalance: transactionIncome - transactionExpense,
+        },
+        monthWise,
+        recentPayments,
+      },
+      message: "Super admin finance monitor retrieved successfully",
+    });
+  } catch (error) {
+    console.error("Error fetching super admin finance monitor:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };

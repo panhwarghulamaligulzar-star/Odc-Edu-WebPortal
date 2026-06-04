@@ -224,6 +224,18 @@ export const getMonthlySummary = async (months = 12) => {
   }
 };
 
+export const getSuperAdminFinanceMonitor = async (params = {}) => {
+  try {
+    const response = await api.get("/accounting/super-admin/monitor", {
+      params,
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Get Super Admin Finance Monitor Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
 // ── Profit & Loss ───────────────────────────────────────────
 
 export const getProfitLoss = async (filters = {}) => {

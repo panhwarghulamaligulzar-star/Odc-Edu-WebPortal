@@ -35,6 +35,8 @@ import {
   getPaymentMethods,
   getLedger,
 } from "../../../services/accountingService";
+import useZustandStore from "../../../stores/zustandStore";
+import { canViewAccountingBalances } from "../../../utils/accountingAccess";
 
 const { Option } = Select;
 const { RangePicker } = DatePicker;
@@ -268,6 +270,12 @@ const Ledger = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 20;
   const [previewVisible, setPreviewVisible] = useState(false);
+  const { appSettings, isSuperAdmin, adminInfo } = useZustandStore();
+  const balancesVisible = canViewAccountingBalances({
+    appSettings,
+    isSuperAdmin,
+    adminInfo,
+  });
 
   // ── Load accounts — auto-select all ──────────────────────
   useEffect(() => {
@@ -284,6 +292,14 @@ const Ledger = () => {
 
   // ── Fetch ledger(s) ────────────────────────────────────────
   const fetchLedger = useCallback(async () => {
+    if (!balancesVisible) {
+      setStatement([]);
+      setSummary(null);
+      setMultiData(null);
+      setFetchError(null);
+      return;
+    }
+
     const targets = selectedMethods.length
       ? selectedMethods
       : methods.map((m) => m._id);
@@ -368,7 +384,7 @@ const Ledger = () => {
       setLoading(false);
       setCurrentPage(1); // reset to page 1 on every new fetch
     }
-  }, [selectedMethods, methods, dateRange]);
+  }, [selectedMethods, methods, dateRange, balancesVisible]);
 
   useEffect(() => {
     fetchLedger();
@@ -499,6 +515,17 @@ const Ledger = () => {
 
   return (
     <div className="p-6">
+      {!balancesVisible ? (
+        <Alert
+          type="warning"
+          showIcon
+          className="mb-4"
+          message="Ledger balances are hidden by the super admin."
+          description="This page is restricted because it exposes running balances and account totals."
+        />
+      ) : null}
+      {!balancesVisible ? null : (
+      <>
       {/* ── Page Header ───────────────────────────────────── */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
@@ -1147,6 +1174,8 @@ const Ledger = () => {
           })}
         />
       </Modal>
+      </>
+      )}
     </div>
   );
 };

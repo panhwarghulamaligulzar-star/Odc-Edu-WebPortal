@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  DatePicker,
   Button,
   Card,
   Checkbox,
@@ -14,6 +15,7 @@ import {
   Table,
   Tag,
   message,
+  Statistic,
 } from "antd";
 import {
   DeleteOutlined,
@@ -23,6 +25,7 @@ import {
   ReloadOutlined,
   SafetyOutlined,
 } from "@ant-design/icons";
+import dayjs from "dayjs";
 import { RBAC_ACTIONS, RBAC_MODULES, createPermissionTemplate } from "../../config/rbac";
 import {
   createRole,
@@ -38,6 +41,7 @@ import {
   updateUserRole,
   updateUserStatus,
 } from "../../services/adminService";
+import { getSuperAdminFinanceMonitor } from "../../services/accountingService";
 
 const moduleLabels = {
   dashboard: "Dashboard",
@@ -49,7 +53,6 @@ const moduleLabels = {
   certifications: "Certifications",
   announcements: "Announcements",
 };
-
 const rolesViewOptions = [
   { key: "roles", label: "Roles Table" },
   { key: "users", label: "Users Table" },
@@ -234,10 +237,13 @@ const SuperAdmin = () => {
   const [savingUserAccess, setSavingUserAccess] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedRole, setSelectedRole] = useState(null);
+  const [financeMonth, setFinanceMonth] = useState(dayjs());
+  const [financeLoading, setFinanceLoading] = useState(false);
+  const [financeData, setFinanceData] = useState(null);
   const [form] = Form.useForm();
   const [userForm] = Form.useForm();
 
-  const currentSection = ["overview", "roles", "permissions"].includes(
+  const currentSection = ["overview", "roles", "permissions", "finance"].includes(
     searchParams.get("section"),
   )
     ? searchParams.get("section")
@@ -271,6 +277,27 @@ const SuperAdmin = () => {
     loadRoles();
     loadUsers();
   }, []);
+
+  const loadFinanceMonitor = async (monthValue = financeMonth) => {
+    setFinanceLoading(true);
+    try {
+      const response = await getSuperAdminFinanceMonitor({
+        month: monthValue.format("YYYY-MM"),
+        months: 6,
+      });
+      setFinanceData(response.data || null);
+    } catch (error) {
+      message.error(error?.message || "Failed to load finance monitor");
+    } finally {
+      setFinanceLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentSection === "finance") {
+      loadFinanceMonitor(financeMonth);
+    }
+  }, [currentSection, financeMonth]);
 
   useEffect(() => {
     const customRoles = roles.filter((role) => !role.isSystem);
@@ -1113,8 +1140,8 @@ const SuperAdmin = () => {
           className="min-w-0 flex-1 rounded-2xl shadow-sm"
           bodyStyle={{ padding: 0 }}
         >
-          <div className="max-h-[72vh] overflow-y-auto">
-            <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-5 py-4 backdrop-blur">
+          <div className="max-h-[72vh] overflow-y-auto rounded-t-2xl">
+            <div className="sticky top-0 z-20 rounded-t-2xl border-b border-slate-200 bg-white/95 px-5 py-4 backdrop-blur">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <div className="text-lg font-ArialBold text-primary">
@@ -1194,11 +1221,211 @@ const SuperAdmin = () => {
     </div>
   );
 
+  const renderFinanceWorkspace = () => {
+    const periodLabel = financeData?.period?.label || "Selected Month";
+    const balances = financeData?.balances || {};
+    const feePayments = financeData?.feePayments || {};
+    const installments = financeData?.installments || {};
+    const accounting = financeData?.accounting || {};
+    const trends = financeData?.monthWise || [];
+    const recentPayments = financeData?.recentPayments || [];
+
+    const summaryCards = [
+      {
+        key: "balance",
+        title: "Total Current Balance",
+        value: balances.totalCurrentBalance || 0,
+        color: "#0f766e",
+      },
+      {
+        key: "collected",
+        title: "Fee Collected",
+        value: feePayments.totalCollected || 0,
+        color: "#1d4ed8",
+      },
+      {
+        key: "pending",
+        title: "Pending Installments",
+        value: installments.totalPendingInstallmentAmount || 0,
+        color: "#b45309",
+      },
+      {
+        key: "net",
+        title: "Net Income / Expense",
+        value: accounting.netBalance || 0,
+        color: accounting.netBalance >= 0 ? "#166534" : "#b91c1c",
+      },
+    ];
+
+    const recentPaymentColumns = [
+      {
+        title: "Receipt",
+        dataIndex: "receiptNo",
+        key: "receiptNo",
+        render: (value) => <span className="font-mono text-xs">{value}</span>,
+      },
+      {
+        title: "Student",
+        key: "student",
+        render: (_, record) => record.student?.studentName || "Unknown",
+      },
+      {
+        title: "Course",
+        key: "course",
+        render: (_, record) => record.course?.courseName || "Unknown",
+      },
+      {
+        title: "Amount",
+        dataIndex: "amount",
+        key: "amount",
+        render: (value) => `Rs ${Number(value || 0).toLocaleString()}`,
+      },
+      {
+        title: "Status",
+        dataIndex: "status",
+        key: "status",
+        render: (value) => <Tag color={value === "Completed" ? "green" : value === "Pending" ? "orange" : "red"}>{value}</Tag>,
+      },
+      {
+        title: "Date",
+        dataIndex: "paymentDate",
+        key: "paymentDate",
+        render: (value) => (value ? new Date(value).toLocaleDateString() : "-"),
+      },
+    ];
+
+    return (
+      <div className="space-y-6">
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 className="m-0 text-lg font-ArialBold text-primary">Finance Monitor</h3>
+              <p className="m-0 mt-1 text-sm text-slate-500">
+                Super admin monthly view of balances, installments, income, and expenses
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <DatePicker
+                picker="month"
+                value={financeMonth}
+                onChange={(value) => value && setFinanceMonth(value)}
+                allowClear={false}
+              />
+              <Button icon={<ReloadOutlined />} onClick={() => loadFinanceMonitor(financeMonth)}>
+                Refresh
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {summaryCards.map((card) => (
+            <div key={card.key} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <Statistic
+                title={<span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{card.title}</span>}
+                value={card.value}
+                precision={0}
+                formatter={(value) => `Rs ${Number(value || 0).toLocaleString()}`}
+                valueStyle={{ color: card.color, fontWeight: 700 }}
+              />
+              <div className="mt-2 text-xs text-slate-400">{periodLabel}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <Card title={`Installment Status - ${periodLabel}`} loading={financeLoading} className="rounded-2xl shadow-sm">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs text-slate-400">Installment Amount</div>
+                <div className="mt-1 text-lg font-ArialBold text-primary">
+                  Rs {Number(installments.totalInstallmentAmount || 0).toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs text-slate-400">Paid Installments</div>
+                <div className="mt-1 text-lg font-ArialBold text-green-700">
+                  Rs {Number(installments.totalInstallmentPaidAmount || 0).toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs text-slate-400">Pending Count</div>
+                <div className="mt-1 text-lg font-ArialBold text-amber-700">
+                  {Number(installments.pendingCount || 0).toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs text-slate-400">Overdue Count</div>
+                <div className="mt-1 text-lg font-ArialBold text-red-700">
+                  {Number(installments.overdueCount || 0).toLocaleString()}
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card title={`Accounting Summary - ${periodLabel}`} loading={financeLoading} className="rounded-2xl shadow-sm">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs text-slate-400">Income</div>
+                <div className="mt-1 text-lg font-ArialBold text-green-700">
+                  Rs {Number(accounting.totalIncome || 0).toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs text-slate-400">Expense</div>
+                <div className="mt-1 text-lg font-ArialBold text-red-700">
+                  Rs {Number(accounting.totalExpense || 0).toLocaleString()}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs text-slate-400">Net</div>
+                <div className="mt-1 text-lg font-ArialBold text-primary">
+                  Rs {Number(accounting.netBalance || 0).toLocaleString()}
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        <Card title="Month-wise Trend" loading={financeLoading} className="rounded-2xl shadow-sm">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {trends.length ? (
+              trends.map((item) => (
+                <div key={item.month} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="text-base font-ArialBold text-primary">{item.month}</div>
+                  <div className="mt-3 space-y-2 text-sm text-slate-600">
+                    <div>Fee Collected: Rs {Number(item.feeCollected || 0).toLocaleString()}</div>
+                    <div>Income: Rs {Number(item.income || 0).toLocaleString()}</div>
+                    <div>Expense: Rs {Number(item.expense || 0).toLocaleString()}</div>
+                    <div>Pending Installments: Rs {Number(item.pendingInstallmentAmount || 0).toLocaleString()}</div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <Empty description="No finance trend data available" />
+            )}
+          </div>
+        </Card>
+
+        <Card title="Recent Payments" loading={financeLoading} className="rounded-2xl shadow-sm">
+          <Table
+            rowKey="_id"
+            columns={recentPaymentColumns}
+            dataSource={recentPayments}
+            pagination={{ pageSize: 6 }}
+            scroll={tableScrollConfig}
+          />
+        </Card>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       {currentSection === "overview" && renderOverviewWorkspace()}
       {currentSection === "roles" && renderRolesWorkspace()}
       {currentSection === "permissions" && renderPermissionsWorkspace()}
+      {currentSection === "finance" && renderFinanceWorkspace()}
 
       <Modal
         title={editingRole ? "Edit Role" : "Create New Role"}
