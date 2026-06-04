@@ -26,7 +26,12 @@ import {
   SafetyOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
-import { RBAC_ACTIONS, RBAC_MODULES, createPermissionTemplate } from "../../config/rbac";
+import {
+  RBAC_ACTIONS,
+  RBAC_MODULES,
+  createPermissionTemplate,
+  normalizePermissionTemplate,
+} from "../../config/rbac";
 import {
   createRole,
   deleteRole,
@@ -58,8 +63,30 @@ const rolesViewOptions = [
   { key: "users", label: "Users Table" },
 ];
 
+const normalizePermissionsState = (permissions = {}) => {
+  const base = createPermissionTemplate();
+
+  if (Array.isArray(permissions)) {
+    permissions.forEach((item) => {
+      if (!item?.module || !base[item.module]) {
+        return;
+      }
+
+      base[item.module] = {
+        ...base[item.module],
+        ...(item.actions || {}),
+      };
+    });
+
+    return base;
+  }
+
+  return normalizePermissionTemplate(permissions);
+};
+
 const buildPermissionsFromRole = (role) => {
   const base = createPermissionTemplate();
+
   role?.permissions?.forEach((item) => {
     base[item.module] = {
       ...base[item.module],
@@ -253,9 +280,12 @@ const SuperAdmin = () => {
     setLoadingRoles(true);
     try {
       const response = await getRoles();
-      setRoles(response.data || []);
+      const nextRoles = response.data || [];
+      setRoles(nextRoles);
+      return nextRoles;
     } catch (error) {
       message.error(error?.message || "Failed to load roles");
+      return [];
     } finally {
       setLoadingRoles(false);
     }
@@ -265,9 +295,12 @@ const SuperAdmin = () => {
     setLoadingUsers(true);
     try {
       const response = await getAllAdminInfo();
-      setUsers(response?.data || []);
+      const nextUsers = response?.data || [];
+      setUsers(nextUsers);
+      return nextUsers;
     } catch (error) {
       message.error(error?.message || "Failed to load users");
+      return [];
     } finally {
       setLoadingUsers(false);
     }
@@ -328,7 +361,7 @@ const SuperAdmin = () => {
 
   useEffect(() => {
     if (selectedUser) {
-      setUserPermissionEditorState(selectedUser.permissions || createPermissionTemplate());
+      setUserPermissionEditorState(normalizePermissionsState(selectedUser.permissions));
     } else {
       setUserPermissionEditorState(createPermissionTemplate());
     }
@@ -464,7 +497,14 @@ const SuperAdmin = () => {
       });
 
       message.success("Permissions updated successfully");
-      await loadRoles();
+      const [, refreshedUsers] = await Promise.all([loadRoles(), loadUsers()]);
+
+      if (selectedUser?.roleId === activePermissionRole._id) {
+        const refreshedUser = refreshedUsers.find((user) => user._id === selectedUser._id);
+        if (refreshedUser) {
+          setSelectedUser(refreshedUser);
+        }
+      }
     } catch (error) {
       message.error(error?.message || "Failed to update permissions");
     } finally {
@@ -477,24 +517,44 @@ const SuperAdmin = () => {
 
     setSavingUserAccess(true);
     try {
+      const normalizedPermissions = normalizePermissionsState(userPermissionEditorState);
+      const linkedRole = roles.find((role) => role._id === selectedUser.roleId);
+
+      if (linkedRole && !linkedRole.isSystem) {
+        await updateRole(linkedRole._id, {
+          name: linkedRole.name,
+          description: linkedRole.description || "",
+          permissions: toRolePayload(normalizedPermissions),
+        });
+      }
+
       await updateAdminInfo(selectedUser._id, {
         name: selectedUser.name,
         email: selectedUser.email,
         roleId: selectedUser.isSuperAdmin ? selectedUser.roleId : selectedUser.roleId || null,
-        permissions: toRolePayload(userPermissionEditorState),
+        permissions: toRolePayload(normalizedPermissions),
       });
 
       message.success("User access updated successfully");
-      await loadUsers();
+      const [, refreshedUsers] = await Promise.all([loadRoles(), loadUsers()]);
+      const refreshedUser = refreshedUsers.find((user) => user._id === selectedUser._id);
 
-      setSelectedUser((prev) =>
-        prev
-          ? {
-              ...prev,
-              permissions: userPermissionEditorState,
-            }
-          : prev,
-      );
+      if (refreshedUser) {
+        setSelectedUser(refreshedUser);
+      } else {
+        setSelectedUser((prev) =>
+          prev
+            ? {
+                ...prev,
+                permissions: normalizedPermissions,
+              }
+            : prev,
+        );
+      }
+
+      if (selectedUser.roleId) {
+        setActivePermissionRoleId(selectedUser.roleId);
+      }
     } catch (error) {
       message.error(error?.message || "Failed to update user access");
     } finally {
@@ -836,15 +896,18 @@ const SuperAdmin = () => {
     {
       title: "Visible Modules",
       key: "preview",
+      width: 280,
       render: (_, record) => {
         const previewModules = getRolePreviewModules(record);
         return (
-          <div className="flex flex-wrap gap-1">
+          <div className="grid grid-cols-2 gap-2 min-w-[240px]">
             {previewModules.length ? (
               previewModules.map((moduleKey) => (
-                <Tag key={moduleKey} color="blue">
-                  {moduleLabels[moduleKey]}
-                </Tag>
+                <div key={moduleKey} className="min-w-0">
+                  <Tag color="blue" className="m-0 inline-flex max-w-full truncate">
+                    {moduleLabels[moduleKey]}
+                  </Tag>
+                </div>
               ))
             ) : (
               <span className="text-slate-400">No modules assigned</span>

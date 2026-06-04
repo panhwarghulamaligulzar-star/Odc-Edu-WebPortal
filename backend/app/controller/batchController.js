@@ -232,11 +232,7 @@ const getBatchesByCourse = async (req, res) => {
 const updateBatch = async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
-
-    // Don't allow updating course or batchCode
-    delete updates.course;
-    delete updates.batchCode;
+    const updates = { ...req.body };
 
     const batch = await BatchSchema.findById(id);
     if (!batch) {
@@ -244,6 +240,46 @@ const updateBatch = async (req, res) => {
         success: false,
         message: "Batch not found",
       });
+    }
+
+    if (updates.course) {
+      const resolvedCourse = await resolveCourse(updates.course);
+      if (!resolvedCourse) {
+        return res.status(404).json({
+          success: false,
+          message: "Course not found",
+        });
+      }
+
+      const conflictingBatch = await BatchSchema.findOne({
+        _id: { $ne: id },
+        course: resolvedCourse._id,
+        batchCode: updates.batchCode || batch.batchCode,
+      });
+
+      if (conflictingBatch) {
+        return res.status(409).json({
+          success: false,
+          message: "This batch code is already used for the selected course",
+        });
+      }
+
+      updates.course = resolvedCourse._id;
+    }
+
+    if (updates.batchCode && updates.batchCode !== batch.batchCode) {
+      const conflictingBatch = await BatchSchema.findOne({
+        _id: { $ne: id },
+        course: updates.course || batch.course,
+        batchCode: updates.batchCode,
+      });
+
+      if (conflictingBatch) {
+        return res.status(409).json({
+          success: false,
+          message: "This batch code is already used for the selected course",
+        });
+      }
     }
 
     const updatedBatch = await BatchSchema.findByIdAndUpdate(id, updates, {

@@ -255,10 +255,8 @@ const EnrollmentManagement = () => {
             <MdAssignment size={22} style={{ color: "#E8FC0A" }} />
           </div>
           <div>
-            <h2 className="text-xl font-bold m-0" style={{ color: "#01134C" }}>
-              Enrollment Management
-            </h2>
-            <p className="text-sm m-0" style={{ color: "#6b7280" }}>
+            <h2 className="module-title">Enrollment Management</h2>
+            <p className="module-subtitle">
               Manage & track student enrollments
             </p>
           </div>

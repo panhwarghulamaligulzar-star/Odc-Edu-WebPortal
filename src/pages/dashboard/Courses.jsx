@@ -3,13 +3,12 @@ import {
   Modal,
   message,
   Form,
-  Card,
-  Tag,
   Tooltip,
   Popconfirm,
   Empty,
-  Avatar,
-  Progress,
+  Tabs,
+  Pagination,
+  Input,
 } from "antd";
 import LoaderSpnar from "../../components/loader/loaderSpnar";
 import React, { useState, useEffect } from "react";
@@ -42,8 +41,11 @@ import {
   updateCourse,
   deleteCourse,
 } from "../../services/feeService";
+import { getBatchesByCourse } from "../../services/batchService";
 import { EditIcon, GraduationCap } from "lucide-react";
 import { useModulePermissions } from "../../hooks/usePermissions";
+
+const COURSES_PER_PAGE = 10;
 
 const Courses = () => {
   const permissions = useModulePermissions("courses");
@@ -56,8 +58,10 @@ const Courses = () => {
   const [form] = Form.useForm();
   const [showTeacherModal, setShowTeacherModal] = useState(false);
   const [selectedTeacher, setSelectedTeacher] = useState(null);
-  const [batchModalVisible, setBatchModalVisible] = useState(false);
-  const [selectedCourse, setSelectedCourse] = useState(null);
+  const [activeTab, setActiveTab] = useState("courses");
+  const [selectedBatchCourseId, setSelectedBatchCourseId] = useState(null);
+  const [courseSearchTerm, setCourseSearchTerm] = useState("");
+  const [coursePage, setCoursePage] = useState(1);
 
   // Fetch courses on mount
   useEffect(() => {
@@ -70,6 +74,7 @@ const Courses = () => {
       const response = await getCourses();
       if (response.success) {
         setCourses(response.data);
+        setCoursePage(1);
       }
     } catch (error) {
       message.error("Failed to fetch courses");
@@ -144,34 +149,45 @@ const Courses = () => {
     setShowTeacherModal(true);
   };
 
-  const openBatchModal = (course) => {
+  const openBatchWorkspace = (course) => {
     if (!permissions.update) {
       message.warning("You do not have permission to manage course batches.");
       return;
     }
-    setSelectedCourse(course);
-    setBatchModalVisible(true);
+    setSelectedBatchCourseId(course._id);
+    setActiveTab("batches");
   };
 
-  const openEditModal = (course) => {
+  const openEditModal = async (course) => {
     if (!permissions.update) {
       message.warning("You do not have permission to edit courses.");
       return;
     }
+    setLoading(true);
     setEditMode(true);
     setEditingCourse(course);
-    form.setFieldsValue({
-      courseId: course.courseId,
-      courseName: course.courseName,
-      courseCategory: course.courseCategory,
-      duration: course.duration,
-      admissionFee: course.admissionFee,
-      courseFee: course.courseFee,
-      certificateFee: course.certificateFee,
-      totalFee: course.totalFee,
-      teacherId: course.teacherId?.map((t) => t._id) || [],
-    });
-    setOpenModal(true);
+    try {
+      const batchResponse = await getBatchesByCourse(course._id);
+      form.setFieldsValue({
+        courseId: course.courseId,
+        courseName: course.courseName,
+        courseCategory: course.courseCategory,
+        duration: course.duration,
+        admissionFee: course.admissionFee,
+        courseFee: course.courseFee,
+        certificateFee: course.certificateFee,
+        totalFee: course.totalFee,
+        teacherId: course.teacherId?.map((t) => t._id) || [],
+        batchIds: batchResponse?.success
+          ? (batchResponse.data || []).map((batch) => batch._id)
+          : [],
+      });
+      setOpenModal(true);
+    } catch (error) {
+      message.error("Failed to load linked batches for this course");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const openCreateModal = () => {
@@ -182,12 +198,474 @@ const Courses = () => {
     setEditMode(false);
     setEditingCourse(null);
     form.resetFields();
+    form.setFieldsValue({ batchIds: [] });
     setOpenModal(true);
+  };
+
+  const courseSummary = React.useMemo(() => {
+    const totalCourses = courses.length;
+    const totalTeachers = courses.reduce(
+      (sum, course) => sum + Number(course.teacherId?.length || 0),
+      0,
+    );
+    const assignedCourses = courses.filter(
+      (course) => Number(course.enrolledStudentsCount || 0) > 0,
+    ).length;
+    const linkedBatches = courses.reduce(
+      (sum, course) => sum + Number(course.linkedBatchesCount || 0),
+      0,
+    );
+    const enrolledStudents = courses.reduce(
+      (sum, course) => sum + Number(course.enrolledStudentsCount || 0),
+      0,
+    );
+    const shortCourses = courses.filter((course) => Number(course.duration || 0) <= 6).length;
+    const longCourses = courses.filter((course) => Number(course.duration || 0) > 6).length;
+    const morningCourses = courses.filter((course) =>
+      (course.linkedBatchesCountByShift?.Morning || 0) > 0,
+    ).length;
+    const eveningCourses = courses.filter((course) =>
+      (course.linkedBatchesCountByShift?.Evening || 0) > 0,
+    ).length;
+
+    return {
+      totalCourses,
+      totalTeachers,
+      assignedCourses,
+      linkedBatches,
+      enrolledStudents,
+      morningCourses,
+      eveningCourses,
+      shortCourses,
+      longCourses,
+    };
+  }, [courses]);
+
+  const filteredCourses = React.useMemo(() => {
+    const keyword = courseSearchTerm.trim().toLowerCase();
+    if (!keyword) {
+      return courses;
+    }
+
+    return courses.filter((course) => {
+      const searchableText = [
+        course.courseName,
+        course.courseId,
+        course.courseCategory,
+        course.duration,
+        course.totalFee,
+        ...(course.teacherId || []).map((teacher) => teacher?.fullName),
+        ...(course.teacherId || []).map((teacher) => teacher?.teacherId),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return searchableText.includes(keyword);
+    });
+  }, [courseSearchTerm, courses]);
+
+  const paginatedCourses = React.useMemo(
+    () =>
+      filteredCourses.slice(
+        (coursePage - 1) * COURSES_PER_PAGE,
+        coursePage * COURSES_PER_PAGE,
+      ),
+    [filteredCourses, coursePage],
+  );
+
+  const renderCoursesGrid = () => {
+    if (fetchingCourses) {
+      return (
+        <div className="flex justify-center items-center h-64">
+          <LoaderSpnar />
+        </div>
+      );
+    }
+
+    if (courses.length === 0) {
+      return (
+        <Empty
+          description="No courses found. Create your first course!"
+          className="mt-20"
+        />
+      );
+    }
+
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-5">
+          <div className="rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Total Courses
+            </div>
+            <div className="mt-1 text-[21px] font-bold leading-none text-primary">
+              {courseSummary.totalCourses}
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              All courses in this module
+            </div>
+          </div>
+
+          <div className="rounded-[16px] border border-slate-200 bg-white px-3 py-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Assigned Courses
+            </div>
+            <div className="mt-1 text-[21px] font-bold leading-none text-primary">
+              {courseSummary.assignedCourses}
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              Courses linked with students
+            </div>
+          </div>
+
+          <div className="rounded-[16px] border border-slate-200 bg-white px-3 py-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Teacher Links
+            </div>
+            <div className="mt-1 text-[21px] font-bold leading-none text-primary">
+              {courseSummary.totalTeachers}
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              {courseSummary.enrolledStudents} enrolled students across {courseSummary.linkedBatches} batches
+            </div>
+          </div>
+
+          <div className="rounded-[16px] border border-slate-200 bg-white px-3 py-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Course Timing
+            </div>
+            <div className="mt-1 text-[16px] font-bold leading-none text-primary">
+              {courseSummary.morningCourses} morning / {courseSummary.eveningCourses} evening
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              Courses with linked morning and evening batches
+            </div>
+          </div>
+
+          <div className="rounded-[16px] border border-slate-200 bg-white px-3 py-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Duration Split
+            </div>
+            <div className="mt-1 text-[16px] font-bold leading-none text-primary">
+              {courseSummary.shortCourses} short / {courseSummary.longCourses} long
+            </div>
+            <div className="mt-1 text-[11px] text-slate-500">
+              6 months or less vs above 6 months
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div className="min-w-0">
+            <div className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8ea2c4]">
+              Course Search
+            </div>
+            <div className="mt-1 text-[11px] leading-5 text-[#64748b]">
+              Search by course name, course ID, teacher, duration, category, fee, or related keywords.
+            </div>
+          </div>
+          <div className="flex w-full flex-col gap-1 md:w-[430px] md:shrink-0">
+            <Input.Search
+              allowClear
+              placeholder="Search courses by name, ID, teacher, duration..."
+              size="small"
+              value={courseSearchTerm}
+              className="w-full"
+              onChange={(e) => {
+                setCourseSearchTerm(e.target.value);
+                setCoursePage(1);
+              }}
+            />
+            <div className="text-right text-[10px] font-medium text-[#64748b]">
+              {filteredCourses.length} course{filteredCourses.length === 1 ? "" : "s"} found
+            </div>
+          </div>
+        </div>
+
+        {filteredCourses.length === 0 ? (
+          <Empty
+            description="No courses match your search"
+            className="mt-10"
+          />
+        ) : (
+          <>
+        <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5">
+        {paginatedCourses.map((course) => (
+          <div
+            key={course._id}
+            className="relative rounded-[18px] border border-[#dbe4f0] bg-white px-2.5 py-2.5 shadow-[0_4px_14px_rgba(15,23,42,0.05)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_7px_16px_rgba(15,23,42,0.08)]"
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              minHeight: "122px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                marginBottom: "6px",
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <div
+                  style={{
+                    fontSize: "9px",
+                    fontWeight: "700",
+                    color: "#8ea2c4",
+                    margin: "0 0 4px 0",
+                    letterSpacing: "0.05em",
+                    textTransform: "uppercase",
+                    fontFamily: "'Inter-sans', Arial, sans-serif",
+                  }}
+                >
+                  Course
+                </div>
+                <h3
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: "700",
+                    color: "#0f172a",
+                    margin: "0 0 3px 0",
+                    lineHeight: "1.2",
+                    fontFamily: "'Inter-sans', Arial, sans-serif",
+                  }}
+                >
+                  {course.courseName}
+                </h3>
+                <div
+                  style={{
+                    fontSize: "9px",
+                    color: "#64748b",
+                    fontWeight: "600",
+                  }}
+                >
+                  {course.courseId}
+                </div>
+              </div>
+              <div
+                style={{
+                  width: "24px",
+                  height: "24px",
+                  borderRadius: "8px",
+                  background: "#eef4ff",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#01134C",
+                  fontSize: "11px",
+                }}
+              >
+                <GraduationCap />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1.5">
+              <div
+                style={{
+                  background: "#f8fbff",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "10px",
+                  padding: "6px 8px",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "8px",
+                    color: "#8ea2c4",
+                    fontWeight: "700",
+                    textTransform: "uppercase",
+                    marginBottom: "2px",
+                  }}
+                >
+                  Duration
+                </div>
+                <div
+                  style={{
+                    fontSize: "10px",
+                    color: "#0f172a",
+                    fontWeight: "700",
+                  }}
+                >
+                  {course.duration === 1 ? "1 Year" : `${course.duration} Months`}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  background: "#f8fbff",
+                  border: "1px solid #e2e8f0",
+                  borderRadius: "10px",
+                  padding: "6px 8px",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "8px",
+                    color: "#8ea2c4",
+                    fontWeight: "700",
+                    textTransform: "uppercase",
+                    marginBottom: "2px",
+                  }}
+                >
+                  Teacher
+                </div>
+                <div
+                  style={{
+                    fontSize: "10px",
+                    color: "#0f172a",
+                    fontWeight: "700",
+                    lineHeight: "1.3",
+                  }}
+                >
+                  {course.teacherId?.length
+                    ? `${course.teacherId[0]?.fullName || "Assigned"}${course.teacherId.length > 1 ? ` +${course.teacherId.length - 1}` : ""}`
+                    : "Not assigned"}
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: "#f8fbff",
+                padding: "6px 8px",
+                borderRadius: "10px",
+                border: "1px solid #e2e8f0",
+                marginTop: "5px",
+                marginBottom: "5px",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: "8px",
+                  color: "#8ea2c4",
+                  marginBottom: "2px",
+                  fontWeight: "700",
+                  textTransform: "uppercase",
+                }}
+              >
+                Total Course Fee
+              </div>
+              <div
+                style={{
+                  fontSize: "10px",
+                  fontWeight: "700",
+                  color: "#01134C",
+                  fontFamily: "'Inter-sans', Arial, sans-serif",
+                }}
+              >
+                {course.totalFee?.toLocaleString()} PKR
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "5px",
+                marginTop: "auto",
+              }}
+            >
+              <div style={{ display: "flex", gap: "5px" }}>
+                {permissions.update && (
+                  <Tooltip title="Open linked batches">
+                    <div
+                      onClick={() => openBatchWorkspace(course)}
+                      style={{
+                        width: "22px",
+                        height: "22px",
+                        borderRadius: "8px",
+                        background: "#eef4ff",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        color: "#3B82F6",
+                        fontSize: "10px",
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      <FaUsers />
+                    </div>
+                  </Tooltip>
+                )}
+                {permissions.update && (
+                  <div
+                    onClick={() => openEditModal(course)}
+                    style={{
+                      width: "22px",
+                      height: "22px",
+                        borderRadius: "8px",
+                        background: "#eef4ff",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        color: "#667eea",
+                      fontSize: "10px",
+                      transition: "all 0.2s ease",
+                    }}
+                  >
+                    <FaEdit />
+                  </div>
+                )}
+                {permissions.delete && (
+                  <Popconfirm
+                    title="Delete Course"
+                    description="Are you sure you want to delete this course?"
+                    onConfirm={() => handleDeleteCourse(course._id)}
+                    okText="Yes"
+                    cancelText="No"
+                    okButtonProps={{ danger: true }}
+                  >
+                    <div
+                      style={{
+                        width: "22px",
+                        height: "22px",
+                        borderRadius: "8px",
+                        background: "#fff1f2",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        color: "#EF4444",
+                        fontSize: "10px",
+                        transition: "all 0.2s ease",
+                      }}
+                    >
+                      <FaTrash />
+                    </div>
+                  </Popconfirm>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {filteredCourses.length > COURSES_PER_PAGE && (
+        <div className="flex justify-end">
+          <Pagination
+            current={coursePage}
+            pageSize={COURSES_PER_PAGE}
+            total={filteredCourses.length}
+            onChange={setCoursePage}
+            showSizeChanger={false}
+          />
+        </div>
+      )}
+      </>
+      )}
+      </div>
+    );
   };
 
   return (
     <>
       <Modal
+        className="courses-module"
         title={
           <h4 className="h4 py-[12px]">
             {editMode ? "Edit Course" : "Create Course"}
@@ -212,11 +690,12 @@ const Courses = () => {
             form={form}
             loading={loading}
             onSubmit={editMode ? handleEditCourse : handleCreateCourse}
+            submitLabel={editMode ? "Update Course" : "Create Course"}
           />
         </div>
       </Modal>
 
-      <div className="flex justify-between items-center mb-6">
+      <div className="courses-module flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
           <div
             className="w-10 h-10 rounded-lg flex items-center justify-center"
@@ -225,15 +704,13 @@ const Courses = () => {
             <MdMenuBook size={22} style={{ color: "#E8FC0A" }} />
           </div>
           <div>
-            <h2 className="text-xl font-bold m-0" style={{ color: "#01134C" }}>
-              Courses
-            </h2>
-            <p className="text-sm m-0" style={{ color: "#6b7280" }}>
-              Browse & manage course catalog
+            <h2 className="module-title">Courses</h2>
+            <p className="module-subtitle">
+              Create courses, create batches, and link batches with courses from one module
             </p>
           </div>
         </div>
-        {permissions.create && (
+        {activeTab === "courses" && permissions.create && (
           <Button
             onClick={openCreateModal}
             type="primary"
@@ -246,368 +723,29 @@ const Courses = () => {
         )}
       </div>
 
-      <div className="p-2 pb-[30px]">
-        {fetchingCourses ? (
-          <div className="flex justify-center items-center h-64">
-            <LoaderSpnar />
-          </div>
-        ) : courses.length === 0 ? (
-          <Empty
-            description="No courses found. Create your first course!"
-            className="mt-20"
-          />
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4 gap-4">
-            {courses.map((course) => {
-              // Debug log to check teacher data
-              console.log(
-                "Course:",
-                course.courseName,
-                "Teachers:",
-                course.teacherId,
-              );
-
-              // Get course initials
-              const getCourseInitials = (name) => {
-                return name
-                  .split(" ")
-                  .map((word) => word[0])
-                  .join("")
-                  .toUpperCase()
-                  .slice(0, 2);
-              };
-
-              // Generate random progress for demo (you can replace with actual data)
-              const progress = Math.floor(Math.random() * 60) + 20;
-
-              return (
-                <div
-                  key={course._id}
-                  className="relative"
-                  style={{
-                    background: "#FFFFFF",
-                    borderRadius: "12px",
-                    overflow: "hidden",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
-                    transition: "all 0.3s ease",
-                    cursor: "pointer",
-                    border: "1px solid #E8EAF0",
-                    display: "flex",
-                    flexDirection: "column",
-                    padding: "16px",
-                    minHeight: "240px",
-                    borderColor: "#D1D6D4",
-                  }}
-                >
-                  {/* Top Section - Title, Action Icon, and Status */}
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      marginBottom: "12px",
-                    }}
-                  >
-                    <div style={{ flex: 1 }}>
-                      <h3
-                        style={{
-                          fontSize: "14px",
-                          fontWeight: "700",
-                          color: "#2D3748",
-                          margin: "0 0 4px 0",
-                          fontFamily: "'Arial-bold', sans-serif",
-                        }}
-                      >
-                        {course.courseName}
-                      </h3>
-                      <div
-                        style={{
-                          fontSize: "11px",
-                          color: "#718096",
-                          fontWeight: "500",
-                        }}
-                      >
-                        {course.courseId}
-                      </div>
-                    </div>
-                    {/* Action Icon Button */}
-                    <div
-                      style={{
-                        width: "32px",
-                        height: "32px",
-                        borderRadius: "6px",
-                        background: "rgba(1, 19, 76, 0.1)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer",
-                        color: "#01134C",
-                        fontSize: "14px",
-                        transition: "all 0.2s ease",
-                      }}
-                    >
-                      <GraduationCap />
-                    </div>
-                  </div>
-
-                  {/* Description Section */}
-                  <p
-                    style={{
-                      fontSize: "12px",
-                      color: "#4A5568",
-                      lineHeight: "1.4",
-                      margin: "0 0 12px 0",
-                      flex: 1,
-                    }}
-                  >
-                    Duration:{" "}
-                    {course.duration === 1
-                      ? "1 Year"
-                      : `${course.duration} Months`}
-                  </p>
-
-                  {/* Info Section with Icon */}
-                  <div
-                    style={{
-                      borderTop: "",
-                      paddingTop: "12px",
-                      marginBottom: "12px",
-                    }}
-                  >
-                    {course.teacherId && course.teacherId.length > 0 && (
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "10px",
-                          marginBottom: "8px",
-                        }}
-                      >
-                        {/* Teacher Profile Picture */}
-                        <div
-                          style={{
-                            width: "36px",
-                            height: "36px",
-                            borderRadius: "50%",
-                            overflow: "hidden",
-                            border: "2px solid #E8EAF0",
-                            flexShrink: 0,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            background: "#F0F2F5",
-                          }}
-                        >
-                          {course.teacherId[0]?.profilePicture ? (
-                            <img
-                              src={course.teacherId[0].profilePicture}
-                              alt={course.teacherId[0].fullName}
-                              style={{
-                                width: "100%",
-                                height: "100%",
-                                objectFit: "cover",
-                              }}
-                              onError={(e) => {
-                                e.target.style.display = "none";
-                                e.target.parentElement.innerHTML = `<div style="width: 100%; height: 100%; background: ${course.teacherId[0].gender === "Male" ? "#667eea" : "#FF5B7D"}; display: flex; align-items: center; justify-content: center; color: white; font-size: 16px; font-weight: bold;">${course.teacherId[0].fullName
-                                  ?.split(" ")
-                                  .slice(0, 2)
-                                  .map((n) => n[0])
-                                  .join("")
-                                  .toUpperCase()}</div>`;
-                              }}
-                            />
-                          ) : (
-                            <div
-                              style={{
-                                width: "100%",
-                                height: "100%",
-                                background:
-                                  course.teacherId[0]?.gender === "Male"
-                                    ? "#667eea"
-                                    : "#FF5B7D",
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                color: "white",
-                                fontSize: "16px",
-                                fontWeight: "bold",
-                              }}
-                            >
-                              {course.teacherId[0]?.fullName
-                                ?.split(" ")
-                                .slice(0, 2)
-                                .map((n) => n[0])
-                                .join("")
-                                .toUpperCase()}
-                            </div>
-                          )}
-                        </div>
-
-                        <div>
-                          <div
-                            style={{
-                              fontSize: "10px",
-                              color: "#718096",
-                              fontWeight: "500",
-                            }}
-                          >
-                            Teacher
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "12px",
-                              color: "#2D3748",
-                              fontWeight: "600",
-                            }}
-                          >
-                            {course.teacherId[0]?.fullName || "N/A"}
-                            {course.teacherId.length > 1 &&
-                              ` +${course.teacherId.length - 1}`}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Fee Section */}
-                  <div
-                    style={{
-                      background: "#F7FAFC",
-                      padding: "10px 12px",
-                      borderRadius: "8px",
-                      border: "1px solid #E8EAF0",
-                      marginBottom: "12px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: "10px",
-                        color: "#718096",
-                        marginBottom: "2px",
-                      }}
-                    >
-                      Total Course Fee
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "16px",
-                        fontWeight: "700",
-                        color: "#01134C",
-                        fontFamily: "'Arial-bold', sans-serif",
-                      }}
-                    >
-                      {course.totalFee?.toLocaleString()} PKR
-                    </div>
-                  </div>
-
-                  {/* Bottom Action Section */}
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: "8px",
-                      marginTop: "auto",
-                    }}
-                  >
-                    {/* Left Icons */}
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      {permissions.update && (
-                        <Tooltip title="Manage Batches">
-                          <div
-                            onClick={() => openBatchModal(course)}
-                            style={{
-                              width: "32px",
-                              height: "32px",
-                              borderRadius: "6px",
-                              background: "rgba(59, 130, 246, 0.15)",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              cursor: "pointer",
-                              color: "#3B82F6",
-                              fontSize: "14px",
-                              transition: "all 0.2s ease",
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background =
-                                "rgba(59, 130, 246, 0.25)";
-                              e.currentTarget.style.transform = "scale(1.05)";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background =
-                                "rgba(59, 130, 246, 0.15)";
-                              e.currentTarget.style.transform = "scale(1)";
-                            }}
-                          >
-                            <FaUsers />
-                          </div>
-                        </Tooltip>
-                      )}
-                      {permissions.update && (
-                        <div
-                          onClick={() => openEditModal(course)}
-                          style={{
-                            width: "32px",
-                            height: "32px",
-                            borderRadius: "6px",
-                            background: "rgba(102, 126, 234, 0.15)",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            cursor: "pointer",
-                            color: "#667eea",
-                            fontSize: "14px",
-                            transition: "all 0.2s ease",
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.background =
-                              "rgba(102, 126, 234, 0.25)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background =
-                              "rgba(102, 126, 234, 0.15)";
-                          }}
-                        >
-                          <FaEdit />
-                        </div>
-                      )}
-                      {permissions.delete && (
-                        <Popconfirm
-                          title="Delete Course"
-                          description="Are you sure you want to delete this course?"
-                          onConfirm={() => handleDeleteCourse(course._id)}
-                          okText="Yes"
-                          cancelText="No"
-                          okButtonProps={{ danger: true }}
-                        >
-                          <div
-                            style={{
-                              width: "32px",
-                              height: "32px",
-                              borderRadius: "6px",
-                              background: "#FEF2F2",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              cursor: "pointer",
-                              color: "#EF4444",
-                              fontSize: "14px",
-                              transition: "all 0.2s ease",
-                            }}
-                          >
-                            <FaTrash />
-                          </div>
-                        </Popconfirm>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+      <div className="courses-module p-2 pb-[30px] theme-font">
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            {
+              key: "courses",
+              label: <span style={{ fontFamily: "'Inter-sans', Arial, sans-serif" }}>Course Management</span>,
+              children: renderCoursesGrid(),
+            },
+            {
+              key: "batches",
+              label: <span style={{ fontFamily: "'Inter-sans', Arial, sans-serif" }}>Batch Management</span>,
+              children: (
+                <BatchManagement
+                  courseId={selectedBatchCourseId}
+                  courses={courses}
+                  onCourseChange={setSelectedBatchCourseId}
+                />
+              ),
+            },
+          ]}
+        />
       </div>
 
       {/* Teacher Details Modal */}
@@ -977,25 +1115,6 @@ const Courses = () => {
         )}
       </Modal>
 
-      {/* Batch Management Modal */}
-      <Modal
-        open={batchModalVisible}
-        onCancel={() => {
-          setBatchModalVisible(false);
-          setSelectedCourse(null);
-        }}
-        footer={null}
-        width={1320}
-        centered
-        destroyOnClose
-      >
-        {selectedCourse && (
-          <BatchManagement
-            courseId={selectedCourse._id || selectedCourse.id || selectedCourse.courseId}
-            courseName={selectedCourse.courseName}
-          />
-        )}
-      </Modal>
     </>
   );
 };

@@ -1,5 +1,7 @@
 import CourseSchema from "../modules/courseModule.js";
 import TeacherSchema from "../modules/teacherModule.js";
+import BatchSchema from "../modules/batchModule.js";
+import EnrollmentSchema from "../modules/enrollmentModule.js";
 import mongoose from "mongoose";
 
 const toNum = (value) => Math.max(0, Number(value) || 0);
@@ -12,6 +14,118 @@ const calculateTotalFee = (data = {}) =>
   toNum(data.registrationFee) +
   toNum(data.practicalFee) +
   toNum(data.otherFee);
+
+const normalizeBatchIds = (batchIds) =>
+  Array.isArray(batchIds)
+    ? batchIds.filter((id) => typeof id === "string" && id.trim())
+    : [];
+
+const assignBatchesToCourse = async (courseId, batchIds = []) => {
+  const normalizedBatchIds = normalizeBatchIds(batchIds);
+  if (normalizedBatchIds.length === 0) {
+    return [];
+  }
+
+  const batches = await BatchSchema.find({
+    _id: { $in: normalizedBatchIds },
+  });
+
+  if (batches.length !== normalizedBatchIds.length) {
+    throw new Error("One or more selected batches are invalid");
+  }
+
+  await BatchSchema.updateMany(
+    { _id: { $in: normalizedBatchIds } },
+    { $set: { course: courseId } },
+  );
+
+  return normalizedBatchIds;
+};
+
+const attachCourseUsageStats = async (courses = []) => {
+  if (!courses.length) {
+    return [];
+  }
+
+  const courseIds = courses.map((course) => course._id);
+
+  const [enrollmentCounts, batchCounts] = await Promise.all([
+    EnrollmentSchema.aggregate([
+      { $match: { course: { $in: courseIds } } },
+      {
+        $lookup: {
+          from: "admissions",
+          localField: "student",
+          foreignField: "_id",
+          as: "studentRecord",
+        },
+      },
+      { $unwind: "$studentRecord" },
+      {
+        $match: {
+          "studentRecord.isActive": true,
+          status: { $in: ["Active", "Completed", "On Hold"] },
+        },
+      },
+      {
+        $group: {
+          _id: "$course",
+          enrolledStudentsCount: { $sum: 1 },
+        },
+      },
+    ]),
+    BatchSchema.aggregate([
+      { $match: { course: { $in: courseIds } } },
+      {
+        $group: {
+          _id: "$course",
+          linkedBatchesCount: { $sum: 1 },
+          morningBatchesCount: {
+            $sum: {
+              $cond: [{ $eq: ["$shift", "Morning"] }, 1, 0],
+            },
+          },
+          eveningBatchesCount: {
+            $sum: {
+              $cond: [{ $eq: ["$shift", "Evening"] }, 1, 0],
+            },
+          },
+        },
+      },
+    ]),
+  ]);
+
+  const enrollmentMap = new Map(
+    enrollmentCounts.map((item) => [String(item._id), item.enrolledStudentsCount]),
+  );
+  const batchMap = new Map(
+    batchCounts.map((item) => [String(item._id), item.linkedBatchesCount]),
+  );
+  const batchShiftMap = new Map(
+    batchCounts.map((item) => [
+      String(item._id),
+      {
+        Morning: item.morningBatchesCount || 0,
+        Evening: item.eveningBatchesCount || 0,
+      },
+    ]),
+  );
+
+  return courses.map((course) => {
+    const plainCourse =
+      typeof course.toObject === "function" ? course.toObject() : course;
+
+    return {
+      ...plainCourse,
+      enrolledStudentsCount: enrollmentMap.get(String(plainCourse._id)) || 0,
+      linkedBatchesCount: batchMap.get(String(plainCourse._id)) || 0,
+      linkedBatchesCountByShift: batchShiftMap.get(String(plainCourse._id)) || {
+        Morning: 0,
+        Evening: 0,
+      },
+    };
+  });
+};
 
 const createCourse = async (req, res) => {
   try {
@@ -31,6 +145,7 @@ const createCourse = async (req, res) => {
       includePracticalFeeInInstallments,
       includeOtherFeeInInstallments,
       teacherId, // Array of teacher IDs
+      batchIds,
     } = req.body;
 
     // Check required fields
@@ -113,6 +228,8 @@ const createCourse = async (req, res) => {
     //  Save to database
     const savedCourse = await newCourse.save();
 
+    await assignBatchesToCourse(savedCourse._id, batchIds);
+
     // Update teachers' courseId array
     if (teacherId && teacherId.length > 0) {
       await TeacherSchema.updateMany(
@@ -152,10 +269,12 @@ export const getAllCourses = async (req, res) => {
       )
       .sort({ createdAt: -1 });
 
+    const coursesWithStats = await attachCourseUsageStats(courses);
+
     res.status(200).json({
       success: true,
       message: "Courses retrieved successfully",
-      data: courses,
+      data: coursesWithStats,
     });
   } catch (error) {
     res.status(500).json({
@@ -183,10 +302,12 @@ export const getCourseById = async (req, res) => {
       });
     }
 
+    const [courseWithStats] = await attachCourseUsageStats([course]);
+
     res.status(200).json({
       success: true,
       message: "Course retrieved successfully",
-      data: course,
+      data: courseWithStats,
     });
   } catch (error) {
     res.status(500).json({
@@ -218,6 +339,7 @@ export const updateCourse = async (req, res) => {
       includePracticalFeeInInstallments,
       includeOtherFeeInInstallments,
       teacherId,
+      batchIds,
     } = req.body;
 
     const course = await CourseSchema.findById(id);
@@ -298,6 +420,8 @@ export const updateCourse = async (req, res) => {
       new: true,
       runValidators: true,
     }).populate("teacherId", "teacherId fullName contactNo");
+
+    await assignBatchesToCourse(updatedCourse._id, batchIds);
 
     // Add course to new teachers
     if (teacherId && teacherId.length > 0) {

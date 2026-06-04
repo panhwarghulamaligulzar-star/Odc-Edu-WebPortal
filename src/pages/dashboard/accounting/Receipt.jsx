@@ -472,8 +472,8 @@ export default function Receipt() {
             <MdReceiptLong size={22} color="#ffffff" />
           </div>
           <div>
-            <h2 className="text-xl font-bold m-0 text-[#0f172a]">Receipts</h2>
-            <p className="m-0 text-sm text-gray-500">
+            <h2 className="module-title">Receipts</h2>
+            <p className="module-subtitle">
               Track student dues, collections, and remaining balances
             </p>
           </div>

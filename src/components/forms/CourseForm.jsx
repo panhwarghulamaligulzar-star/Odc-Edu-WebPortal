@@ -9,13 +9,21 @@ import {
   Col,
 } from "antd";
 import { getAllTeachers } from "../../services/feeService";
+import { getAllBatches } from "../../services/batchService";
 import LoaderSpnar from "../loader/loaderSpnar";
 
-const CourseForm = ({ form, loading = false, onSubmit }) => {
+const CourseForm = ({
+  form,
+  loading = false,
+  onSubmit,
+  submitLabel = "Save Course",
+}) => {
   const [localForm] = Form.useForm();
   const usedForm = form || localForm; // use passed form if exists
   const [teachers, setTeachers] = useState([]);
   const [loadingTeachers, setLoadingTeachers] = useState(false);
+  const [batches, setBatches] = useState([]);
+  const [loadingBatches, setLoadingBatches] = useState(false);
 
   // Fetch teachers
   useEffect(() => {
@@ -33,6 +41,24 @@ const CourseForm = ({ form, loading = false, onSubmit }) => {
       }
     };
     fetchTeachers();
+  }, []);
+
+  useEffect(() => {
+    const fetchBatches = async () => {
+      setLoadingBatches(true);
+      try {
+        const response = await getAllBatches();
+        if (response.success) {
+          setBatches(response.data || []);
+        }
+      } catch (error) {
+        console.error("Error fetching batches:", error);
+      } finally {
+        setLoadingBatches(false);
+      }
+    };
+
+    fetchBatches();
   }, []);
 
   // Watch fees and course name
@@ -140,6 +166,47 @@ const CourseForm = ({ form, loading = false, onSubmit }) => {
             </Select.Option>
           ))}
         </Select>
+      </Form.Item>
+
+      <Form.Item
+        name="batchIds"
+        label={
+          <span className="text-md !text-[14px] opacity-40">
+            Assign Batches (Multiple)
+          </span>
+        }
+        extra="Select existing batches to quickly link them with this course."
+      >
+        <Select
+          mode="multiple"
+          size="large"
+          placeholder="Select one or more batches"
+          className="form-input !font-ArialLight"
+          loading={loadingBatches}
+          showSearch
+          optionFilterProp="label"
+          options={batches.map((batch) => ({
+            value: batch._id,
+            label: `${batch.batchName} (${batch.batchCode})`,
+            searchLabel: `${batch.batchName} ${batch.batchCode} ${batch.course?.courseName || ""}`,
+          }))}
+          filterOption={(input, option) =>
+            (option?.searchLabel || option?.label || "")
+              .toLowerCase()
+              .includes(input.toLowerCase())
+          }
+          optionRender={(option) => {
+            const batch = batches.find((item) => item._id === option.value);
+            return (
+              <div className="flex flex-col">
+                <span>{option.label}</span>
+                <span className="text-[11px] text-slate-400">
+                  Current course: {batch?.course?.courseName || "Not linked"}
+                </span>
+              </div>
+            );
+          }}
+        />
       </Form.Item>
 
       <Row gutter={16}>
@@ -265,7 +332,7 @@ const CourseForm = ({ form, loading = false, onSubmit }) => {
           className="btn-xl hover:!bg-blue-900"
           disabled={loading}
         >
-          {loading ? <LoaderSpnar /> : <span>Update course</span>}
+          {loading ? <LoaderSpnar /> : <span>{submitLabel}</span>}
         </Button>
       </div>
     </Form>

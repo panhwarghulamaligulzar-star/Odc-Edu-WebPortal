@@ -118,8 +118,8 @@ const AppSettingsPage = () => {
           <Palette size={22} />
         </div>
         <div>
-          <h2 className="text-xl font-bold text-primary m-0">App Settings</h2>
-          <p className="text-sm text-gray-500 m-0">
+          <h2 className="module-title">App Settings</h2>
+          <p className="module-subtitle">
             Control branding, report styling, and school metadata
           </p>
         </div>

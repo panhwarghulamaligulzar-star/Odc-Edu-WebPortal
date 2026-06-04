@@ -92,15 +92,6 @@ export const buildPermissionsMap = (user, resolvedRole = null) => {
     };
   });
 
-  if (user?.permissions?.length) {
-    normalizePermissions(user.permissions).forEach((permission) => {
-      permissionMap[permission.module] = {
-        ...permissionMap[permission.module],
-        ...(permission.actions || {}),
-      };
-    });
-  }
-
   return permissionMap;
 };
 

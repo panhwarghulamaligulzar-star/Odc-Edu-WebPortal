@@ -1699,8 +1699,8 @@ export default function Attendance() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-bold text-primary">Attendance</h2>
-          <p className="text-gray-500 text-sm">Mark and review student & teacher attendance per batch</p>
+          <h2 className="module-title">Attendance</h2>
+          <p className="module-subtitle">Mark and review student & teacher attendance per batch</p>
         </div>
       </div>
 

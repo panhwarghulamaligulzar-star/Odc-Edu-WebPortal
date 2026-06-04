@@ -9,6 +9,8 @@ import {
   Popconfirm,
   Empty,
   Avatar,
+  Pagination,
+  Input,
 } from "antd";
 import LoaderSpnar from "../../components/loader/loaderSpnar";
 import React, { useState, useEffect } from "react";
@@ -42,6 +44,8 @@ import odcLogo from "../../assets/images/logos/new logo.png";
 import { MdPeopleAlt } from "react-icons/md";
 import { useModulePermissions } from "../../hooks/usePermissions";
 
+const TEACHERS_PER_PAGE = 10;
+
 const Teachers = () => {
   const permissions = useModulePermissions("employees");
   const [openModal, setOpenModal] = useState(false);
@@ -54,6 +58,8 @@ const Teachers = () => {
   const [form] = Form.useForm();
   const [showIdCard, setShowIdCard] = useState(false);
   const [selectedTeacher, setSelectedTeacher] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState("");
 
   // Fetch teachers and courses on mount
   useEffect(() => {
@@ -65,16 +71,9 @@ const Teachers = () => {
     setFetchingTeachers(true);
     try {
       const response = await getAllTeachers();
-      console.log("=== FETCHED TEACHERS ===");
-      console.log("Response:", response);
       if (response.success) {
-        console.log("Teachers Data:", response.data);
-        // Log first teacher to see structure
-        if (response.data.length > 0) {
-          console.log("First Teacher Fields:", Object.keys(response.data[0]));
-          console.log("First Teacher Data:", response.data[0]);
-        }
         setTeachers(response.data);
+        setCurrentPage(1);
       }
     } catch (error) {
       message.error("Failed to fetch teachers");
@@ -159,7 +158,6 @@ const Teachers = () => {
       message.warning("You do not have permission to edit employees.");
       return;
     }
-    console.log("Editing teacher:", teacher);
     setEditMode(true);
     setEditingTeacher(teacher);
     form.setFieldsValue({
@@ -203,7 +201,6 @@ const Teachers = () => {
       message.warning("You do not have permission to print employee cards.");
       return;
     }
-    console.log("Selected teacher for detail view:", teacher);
     setSelectedTeacher(teacher);
     setShowIdCard(true);
   };
@@ -218,6 +215,44 @@ const Teachers = () => {
       .toUpperCase()
       .slice(0, 2);
   };
+
+  const formatExperience = (value) => {
+    if (!value) return "N/A";
+    if (value === "Fresh") return "Fresh";
+    if (value === "1") return "1 Year";
+    return `${value} Years`;
+  };
+
+  const filteredTeachers = teachers.filter((teacher) => {
+    const keyword = searchTerm.trim().toLowerCase();
+    if (!keyword) return true;
+
+    const searchableText = [
+      teacher.fullName,
+      teacher.teacherId,
+      teacher.designation,
+      teacher.contactNo,
+      teacher.highestQualification,
+      teacher.degreeTitle,
+      teacher.majorSubject,
+      teacher.teachingExperience,
+      teacher.gender,
+      teacher.email,
+      teacher.address,
+      ...(teacher.computerSkills || []),
+      ...(teacher.courseId || []).map((course) => course?.courseName),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    return searchableText.includes(keyword);
+  });
+
+  const paginatedTeachers = filteredTeachers.slice(
+    (currentPage - 1) * TEACHERS_PER_PAGE,
+    currentPage * TEACHERS_PER_PAGE,
+  );
 
   return (
     <>
@@ -261,10 +296,8 @@ const Teachers = () => {
             <MdPeopleAlt size={22} style={{ color: "#E8FC0A" }} />
           </div>
           <div>
-            <h2 className="text-xl font-bold m-0" style={{ color: "#01134C" }}>
-              Employees
-            </h2>
-            <p className="text-sm m-0" style={{ color: "#6b7280" }}>
+            <h2 className="module-title">Employees</h2>
+            <p className="module-subtitle">
               Manage staff & teacher profiles
             </p>
           </div>
@@ -293,346 +326,121 @@ const Teachers = () => {
             className="mt-20"
           />
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-[20px]">
-            {teachers.map((teacher) => {
-              // Debug log for each teacher
-              console.log("Rendering teacher card:", {
-                id: teacher.teacherId,
-                designation: teacher.designation,
-                highestQualification: teacher.highestQualification,
-                majorSubject: teacher.majorSubject,
-                teachingExperience: teacher.teachingExperience,
-                allFields: teacher,
-              });
+          <div className="space-y-4">
+            <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+              <div className="min-w-0">
+                <div className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8ea2c4]">
+                  Employee Search
+                </div>
+                <div className="mt-1 text-[11px] leading-5 text-[#64748b]">
+                  Search by name, ID, designation, subject, phone, qualification, or related keywords.
+                </div>
+              </div>
+              <div className="flex w-full flex-col gap-1 md:w-[430px] md:shrink-0">
+                <Input.Search
+                  allowClear
+                  placeholder="Search employees by name, designation, subject, phone..."
+                  size="small"
+                  value={searchTerm}
+                  className="w-full"
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                />
+                <div className="text-right text-[10px] font-medium text-[#64748b]">
+                  {filteredTeachers.length} employee{filteredTeachers.length === 1 ? "" : "s"} found
+                </div>
+              </div>
+            </div>
 
+            {filteredTeachers.length === 0 ? (
+              <Empty
+                description="No employees match your search"
+                className="mt-10"
+              />
+            ) : (
+              <>
+            <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5">
+            {paginatedTeachers.map((teacher) => {
               return (
                 <div
                   key={teacher._id}
-                  style={{
-                    width: "100%",
-                    height: "260px",
-                    borderRadius: "16px",
-                    overflow: "hidden",
-                    boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-                    background:
-                      "linear-gradient(135deg, #E8F0FE 0%, #F0F4FF 100%)",
-                    position: "relative",
-                    transition: "all 0.3s ease",
-                    cursor: "pointer",
-                  }}
-                  className="hover:shadow-2xl hover:scale-[1.02] overflow-hidden"
+                  className="flex h-full min-h-[124px] flex-col rounded-[18px] border border-[#dbe4f0] bg-white p-2.5 shadow-[0_4px_14px_rgba(15,23,42,0.05)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_7px_16px_rgba(15,23,42,0.08)]"
                 >
-                  {/* Main Content Area */}
                   <div
-                    style={{
-                      display: "flex",
-                      height: "calc(100% - 52px)",
-                    }}
+                    className="mb-2 flex items-start justify-between gap-2 rounded-[14px] border border-[#e6edf7] bg-[#f8fbff] px-2.5 py-2"
                   >
-                    {/* Left Section - Info */}
                     <div
-                      style={{
-                        flex: 1,
-                        background: "white",
-                        padding: "16px",
-                        display: "flex",
-                        flexDirection: "column",
-                        justifyContent: "space-between",
-                        backgroundColor: "#ffffff",
-                      }}
+                      className="flex min-w-0 flex-1 flex-col"
+                      style={{ fontFamily: "'Inter-sans', Arial, sans-serif" }}
                     >
-                      {/* Teacher Information */}
-                      <div style={{ flex: 1, overflowY: "auto" }}>
-                        {/* ID Row */}
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "space-between",
-                            gap: "8px",
-                            marginBottom: "10px",
-                            backgroundColor: "#ffffff",
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "#666",
-                              fontWeight: "800",
-                              minWidth: "80px",
-                              fontFamily: "Inter, sans-serif",
-                            }}
-                          >
-                            ID:
-                          </span>
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "#333",
-                              fontWeight: "400",
-                              flex: 1,
-                              textAlign: "right",
-                            }}
-                          >
-                            {teacher.teacherId || "N/A"}
-                          </span>
-                        </div>
-
-                        {/* Designation Row */}
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            marginBottom: "10px",
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "#666",
-                              fontWeight: "800",
-                              minWidth: "80px",
-                              fontFamily: "Inter, sans-serif",
-                            }}
-                          >
-                            Designation:
-                          </span>
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "#333",
-                              fontWeight: "400",
-                              flex: 1,
-                              textAlign: "right",
-                            }}
-                          >
-                            {teacher.designation || "N/A"}
-                          </span>
-                        </div>
-
-                        {/* Phone Row */}
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            marginBottom: "10px",
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "#666",
-                              fontWeight: "800",
-                              minWidth: "80px",
-                              fontFamily: "Inter, sans-serif",
-                            }}
-                          >
-                            Phone:
-                          </span>
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "#333",
-                              fontWeight: "400",
-                              flex: 1,
-                              textAlign: "right",
-                            }}
-                          >
-                            {teacher.contactNo || "N/A"}
-                          </span>
-                        </div>
-
-                        {/* Qualification Row */}
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            marginBottom: "10px",
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "#666",
-                              fontWeight: "800",
-                              minWidth: "80px",
-                              fontFamily: "Inter, sans-serif",
-                            }}
-                          >
-                            Education:
-                          </span>
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "#333",
-                              fontWeight: "400",
-                              flex: 1,
-                              textAlign: "right",
-                            }}
-                          >
-                            {teacher.highestQualification || "N/A"}
-                          </span>
-                        </div>
-
-                        {/* Major Subject Row */}
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            marginBottom: "10px",
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "#666",
-                              fontWeight: "800",
-                              minWidth: "80px",
-                              fontFamily: "Inter, sans-serif",
-                            }}
-                          >
-                            Subject:
-                          </span>
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "#333",
-                              fontWeight: "400",
-                              flex: 1,
-                              textAlign: "right",
-                            }}
-                          >
-                            {teacher.majorSubject || "N/A"}
-                          </span>
-                        </div>
-
-                        {/* Experience Row */}
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "flex-start",
-                            gap: "8px",
-                            marginBottom: "10px",
-                          }}
-                        >
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "#666",
-                              fontWeight: "800",
-                              minWidth: "80px",
-                              fontFamily: "Inter, sans-serif",
-                            }}
-                          >
-                            Experience:
-                          </span>
-                          <span
-                            style={{
-                              fontSize: "11px",
-                              color: "#333",
-                              fontWeight: "400",
-                              flex: 1,
-                              lineHeight: "1.4",
-                              textAlign: "right",
-                            }}
-                          >
-                            {teacher.teachingExperience
-                              ? `${teacher.teachingExperience}${teacher.teachingExperience === "Fresh" ? "" : teacher.teachingExperience === "1" ? " Year" : " Years"}`
-                              : "N/A"}
-                          </span>
-                        </div>
+                      <span className="text-[9px] font-semibold uppercase tracking-[0.08em] text-[#8ea2c4]">
+                        Employee
+                      </span>
+                      <h3 className="mt-1 line-clamp-2 text-[12px] font-bold leading-[1.15] text-[#0f172a]">
+                        {teacher.fullName || "Unknown"}
+                      </h3>
+                      <span className="mt-0.5 text-[9px] font-medium text-[#64748b]">
+                        {teacher.teacherId || "No ID"}
+                      </span>
+                      <div className="mt-1 inline-flex w-fit rounded-full bg-white px-2 py-0.5 text-[8px] font-semibold text-[#01134C] shadow-sm">
+                        {teacher.designation || "Employee"}
                       </div>
                     </div>
 
-                    {/* Right Section - Photo */}
                     <div
-                      style={{
-                        width: "160px",
-                        background: "#ffff",
-                        padding: "16px",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        gap: "12px",
-                      }}
+                      className="flex h-[50px] w-[50px] shrink-0 items-center justify-center overflow-hidden rounded-full border-[3px] border-white bg-[#01134C] text-[18px] font-bold uppercase text-white shadow-[0_8px_18px_rgba(1,19,76,0.16)]"
+                      style={{ fontFamily: "'Inter-sans', Arial, sans-serif" }}
                     >
-                      {/* Photo Container */}
-                      <div
-                        style={{
-                          width: "130px",
-                          height: "130px",
-                          overflow: "hidden",
-                          border: "4px solid rgba(255,255,255,0.5)",
-                          borderRadius: "16px",
-                          background: "#ffff",
-                          position: "relative",
-                        }}
-                      >
-                        {teacher.profilePicture ? (
-                          <img
-                            src={teacher.profilePicture}
-                            alt={teacher.fullName}
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              objectFit: "cover",
-                            }}
-                          />
-                        ) : (
-                          <div
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              background: "#01134C",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              fontSize: "40px",
-                              color: "white",
-                              fontWeight: "bold",
-                              textTransform: "uppercase",
-                            }}
-                          >
-                            {getInitials(teacher.fullName)}
-                          </div>
-                        )}
-                      </div>
+                      {teacher.profilePicture ? (
+                        <img
+                          src={teacher.profilePicture}
+                          alt={teacher.fullName}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        getInitials(teacher.fullName)
+                      )}
+                    </div>
+                  </div>
 
-                      {/* Teacher Name */}
-                      <div style={{ textAlign: "center" }}>
-                        <h4
-                          style={{
-                            margin: 0,
-                            fontSize: "15px",
-                            fontWeight: "bold",
-                            letterSpacing: "0.3px",
-                            color: "#01134C",
-                            lineHeight: "1.3",
-                          }}
-                        >
-                          {teacher.fullName || "Unknown"}
-                        </h4>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <div className="rounded-[10px] border border-[#e6edf7] bg-white px-2 py-1.5">
+                      <div className="text-[8px] font-semibold uppercase tracking-[0.08em] text-[#8ea2c4]">
+                        Phone
+                      </div>
+                      <div className="mt-0.5 truncate text-[10px] font-semibold text-[#0f172a]">
+                        {teacher.contactNo || "N/A"}
+                      </div>
+                    </div>
+                    <div className="rounded-[10px] border border-[#e6edf7] bg-white px-2 py-1.5">
+                      <div className="text-[8px] font-semibold uppercase tracking-[0.08em] text-[#8ea2c4]">
+                        Education
+                      </div>
+                      <div className="mt-0.5 truncate text-[10px] font-semibold text-[#0f172a]">
+                        {teacher.highestQualification || "N/A"}
+                      </div>
+                    </div>
+                    <div className="rounded-[10px] border border-[#e6edf7] bg-white px-2 py-1.5">
+                      <div className="text-[8px] font-semibold uppercase tracking-[0.08em] text-[#8ea2c4]">
+                        Subject
+                      </div>
+                      <div className="mt-0.5 truncate text-[10px] font-semibold text-[#0f172a]">
+                        {teacher.majorSubject || "N/A"}
+                      </div>
+                    </div>
+                    <div className="rounded-[10px] border border-[#e6edf7] bg-white px-2 py-1.5">
+                      <div className="text-[8px] font-semibold uppercase tracking-[0.08em] text-[#8ea2c4]">
+                        Experience
+                      </div>
+                      <div className="mt-0.5 truncate text-[10px] font-semibold text-[#0f172a]">
+                        {formatExperience(teacher.teachingExperience)}
                       </div>
                     </div>
                   </div>
 
-                  {/* Action Buttons - Positioned at bottom */}
-                  <div
-                    style={{
-                      position: "absolute",
-                      bottom: "10px",
-                      left: "16px",
-                      right: "20px",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      gap: "6px",
-                      zIndex: 10,
-                    }}
-                  >
+                  <div className="mt-2 flex items-center justify-between rounded-[10px] border border-[#e6edf7] bg-[#f8fbff] px-2 py-1.5">
                     {permissions.print && (
                       <Button
                         type="primary"
@@ -642,15 +450,16 @@ const Teachers = () => {
                           background: "#01134C",
                           borderColor: "#01134C",
                           fontWeight: "600",
-                          fontSize: "11px",
-                          height: "30px",
+                          fontSize: "9px",
+                          height: "24px",
+                          borderRadius: "8px",
                         }}
                         size="small"
                       >
                         View Details
                       </Button>
                     )}
-                    <div className="flex gap-[10px]">
+                    <div className="flex gap-[5px]">
                       {permissions.update && (
                         <Button
                           icon={<FaEdit />}
@@ -660,11 +469,12 @@ const Teachers = () => {
                             background: "white",
                             borderColor: "#01134C",
                             color: "#01134C",
-                            height: "30px",
-                            width: "30px",
+                            height: "22px",
+                            width: "22px",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
+                            borderRadius: "8px",
                           }}
                         />
                       )}
@@ -681,7 +491,7 @@ const Teachers = () => {
                             danger
                             icon={<FaTrash />}
                             size="small"
-                            style={{ width: "30px", height: "30px" }}
+                            style={{ width: "22px", height: "22px", borderRadius: "8px" }}
                           />
                         </Popconfirm>
                       )}
@@ -690,6 +500,21 @@ const Teachers = () => {
                 </div>
               );
             })}
+            </div>
+
+            {filteredTeachers.length > TEACHERS_PER_PAGE && (
+              <div className="flex justify-end">
+                <Pagination
+                  current={currentPage}
+                  pageSize={TEACHERS_PER_PAGE}
+                  total={filteredTeachers.length}
+                  onChange={setCurrentPage}
+                  showSizeChanger={false}
+                />
+              </div>
+            )}
+              </>
+            )}
           </div>
         )}
       </div>

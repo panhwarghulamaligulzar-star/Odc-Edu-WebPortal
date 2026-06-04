@@ -9,7 +9,7 @@
 
 @font-face {
   font-family: "Arial-light";
-  src: url("./assets/fonts/Golos_Text/GolosText-VariableFont_wght.ttf") format("truetype");
+  src: url("./assets/fonts/Inter/Inter-VariableFont_opsz,wght.ttf") format("truetype");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -23,13 +23,30 @@
   font-display: swap;
 }
 
+@font-face {
+  font-family: "Inter-sans";
+  src: url("./assets/fonts/Inter/Inter-VariableFont_opsz,wght.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   body {
-    font-family: "Arial-light", Arial, sans-serif;
+    font-family: "Inter-sans", Arial, sans-serif;
+  }
+
+  .ant-tabs,
+  .ant-tabs-tab,
+  .ant-tabs-tab-btn,
+  .ant-tabs-nav,
+  .ant-tabs-nav-wrap,
+  .ant-tabs-nav-list {
+    font-family: "Inter-sans", Arial, sans-serif !important;
   }
 }
 
@@ -111,8 +128,103 @@ h3 {
 .form-input-disabled::placeholder {
   @apply font-Arial text-[16px] font-[400] text-[#000000B2] leading-[24px] opacity-[8px];
 }
- .password-input input::placeholder {
+  .password-input input::placeholder {
   @apply font-Arial text-[16px] font-[400] text-[#D7D7D7] leading-[24px] opacity-[8px];                       /* optional */
 }
+
+  .theme-font {
+    font-family: "Inter-sans", Arial, sans-serif !important;
+  }
+
+  .theme-font :where(
+    .ant-tabs,
+    .ant-tabs-tab,
+    .ant-card,
+    .ant-card-head,
+    .ant-card-body,
+    .ant-table,
+    .ant-table-wrapper,
+    .ant-table-cell,
+    .ant-select,
+    .ant-select-selector,
+    .ant-select-selection-item,
+    .ant-select-item,
+    .ant-btn,
+    .ant-tag,
+    .ant-pagination,
+    .ant-pagination-item,
+    .ant-input,
+    .ant-input-number,
+    .ant-input-number-input,
+    .ant-picker,
+    .ant-modal-content,
+    .ant-modal-title,
+    .ant-form,
+    .ant-form-item-label > label
+  ) {
+    font-family: "Inter-sans", Arial, sans-serif !important;
+  }
+
+  .module-title {
+    @apply m-0 text-xl font-bold;
+    color: #01134c;
+    font-family: "Inter-sans", Arial, sans-serif !important;
+  }
+
+  .module-subtitle {
+    @apply m-0 text-sm;
+    color: #6b7280;
+    font-family: "Inter-sans", Arial, sans-serif !important;
+  }
+
+  .courses-module {
+    font-family: "Inter-sans", Arial, sans-serif !important;
+  }
+
+  .courses-module :where(
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    p,
+    span,
+    div,
+    button,
+    label,
+    input,
+    textarea,
+    th,
+    td,
+    .module-title,
+    .module-subtitle,
+    .ant-tabs,
+    .ant-tabs-tab,
+    .ant-card,
+    .ant-card-head,
+    .ant-card-body,
+    .ant-table,
+    .ant-table-wrapper,
+    .ant-table-cell,
+    .ant-select,
+    .ant-select-selector,
+    .ant-select-selection-item,
+    .ant-select-item,
+    .ant-btn,
+    .ant-tag,
+    .ant-pagination,
+    .ant-pagination-item,
+    .ant-input,
+    .ant-input-number,
+    .ant-input-number-input,
+    .ant-picker,
+    .ant-modal-content,
+    .ant-modal-title,
+    .ant-form,
+    .ant-form-item-label > label
+  ) {
+    font-family: "Inter-sans", Arial, sans-serif !important;
+  }
   
 }
