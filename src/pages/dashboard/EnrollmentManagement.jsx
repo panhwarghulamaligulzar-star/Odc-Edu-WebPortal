@@ -1,75 +1,36 @@
-import React, { useState, useEffect } from "react";
-import {
-  Card,
-  Table,
-  Button,
-  Modal,
-  Form,
-  Select,
-  DatePicker,
-  Input,
-  Space,
-  message,
-  Tag,
-  Row,
-  Col,
-} from "antd";
-import { PlusOutlined, UserAddOutlined } from "@ant-design/icons";
-import {
-  createEnrollment,
-  getAllEnrollments,
-  updateEnrollmentStatus,
-  getCourses,
-} from "../../services/feeService";
-import api from "../../api/axiosInstance";
-import dayjs from "dayjs";
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Avatar, Button, Card, Space, Statistic, Table, Tag, Tooltip, message } from "antd";
+import { EyeOutlined, ReloadOutlined } from "@ant-design/icons";
+import { FaFemale, FaMale } from "react-icons/fa";
 import { MdAssignment } from "react-icons/md";
-import EnrollmentFeeConfiguration from "../../components/forms/EnrollmentFeeConfiguration";
-import { formatDateOnlyForApi } from "../../utils/date";
+import dayjs from "dayjs";
+import api from "../../api/axiosInstance";
+import { getAllEnrollments } from "../../services/feeService";
+
+const normalizeStatus = (status) => String(status || "").trim().toLowerCase();
 
 const EnrollmentManagement = () => {
+  const navigate = useNavigate();
   const [enrollments, setEnrollments] = useState([]);
   const [students, setStudents] = useState([]);
-  const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [form] = Form.useForm();
-  const [processing, setProcessing] = useState(false);
-  const [statusFilter, setStatusFilter] = useState(null);
-  const [installmentPlan, setInstallmentPlan] = useState(null);
-  const [pagination, setPagination] = useState({
-    current: 1,
-    pageSize: 10,
-    total: 0,
-  });
 
   useEffect(() => {
     fetchEnrollments();
     fetchStudents();
-    fetchCourses();
-  }, [pagination.current, statusFilter]);
+  }, []);
 
   const fetchEnrollments = async () => {
     setLoading(true);
     try {
-      const filters = {
-        page: pagination.current,
-        limit: pagination.pageSize,
-      };
-
-      if (statusFilter) filters.status = statusFilter;
-
-      const response = await getAllEnrollments(filters);
+      const response = await getAllEnrollments({ limit: 10000 });
       if (response.success) {
-        setEnrollments(response.data);
-        setPagination({
-          ...pagination,
-          total: response.pagination.total,
-        });
+        setEnrollments(Array.isArray(response.data) ? response.data : []);
       }
     } catch (error) {
-      message.error("Failed to fetch enrollments");
       console.error(error);
+      message.error("Failed to fetch enrollments");
     } finally {
       setLoading(false);
     }
@@ -77,169 +38,184 @@ const EnrollmentManagement = () => {
 
   const fetchStudents = async () => {
     try {
-      const response = await api.get("/student/admissions");
+      const response = await api.get("/student/admissions", { params: { limit: 10000 } });
       if (response.data.success) {
-        setStudents(response.data.data);
+        setStudents(Array.isArray(response.data.data) ? response.data.data : []);
       }
     } catch (error) {
-      console.error("Failed to fetch students:", error);
+      console.error(error);
+      message.error("Failed to fetch student records");
     }
   };
 
-  const fetchCourses = async () => {
-    try {
-      const response = await getCourses();
-      if (response.success) {
-        setCourses(response.data);
-      }
-    } catch (error) {
-      console.error("Failed to fetch courses:", error);
-    }
-  };
+  const activeEnrolledStudents = useMemo(() => {
+    const grouped = new Map();
+    const studentMap = new Map(
+      students.map((student) => [String(student._id), student]),
+    );
 
-  const handleInstallmentPlanCalculated = (plan) => {
-    setInstallmentPlan(plan);
-  };
-
-  const handleCreateEnrollment = async (values) => {
-    setProcessing(true);
-    try {
-      if (!installmentPlan) {
-        message.error("Please wait for fee calculation to complete");
-        setProcessing(false);
+    enrollments.forEach((enrollment) => {
+      const status = normalizeStatus(enrollment.status);
+      if (status !== "active" && status !== "enrolled") {
         return;
       }
 
-      const enrollmentData = {
-        studentId: values.studentId,
-        courseId: values.courseId,
-        enrollmentDate:
-          formatDateOnlyForApi(values.enrollmentDate) ||
-          formatDateOnlyForApi(dayjs()),
-        notes: values.notes,
-        // Fee structure data
-        admissionFee: values.admissionFee || 0,
-        courseFee: values.courseFee || 0,
-        certificateFee: values.certificateFee || 0,
-        totalFee: installmentPlan.summary.totalFee,
-        discount: installmentPlan.summary.totalDiscount,
-        discountType: values.discountType || "none",
-        discountOnAdmission: values.discountOnAdmission || 0,
-        discountOnCourseFee: values.discountOnCourseFee || 0,
-        numberOfInstallments: installmentPlan.installments.length,
-        installments: installmentPlan.installments,
+      const student = enrollment.student;
+      const studentId = student?._id || student;
+      if (!studentId || !student) return;
+      const fullStudent = studentMap.get(String(studentId)) || student;
+
+      if (!grouped.has(studentId)) {
+        grouped.set(studentId, {
+          _id: studentId,
+          student: fullStudent,
+          activeEnrollments: [],
+          firstEnrollmentDate: enrollment.enrollmentDate || null,
+          latestEnrollmentDate: enrollment.enrollmentDate || null,
+          pendingInstallments: 0,
+        });
+      }
+
+      const record = grouped.get(studentId);
+      record.student = {
+        ...record.student,
+        ...fullStudent,
       };
+      record.activeEnrollments.push(enrollment);
 
-      const response = await createEnrollment(enrollmentData);
-      if (response.success) {
-        message.success("Student enrolled successfully with fee structure!");
-        setModalVisible(false);
-        form.resetFields();
-        setInstallmentPlan(null);
-        fetchEnrollments();
+      if (
+        !record.firstEnrollmentDate ||
+        dayjs(enrollment.enrollmentDate).isBefore(dayjs(record.firstEnrollmentDate))
+      ) {
+        record.firstEnrollmentDate = enrollment.enrollmentDate;
       }
-    } catch (error) {
-      message.error(error.message || "Failed to enroll student");
-    } finally {
-      setProcessing(false);
-    }
-  };
 
-  const handleUpdateStatus = async (enrollmentId, status) => {
-    try {
-      const response = await updateEnrollmentStatus(enrollmentId, { status });
-      if (response.success) {
-        message.success("Enrollment status updated successfully!");
-        fetchEnrollments();
+      if (
+        !record.latestEnrollmentDate ||
+        dayjs(enrollment.enrollmentDate).isAfter(dayjs(record.latestEnrollmentDate))
+      ) {
+        record.latestEnrollmentDate = enrollment.enrollmentDate;
       }
-    } catch (error) {
-      message.error(error.message || "Failed to update status");
-    }
-  };
+
+      const installments = enrollment.feeStructure?.installments || [];
+      record.pendingInstallments += installments.filter(
+        (item) => normalizeStatus(item.status) !== "paid",
+      ).length;
+    });
+
+    return Array.from(grouped.values()).sort((a, b) =>
+      dayjs(b.latestEnrollmentDate).valueOf() - dayjs(a.latestEnrollmentDate).valueOf(),
+    );
+  }, [enrollments, students]);
+
+  const stats = useMemo(() => {
+    const pendingInstallments = activeEnrolledStudents.reduce(
+      (sum, student) => sum + student.pendingInstallments,
+      0,
+    );
+    const activeCourses = activeEnrolledStudents.reduce(
+      (sum, student) => sum + student.activeEnrollments.length,
+      0,
+    );
+    const newThisMonth = activeEnrolledStudents.filter((student) =>
+      student.firstEnrollmentDate
+        ? dayjs(student.firstEnrollmentDate).isSame(dayjs(), "month")
+        : false,
+    ).length;
+
+    return {
+      students: activeEnrolledStudents.length,
+      activeCourses,
+      pendingInstallments,
+      newThisMonth,
+    };
+  }, [activeEnrolledStudents]);
 
   const columns = [
     {
       title: "Student",
-      dataIndex: ["student", "studentName"],
-      key: "studentName",
-      render: (text, record) => (
-        <div>
-          <div className="font-semibold">{text}</div>
-          <div className="text-xs opacity-50">
-            {record.student?.registrationNo}
+      key: "student",
+      render: (_, record) => (
+        <div className="flex items-center gap-3">
+          <Avatar
+            size={44}
+            src={record.student?.profilePicture || null}
+            icon={
+              normalizeStatus(record.student?.gender) === "male" ? (
+                <FaMale />
+              ) : (
+                <FaFemale />
+              )
+            }
+            style={{
+              background:
+                normalizeStatus(record.student?.gender) === "male"
+                  ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+                  : "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
+            }}
+          />
+          <div>
+            <div className="font-semibold text-[#1F2937]">
+              {record.student?.studentName || "N/A"}
+            </div>
+            <div className="text-xs text-[#64748B]">
+              {record.student?.registrationNo || "No registration no"}
+            </div>
           </div>
         </div>
       ),
     },
     {
       title: "Gender",
-      dataIndex: ["student", "gender"],
       key: "gender",
-      render: (gender) => (
-        <Tag color={gender === "Male" ? "blue" : "pink"}>{gender}</Tag>
+      render: (_, record) => (
+        <Tag color={normalizeStatus(record.student?.gender) === "male" ? "blue" : "pink"}>
+          {record.student?.gender || "N/A"}
+        </Tag>
       ),
     },
     {
       title: "Mobile",
-      dataIndex: ["student", "mobileNumber"],
       key: "mobile",
+      render: (_, record) => record.student?.mobileNumber || "N/A",
     },
     {
-      title: "Course",
-      dataIndex: ["course", "courseName"],
-      key: "courseName",
-      render: (text, record) => (
+      title: "Father",
+      key: "father",
+      render: (_, record) => (
         <div>
-          <div className="font-semibold">{text}</div>
-          <div className="text-xs opacity-50">{record.course?.courseId}</div>
-          <div className="text-xs opacity-50">
-            {record.course?.shift} • {record.course?.duration} Months
+          <div>{record.student?.fatherName || "N/A"}</div>
+          <div className="text-xs text-[#64748B]">
+            {record.student?.fatherContact || "N/A"}
           </div>
         </div>
       ),
     },
     {
       title: "Enrollment Date",
-      dataIndex: "enrollmentDate",
       key: "enrollmentDate",
-      render: (date) => new Date(date).toLocaleDateString(),
-      sorter: (a, b) => new Date(a.enrollmentDate) - new Date(b.enrollmentDate),
+      render: (_, record) =>
+        record.firstEnrollmentDate
+          ? dayjs(record.firstEnrollmentDate).format("DD/MM/YYYY")
+          : "N/A",
     },
     {
       title: "Status",
-      dataIndex: "status",
       key: "status",
-      render: (status) => {
-        const colors = {
-          Active: "green",
-          Completed: "blue",
-          Dropped: "red",
-          "On Hold": "orange",
-        };
-        return <Tag color={colors[status]}>{status}</Tag>;
-      },
-      filters: [
-        { text: "Active", value: "Active" },
-        { text: "Completed", value: "Completed" },
-        { text: "Dropped", value: "Dropped" },
-        { text: "On Hold", value: "On Hold" },
-      ],
+      render: () => <Tag color="green">Active Enrolled</Tag>,
     },
     {
       title: "Actions",
       key: "actions",
       render: (_, record) => (
-        <Select
-          size="small"
-          value={record.status}
-          onChange={(value) => handleUpdateStatus(record._id, value)}
-          style={{ width: 120 }}
-        >
-          <Select.Option value="Active">Active</Select.Option>
-          <Select.Option value="Completed">Completed</Select.Option>
-          <Select.Option value="Dropped">Dropped</Select.Option>
-          <Select.Option value="On Hold">On Hold</Select.Option>
-        </Select>
+        <Tooltip title="View full student details, course, installments, and payments">
+          <Button
+            type="primary"
+            icon={<EyeOutlined />}
+            onClick={() => navigate(`/dashboard/students/${record._id}`)}
+            style={{ background: "#01134C", borderColor: "#01134C" }}
+          />
+        </Tooltip>
       ),
     },
   ];
@@ -255,144 +231,51 @@ const EnrollmentManagement = () => {
             <MdAssignment size={22} style={{ color: "#E8FC0A" }} />
           </div>
           <div>
-            <h2 className="module-title">Enrollment Management</h2>
+            <h2 className="module-title">Enroll Students</h2>
             <p className="module-subtitle">
-              Manage & track student enrollments
+              Show only active enrolled students. Course, installment, fee, and
+              payment details are available on the detailed student page.
             </p>
           </div>
         </div>
-        <Button
-          type="primary"
-          icon={<UserAddOutlined />}
-          size="large"
-          onClick={() => setModalVisible(true)}
-        >
-          Enroll Student
+        <Button icon={<ReloadOutlined />} onClick={fetchEnrollments}>
+          Refresh
         </Button>
       </div>
 
-      <Card>
-        <div className="mb-4">
-          <Space>
-            <span className="opacity-60">Filter by Status:</span>
-            <Select
-              style={{ width: 150 }}
-              placeholder="All Statuses"
-              value={statusFilter}
-              onChange={setStatusFilter}
-              allowClear
-            >
-              <Select.Option value="Active">Active</Select.Option>
-              <Select.Option value="Completed">Completed</Select.Option>
-              <Select.Option value="Dropped">Dropped</Select.Option>
-              <Select.Option value="On Hold">On Hold</Select.Option>
-            </Select>
-          </Space>
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
+        <Card>
+          <Statistic title="Active Enrolled Students" value={stats.students} />
+        </Card>
+        <Card>
+          <Statistic title="Active Courses" value={stats.activeCourses} />
+        </Card>
+        <Card>
+          <Statistic title="Pending Installments" value={stats.pendingInstallments} />
+        </Card>
+        <Card>
+          <Statistic title="New This Month" value={stats.newThisMonth} />
+        </Card>
+      </div>
 
+      <Card>
+        <div className="mb-4 text-sm text-[#64748B]">
+          This table only shows students who already have an active assigned course.
+          Use the eye button to open the full student details page.
+        </div>
         <Table
           columns={columns}
-          dataSource={enrollments}
+          dataSource={activeEnrolledStudents}
           rowKey="_id"
           loading={loading}
           pagination={{
-            ...pagination,
             showSizeChanger: true,
-            showTotal: (total) => `Total ${total} enrollments`,
+            showTotal: (total, range) =>
+              `${range[0]}-${range[1]} of ${total} active enrolled students`,
           }}
-          onChange={(newPagination) => setPagination(newPagination)}
+          locale={{ emptyText: "No active enrolled students found" }}
         />
       </Card>
-
-      {/* Enrollment Modal */}
-      <Modal
-        title="Enroll Student in Course"
-        open={modalVisible}
-        onCancel={() => {
-          setModalVisible(false);
-          form.resetFields();
-          setInstallmentPlan(null);
-        }}
-        footer={null}
-        width={1100}
-      >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleCreateEnrollment}
-          disabled={processing}
-          initialValues={{
-            enrollmentDate: dayjs(),
-            discountType: "none",
-            discountOnAdmission: 0,
-            discountOnCourseFee: 0,
-          }}
-        >
-          <Form.Item
-            name="studentId"
-            label={
-              <span className="text-md !text-[14px] opacity-40">
-                Select Student
-              </span>
-            }
-            rules={[{ required: true, message: "Please select a student" }]}
-          >
-            <Select
-              size="large"
-              placeholder="Search and select student"
-              className="form-input !font-ArialLight"
-              showSearch
-              filterOption={(input, option) =>
-                option.children.toLowerCase().includes(input.toLowerCase())
-              }
-            >
-              {students.map((student) => (
-                <Select.Option key={student._id} value={student._id}>
-                  {student.studentName}
-                  {student.registrationNo ? ` (${student.registrationNo})` : ""}
-                </Select.Option>
-              ))}
-            </Select>
-          </Form.Item>
-
-          {/* Fee Configuration Section */}
-          <EnrollmentFeeConfiguration
-            form={form}
-            courses={courses}
-            onInstallmentPlanCalculated={handleInstallmentPlanCalculated}
-          />
-
-          <Form.Item
-            name="notes"
-            label={
-              <span className="text-md !text-[14px] opacity-40">
-                Notes (Optional)
-              </span>
-            }
-          >
-            <Input.TextArea
-              size="large"
-              className="form-input !font-ArialLight"
-              placeholder="Any additional notes about this enrollment"
-              rows={3}
-            />
-          </Form.Item>
-
-          <div className="mt-4 pt-4 border-t">
-            <Button
-              type="primary"
-              htmlType="submit"
-              block
-              size="large"
-              className="btn-xl hover:!bg-blue-900"
-              loading={processing}
-              disabled={!installmentPlan}
-            >
-              <span>Enroll Student with Fee Structure</span>
-            </Button>
-          </div>
-        </Form>
-      </Modal>
     </div>
   );
 };

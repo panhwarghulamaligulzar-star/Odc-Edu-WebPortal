@@ -2,6 +2,7 @@ import {
   BrowserRouter as Router,
   Routes,
   Route,
+  Navigate,
 } from "react-router-dom";
 
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -29,6 +30,7 @@ import CareerOpportunities from "../pages/website/pages/CareerOpportunities";
 import Courses from "../pages/dashboard/Courses";
 import Teachers from "../pages/dashboard/Teachers";
 import Students from "../pages/dashboard/Students";
+import EnrollmentManagement from "../pages/dashboard/EnrollmentManagement";
 import StudentProfile from "../pages/dashboard/StudentProfile";
 import HeadsOfAccount from "../pages/dashboard/accounting/HeadsOfAccount";
 import Banks from "../pages/dashboard/accounting/Banks";
@@ -81,7 +83,26 @@ function AppRouter() {
           <Route index element={<ProtectedRoute moduleKey="dashboard"><Dashboard /></ProtectedRoute>} />
           <Route path="courses" element={<ProtectedRoute moduleKey="courses"><Courses /></ProtectedRoute>} />
           <Route path="teachers" element={<ProtectedRoute moduleKey="employees"><Teachers /></ProtectedRoute>} />
-          <Route path="students" element={<ProtectedRoute moduleKey="students"><Students /></ProtectedRoute>} />
+          <Route
+            path="students"
+            element={<Navigate to="/dashboard/students/all" replace />}
+          />
+          <Route
+            path="students/all"
+            element={
+              <ProtectedRoute moduleKey="students">
+                <Students />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="students/enrolled"
+            element={
+              <ProtectedRoute moduleKey="students">
+                <EnrollmentManagement />
+              </ProtectedRoute>
+            }
+          />
           <Route path="students/:id" element={<ProtectedRoute moduleKey="students"><StudentProfile /></ProtectedRoute>} />
           <Route path="certification" element={<ProtectedRoute moduleKey="certifications"><Certification /></ProtectedRoute>} />
           <Route path="settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />

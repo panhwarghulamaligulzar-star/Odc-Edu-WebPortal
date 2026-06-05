@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import LoaderSpnar from "../../components/loader/loaderSpnar";
 import {
   Card,
   Button,
+  Collapse,
   Modal,
   Form,
   Input,
@@ -23,6 +24,7 @@ import {
   Divider,
   Row,
   Col,
+  Tabs,
 } from "antd";
 import CourseAssignmentForm from "../../components/forms/CourseAssignmentForm";
 import StudentFeeProfile from "./StudentFeeProfile";
@@ -61,6 +63,53 @@ import { useModulePermissions } from "../../hooks/usePermissions";
 
 const { TextArea } = Input;
 const { Option } = Select;
+
+const STUDENT_CATEGORY_LABELS = {
+  all: "All Categories",
+  active: "Active Students",
+  dropout: "Dropout Students",
+  passout: "Passout Students",
+};
+
+const normalizeEnrollmentStatus = (status) =>
+  String(status || "")
+    .trim()
+    .toLowerCase();
+
+const hasActiveEnrollment = (student) =>
+  (Array.isArray(student?.enrollments) ? student.enrollments : []).some(
+    (enrollment) => normalizeEnrollmentStatus(enrollment.status) === "active",
+  );
+
+const hasDroppedEnrollment = (student) =>
+  (Array.isArray(student?.enrollments) ? student.enrollments : []).some(
+    (enrollment) => normalizeEnrollmentStatus(enrollment.status) === "dropped",
+  );
+
+const hasCompletedEnrollment = (student) =>
+  (Array.isArray(student?.enrollments) ? student.enrollments : []).some(
+    (enrollment) => normalizeEnrollmentStatus(enrollment.status) === "completed",
+  );
+
+const matchesStudentCategory = (student, category) => {
+  if (category === "all") {
+    return true;
+  }
+
+  if (category === "active") {
+    return hasActiveEnrollment(student);
+  }
+
+  if (category === "dropout") {
+    return !hasActiveEnrollment(student) && hasDroppedEnrollment(student);
+  }
+
+  if (category === "passout") {
+    return !hasActiveEnrollment(student) && hasCompletedEnrollment(student);
+  }
+
+  return true;
+};
 
 // ─── PDF DESIGN CONSTANTS ──────────────────────────────────────────────────────
 const PDF_COLORS = {
@@ -227,9 +276,9 @@ const Students = () => {
   const navigate = useNavigate();
   const permissions = useModulePermissions("students");
   const [students, setStudents] = useState([]);
-  const [filteredStudents, setFilteredStudents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
+  const [studentFormTab, setStudentFormTab] = useState("photo");
   const [courseModalVisible, setCourseModalVisible] = useState(false);
   const [feeProfileModalVisible, setFeeProfileModalVisible] = useState(false);
   const [partialPaymentModalVisible, setPartialPaymentModalVisible] =
@@ -255,34 +304,34 @@ const Students = () => {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const fileInputRef = useRef(null);
-  const [tablePageSize, setTablePageSize] = useState(10);
+  const [tablePageSize, setTablePageSize] = useState(3);
   const [tablePage, setTablePage] = useState(1);
-  const [selectedStudentIds, setSelectedStudentIds] = useState([]);
-  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [activeStudentCategory, setActiveStudentCategory] = useState("all");
+
+  const studentCategoryStats = useMemo(
+    () => ({
+      all: students.length,
+      active: students.filter((student) => matchesStudentCategory(student, "active"))
+        .length,
+      dropout: students.filter((student) => matchesStudentCategory(student, "dropout"))
+        .length,
+      passout: students.filter((student) => matchesStudentCategory(student, "passout"))
+        .length,
+    }),
+    [students],
+  );
 
   useEffect(() => {
     fetchStudents();
     fetchCourses();
   }, []);
 
-  useEffect(() => {
-    filterStudents();
-  }, [
-    students,
-    searchText,
-    genderFilter,
-    enrollmentFilter,
-    courseFilter,
-    batchFilter,
-  ]);
-
-  useEffect(() => {
-    const filteredIds = new Set(filteredStudents.map((student) => student._id));
-    setSelectedStudentIds((prev) => prev.filter((id) => filteredIds.has(id)));
-  }, [filteredStudents]);
-
-  const filterStudents = () => {
+  const filteredStudents = useMemo(() => {
     let filtered = [...students];
+
+    filtered = filtered.filter((student) =>
+      matchesStudentCategory(student, activeStudentCategory),
+    );
 
     if (searchText) {
       filtered = filtered.filter(
@@ -335,9 +384,27 @@ const Students = () => {
       );
     }
 
-    setFilteredStudents(filtered);
+    return filtered;
+  }, [
+    students,
+    searchText,
+    genderFilter,
+    enrollmentFilter,
+    courseFilter,
+    batchFilter,
+    activeStudentCategory,
+  ]);
+
+  useEffect(() => {
     setTablePage(1);
-  };
+  }, [
+    searchText,
+    genderFilter,
+    enrollmentFilter,
+    courseFilter,
+    batchFilter,
+    activeStudentCategory,
+  ]);
 
   const fetchStudents = async () => {
     setLoading(true);
@@ -489,58 +556,11 @@ const Students = () => {
       const response = await api.delete(`/student/admission/${studentId}`);
       if (response.data.success) {
         message.success("Student deleted successfully!");
-        setSelectedStudentIds((prev) => prev.filter((id) => id !== studentId));
         fetchStudents();
       }
     } catch (error) {
       message.error(error.response?.data?.message || "Failed to delete student");
     }
-  };
-
-  const handleBulkDeleteStudents = async () => {
-    if (!permissions.delete) {
-      message.error("You do not have permission to delete students");
-      return;
-    }
-    const normalizedSelectedIds = selectedStudentIds
-      .map((id) => (typeof id === "string" ? id.trim() : String(id || "").trim()))
-      .filter(Boolean);
-
-    if (normalizedSelectedIds.length === 0) {
-      message.warning("Please select at least one student");
-      return;
-    }
-    setBulkDeleting(true);
-    try {
-      const response = await api.post("/student/admissions/bulk-delete", {
-        ids: normalizedSelectedIds,
-      });
-      if (response.data.success) {
-        message.success(
-          response.data.message ||
-            `${normalizedSelectedIds.length} student(s) deleted successfully!`,
-        );
-        setSelectedStudentIds([]);
-        fetchStudents();
-      }
-    } catch (error) {
-      message.error(error.response?.data?.message || "Failed to bulk delete students");
-    } finally {
-      setBulkDeleting(false);
-    }
-  };
-
-  const handleSelectAllFilteredStudents = () => {
-    if (filteredStudents.length === 0) {
-      message.warning("No students available to select");
-      return;
-    }
-    setSelectedStudentIds(
-      filteredStudents
-        .map((student) => student?._id)
-        .filter(Boolean)
-        .map((id) => (typeof id === "string" ? id.trim() : String(id).trim())),
-    );
   };
 
   const handleUnlinkCourse = async (enrollmentId, studentName, courseName) => {
@@ -607,6 +627,7 @@ const Students = () => {
     if (student.profilePicture) {
       setProfilePictureUrl(student.profilePicture);
     }
+    setStudentFormTab("photo");
     setModalVisible(true);
   };
 
@@ -1152,62 +1173,25 @@ const Students = () => {
                 }}
               >
                 Total Students: <strong>{students.length}</strong> | Showing:{" "}
-                <strong>{filteredStudents.length}</strong> | Selected:{" "}
-                <strong>{selectedStudentIds.length}</strong>
+                <strong>{filteredStudents.length}</strong> | Category:{" "}
+                <strong>{STUDENT_CATEGORY_LABELS[activeStudentCategory]}</strong>
               </p>
             </div>
-            <div className="flex gap-1">
-              <Button
-                type="default"
-                size="large"
-                className="btn-lg"
-                onClick={handleSelectAllFilteredStudents}
-                disabled={filteredStudents.length === 0 || loading}
-              >
-                Select All ({filteredStudents.length})
-              </Button>
-              <Button
-                type="default"
-                size="large"
-                className="btn-lg"
-                onClick={() => setSelectedStudentIds([])}
-                disabled={selectedStudentIds.length === 0 || loading}
-              >
-                Clear Selection
-              </Button>
-              {permissions.delete && (
-                <Popconfirm
-                  title="Delete Selected Students"
-                  description={`Are you sure you want to delete ${selectedStudentIds.length} selected student(s)?`}
-                  onConfirm={handleBulkDeleteStudents}
-                  okText="Yes"
-                  cancelText="No"
-                  okButtonProps={{ danger: true, loading: bulkDeleting }}
-                  disabled={selectedStudentIds.length === 0 || loading}
-                >
-                  <Button
-                    danger
-                    icon={<FaTrash />}
-                    size="large"
-                    className="btn-lg"
-                    loading={bulkDeleting}
-                    disabled={selectedStudentIds.length === 0 || loading}
-                  >
-                    Delete Selected
-                  </Button>
-                </Popconfirm>
-              )}
+            <div className="flex gap-2">
               {permissions.import && (
                 <Button
                   type="default"
                   icon={<FaFileImport />}
                   onClick={() => setImportModalVisible(true)}
-                  size="large"
-                  className="btn-lg"
+                  size="middle"
                   style={{
-                    background: "#107c41",
-                    borderColor: "#107c41",
-                    color: "white",
+                    background: "#F0FDF4",
+                    borderColor: "#BBF7D0",
+                    color: "#166534",
+                    borderRadius: "10px",
+                    height: "40px",
+                    paddingInline: "16px",
+                    fontWeight: 600,
                   }}
                 >
                   Import Excel/CSV
@@ -1220,11 +1204,18 @@ const Students = () => {
                   onClick={() => {
                     setModalVisible(true);
                     setEditMode(false);
+                    setStudentFormTab("photo");
                     form.resetFields();
                   }}
-                  size="large"
-                  className="btn-lg"
-                  style={{ marginRight: 10 }}
+                  size="middle"
+                  style={{
+                    background: "#01134C",
+                    borderColor: "#01134C",
+                    borderRadius: "10px",
+                    height: "40px",
+                    paddingInline: "16px",
+                    fontWeight: 600,
+                  }}
                 >
                   Add New Student
                 </Button>
@@ -1276,6 +1267,17 @@ const Students = () => {
               <Option value="not-enrolled">Not Enrolled</Option>
             </Select>
             <Select
+              value={activeStudentCategory}
+              onChange={setActiveStudentCategory}
+              size="large"
+              style={{ width: 170, borderRadius: "10px" }}
+            >
+              <Option value="all">All Categories</Option>
+              <Option value="active">Active Students</Option>
+              <Option value="dropout">Dropout Students</Option>
+              <Option value="passout">Passout Students</Option>
+            </Select>
+            <Select
               value={courseFilter}
               onChange={setCourseFilter}
               size="large"
@@ -1311,6 +1313,7 @@ const Students = () => {
                   setSearchText("");
                   setGenderFilter("all");
                   setEnrollmentFilter("all");
+                  setActiveStudentCategory("all");
                   setCourseFilter("all");
                   setBatchFilter("all");
                 }}
@@ -1333,6 +1336,68 @@ const Students = () => {
             border: "none",
           }}
         >
+          <Collapse
+            defaultActiveKey={["student-categories"]}
+            style={{ marginBottom: "20px", borderRadius: "10px", overflow: "hidden" }}
+            items={[
+              {
+                key: "student-categories",
+                label: (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="font-semibold text-[#01134C]">
+                      Student Categories
+                    </span>
+                    <Tag color="blue">
+                      All: {studentCategoryStats.all}
+                    </Tag>
+                    <Tag color="green">
+                      Active: {studentCategoryStats.active}
+                    </Tag>
+                    <Tag color="red">
+                      Dropout: {studentCategoryStats.dropout}
+                    </Tag>
+                    <Tag color="purple">
+                      Passout: {studentCategoryStats.passout}
+                    </Tag>
+                  </div>
+                ),
+                children: (
+                  <div className="flex flex-wrap gap-3">
+                    {[
+                      {
+                        key: "all",
+                        label: `All Students (${studentCategoryStats.all})`,
+                      },
+                      {
+                        key: "active",
+                        label: `Active Students (${studentCategoryStats.active})`,
+                      },
+                      {
+                        key: "dropout",
+                        label: `Dropout Students (${studentCategoryStats.dropout})`,
+                      },
+                      {
+                        key: "passout",
+                        label: `Passout Students (${studentCategoryStats.passout})`,
+                      },
+                    ].map((category) => (
+                      <Button
+                        key={category.key}
+                        type={activeStudentCategory === category.key ? "primary" : "default"}
+                        onClick={() => setActiveStudentCategory(category.key)}
+                        style={{
+                          borderRadius: "999px",
+                          minWidth: "fit-content",
+                        }}
+                      >
+                        {category.label}
+                      </Button>
+                    ))}
+                  </div>
+                ),
+              },
+            ]}
+          />
           {loading ? (
             <div
               style={{
@@ -1351,8 +1416,12 @@ const Students = () => {
                 enrollmentFilter !== "all" ||
                 courseFilter !== "all" ||
                 batchFilter !== "all"
-                  ? "No students match your search criteria"
-                  : "No students found. Add your first student!"
+                  ? `No ${STUDENT_CATEGORY_LABELS[
+                      activeStudentCategory
+                    ].toLowerCase()} match your search criteria`
+                  : `No ${STUDENT_CATEGORY_LABELS[
+                      activeStudentCategory
+                    ].toLowerCase()} found`
               }
               style={{ padding: "60px 0" }}
             />
@@ -1362,24 +1431,11 @@ const Students = () => {
                 dataSource={filteredStudents}
                 rowKey="_id"
                 className="custom-pagination-table"
-                rowSelection={{
-                  selectedRowKeys: selectedStudentIds,
-                  onChange: (newSelectedRowKeys, selectedRows) =>
-                    setSelectedStudentIds(
-                      selectedRows
-                        .map((student) => student?._id)
-                        .filter(Boolean)
-                        .map((id) =>
-                          typeof id === "string" ? id.trim() : String(id).trim(),
-                        ),
-                    ),
-                  preserveSelectedRowKeys: true,
-                }}
                 pagination={{
                   current: tablePage,
                   pageSize: tablePageSize,
                   showSizeChanger: true,
-                  pageSizeOptions: [10, 25, 50, 100],
+                  pageSizeOptions: [3, 5, 10, 25, 50, 100],
                   showTotal: (total, range) =>
                     `${range[0]}-${range[1]} of ${total} students`,
                   style: { marginTop: "20px" },
@@ -1554,15 +1610,15 @@ const Students = () => {
                   )}
                 />
 
-                {/* Enrolled Courses Column */}
+                {/* Enrollment Summary Column */}
                 <Table.Column
                   title={
                     <span className="text-[14px] text-gray-700 font-ArialLight text-nowrap">
-                      Enrolled Courses
+                      Enrollment
                     </span>
                   }
                   key="courses"
-                  width={320}
+                  width={260}
                   render={(record) => (
                     <div>
                       {record.enrollments && record.enrollments.length > 0 ? (
@@ -1715,31 +1771,12 @@ const Students = () => {
                                   )}
                                 <div
                                   style={{
-                                    display: "flex",
-                                    gap: "6px",
                                     marginTop: "8px",
+                                    fontSize: "11px",
+                                    color: "#64748B",
                                   }}
                                 >
-                                  {permissions.update && (
-                                    <Button
-                                      type="primary"
-                                      size="small"
-                                      icon={<FaEdit />}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        openEditCourseModal(record, enrollment);
-                                      }}
-                                      style={{
-                                        background: "#667eea",
-                                        borderColor: "#667eea",
-                                        fontSize: "11px",
-                                        height: "24px",
-                                        flex: 1,
-                                      }}
-                                    >
-                                      Edit
-                                    </Button>
-                                  )}
+                                  Manage course operations from the Enroll Students tab.
                                 </div>
                               </div>
                             </Tooltip>
@@ -1774,10 +1811,27 @@ const Students = () => {
                     </span>
                   }
                   key="actions"
-                  width={280}
+                  width={270}
                   fixed="right"
                   render={(record) => (
                     <Space size="small" wrap>
+                      {permissions.create && (
+                        <Tooltip title="Assign Course">
+                          <Button
+                            onClick={() => openCourseAssignModal(record)}
+                            style={{
+                              background: "#ECFDF5",
+                              borderColor: "#A7F3D0",
+                              color: "#065F46",
+                              borderRadius: "999px",
+                              fontWeight: 600,
+                            }}
+                            size="small"
+                          >
+                            Assign Course
+                          </Button>
+                        </Tooltip>
+                      )}
                       <Tooltip title="View Full Profile">
                         <Button
                           type="primary"
@@ -1791,43 +1845,6 @@ const Students = () => {
                           size="small"
                         />
                       </Tooltip>
-                      {permissions.create && (
-                        <Tooltip title="Assign Course">
-                          <Button
-                            type="primary"
-                            icon={<FaGraduationCap />}
-                            onClick={() => openCourseAssignModal(record)}
-                            style={{
-                              background: "#4ECDC4",
-                              borderColor: "#4ECDC4",
-                              borderRadius: "8px",
-                            }}
-                            size="small"
-                          />
-                        </Tooltip>
-                      )}
-                      <Tooltip title="Fee Profile">
-                        <Button
-                          icon={<FaDollarSign />}
-                          onClick={() => openFeeProfileModal(record)}
-                          style={{
-                            borderColor: "#667eea",
-                            color: "#667eea",
-                            borderRadius: "8px",
-                          }}
-                          size="small"
-                        />
-                      </Tooltip>
-                      {permissions.print && (
-                        <Tooltip title="Download PDF">
-                          <Button
-                            icon={<FaFileDownload />}
-                            onClick={() => downloadStudentPDF(record)}
-                            style={{ borderRadius: "8px" }}
-                            size="small"
-                          />
-                        </Tooltip>
-                      )}
                       {permissions.update && (
                         <Tooltip title="Edit Student">
                           <Button
@@ -1883,119 +1900,157 @@ const Students = () => {
           form.resetFields();
           setEditMode(false);
           setEditingStudent(null);
+          setStudentFormTab("photo");
         }}
         footer={null}
-        width={900}
+        width={960}
         centered
+        styles={{
+          body: {
+            paddingTop: 12,
+            maxHeight: "78vh",
+            overflow: "hidden",
+          },
+        }}
       >
         <Form
           form={form}
           layout="vertical"
           onFinish={editMode ? handleEditStudent : handleCreateStudent}
-          style={{ marginTop: "20px" }}
+          style={{ marginTop: "12px" }}
         >
-          {/* Profile Picture Upload Section */}
-          <div
-            style={{
-              background:
-                "linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)",
-              padding: "25px",
-              borderRadius: "16px",
-              marginBottom: "25px",
-              border: "2px dashed #667eea",
-              textAlign: "center",
-            }}
-          >
+          <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
             <div
               style={{
+                marginBottom: "12px",
                 display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "10px",
-              }}
-            >
-              <div
-                style={{
-                  width: "120px",
-                  height: "120px",
-                  borderRadius: "50%",
-                  overflow: "hidden",
-                  background: "white",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  boxShadow: "0 8px 25px rgba(0,0,0,0.1)",
-                  border: "4px solid white",
-                  position: "relative",
-                }}
-              >
-                {profilePictureUrl ? (
-                  <img
-                    src={profilePictureUrl}
-                    alt="Profile"
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
-                ) : (
-                  <FaUser style={{ fontSize: "50px", color: "#667eea", opacity: 0.5 }} />
-                )}
-              </div>
-              <Upload
-                accept="image/*"
-                showUploadList={false}
-                beforeUpload={(file) => {
-                  const reader = new FileReader();
-                  reader.onload = (e) => {
-                    setProfilePictureUrl(e.target.result);
-                  };
-                  reader.readAsDataURL(file);
-                  setProfilePicture(file);
-                  return false;
-                }}
-              >
-                <Button
-                  icon={<FaCamera />}
-                  style={{
-                    background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-                    border: "none",
-                    color: "white",
-                    borderRadius: "8px",
-                    height: "40px",
-                    padding: "0 25px",
-                    fontWeight: "600",
-                  }}
-                >
-                  {profilePictureUrl ? "Change Photo" : "Upload Photo"}
-                </Button>
-              </Upload>
-              <p style={{ margin: 0, fontSize: "12px", color: "#718096" }}>
-                Recommended: Square image, max 5MB
-              </p>
-            </div>
-          </div>
-
-          {/* Basic Information Section */}
-          <div
-            style={{
-              background: "#F7FAFC",
-              padding: "20px",
-              borderRadius: "12px",
-              marginBottom: "20px",
-            }}
-          >
-            <h4
-              style={{
-                margin: "0 0 15px 0",
-                color: "#667eea",
-                fontSize: "14px",
-                fontWeight: "600",
-                display: "flex",
-                alignItems: "center",
                 gap: "8px",
+                flexWrap: "wrap",
               }}
             >
-              <FaUser /> BASIC INFORMATION
-            </h4>
-            <Row gutter={16}>
+              <Tag color="blue">{editMode ? "Edit Student" : "New Student"}</Tag>
+              <Tag color="purple">Step-by-step form</Tag>
+            </div>
+
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflow: "auto",
+                paddingRight: "4px",
+              }}
+            >
+              <Tabs
+                activeKey={studentFormTab}
+                onChange={setStudentFormTab}
+                items={[
+                  {
+                    key: "photo",
+                    label: "Photo",
+                    children: (
+                      <div
+                        style={{
+                          background:
+                            "linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)",
+                          padding: "25px",
+                          borderRadius: "16px",
+                          border: "2px dashed #667eea",
+                          textAlign: "center",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            alignItems: "center",
+                            gap: "10px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: "120px",
+                              height: "120px",
+                              borderRadius: "50%",
+                              overflow: "hidden",
+                              background: "white",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              boxShadow: "0 8px 25px rgba(0,0,0,0.1)",
+                              border: "4px solid white",
+                              position: "relative",
+                            }}
+                          >
+                            {profilePictureUrl ? (
+                              <img
+                                src={profilePictureUrl}
+                                alt="Profile"
+                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                              />
+                            ) : (
+                              <FaUser style={{ fontSize: "50px", color: "#667eea", opacity: 0.5 }} />
+                            )}
+                          </div>
+                          <Upload
+                            accept="image/*"
+                            showUploadList={false}
+                            beforeUpload={(file) => {
+                              const reader = new FileReader();
+                              reader.onload = (e) => {
+                                setProfilePictureUrl(e.target.result);
+                              };
+                              reader.readAsDataURL(file);
+                              setProfilePicture(file);
+                              return false;
+                            }}
+                          >
+                            <Button
+                              icon={<FaCamera />}
+                              style={{
+                                background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                                border: "none",
+                                color: "white",
+                                borderRadius: "8px",
+                                height: "40px",
+                                padding: "0 25px",
+                                fontWeight: "600",
+                              }}
+                            >
+                              {profilePictureUrl ? "Change Photo" : "Upload Photo"}
+                            </Button>
+                          </Upload>
+                          <p style={{ margin: 0, fontSize: "12px", color: "#718096" }}>
+                            Recommended: Square image, max 5MB
+                          </p>
+                        </div>
+                      </div>
+                    ),
+                  },
+                  {
+                    key: "basic",
+                    label: "Basic Info",
+                    children: (
+                      <div
+                        style={{
+                          background: "#F7FAFC",
+                          padding: "20px",
+                          borderRadius: "12px",
+                        }}
+                      >
+                        <h4
+                          style={{
+                            margin: "0 0 15px 0",
+                            color: "#667eea",
+                            fontSize: "14px",
+                            fontWeight: "600",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                          }}
+                        >
+                          <FaUser /> BASIC INFORMATION
+                        </h4>
+                        <Row gutter={16}>
               <Col span={8}>
                 <Form.Item
                   name="registrationNo"
@@ -2177,32 +2232,35 @@ const Students = () => {
                   </Radio.Group>
                 </Form.Item>
               </Col>
-            </Row>
-          </div>
-
-          {/* Family Information Section */}
-          <div
-            style={{
-              background: "#FFF5F5",
-              padding: "20px",
-              borderRadius: "12px",
-              marginBottom: "20px",
-            }}
-          >
-            <h4
-              style={{
-                margin: "0 0 15px 0",
-                color: "#F56565",
-                fontSize: "14px",
-                fontWeight: "600",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              <FaUser /> FAMILY INFORMATION
-            </h4>
-            <Row gutter={16}>
+                        </Row>
+                      </div>
+                    ),
+                  },
+                  {
+                    key: "family",
+                    label: "Family",
+                    children: (
+                      <div
+                        style={{
+                          background: "#FFF5F5",
+                          padding: "20px",
+                          borderRadius: "12px",
+                        }}
+                      >
+                        <h4
+                          style={{
+                            margin: "0 0 15px 0",
+                            color: "#F56565",
+                            fontSize: "14px",
+                            fontWeight: "600",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                          }}
+                        >
+                          <FaUser /> FAMILY INFORMATION
+                        </h4>
+                        <Row gutter={16}>
               <Col span={16}>
                 <Form.Item
                   name="fatherName"
@@ -2348,31 +2406,35 @@ const Students = () => {
                   />
                 </Form.Item>
               </Col>
-            </Row>
-          </div>
-
-          {/* Additional Information Section */}
-          <div
-            style={{
-              background: "#F0FFF4",
-              padding: "20px",
-              borderRadius: "12px",
-            }}
-          >
-            <h4
-              style={{
-                margin: "0 0 15px 0",
-                color: "#48BB78",
-                fontSize: "14px",
-                fontWeight: "600",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              <FaBook /> ADDITIONAL INFORMATION
-            </h4>
-            <Row gutter={16}>
+                        </Row>
+                      </div>
+                    ),
+                  },
+                  {
+                    key: "additional",
+                    label: "Additional",
+                    children: (
+                      <div
+                        style={{
+                          background: "#F0FFF4",
+                          padding: "20px",
+                          borderRadius: "12px",
+                        }}
+                      >
+                        <h4
+                          style={{
+                            margin: "0 0 15px 0",
+                            color: "#48BB78",
+                            fontSize: "14px",
+                            fontWeight: "600",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                          }}
+                        >
+                          <FaBook /> ADDITIONAL INFORMATION
+                        </h4>
+                        <Row gutter={16}>
               <Col span={8}>
                 <Form.Item
                   name="previousSchoolCollege"
@@ -2450,41 +2512,55 @@ const Students = () => {
                   />
                 </Form.Item>
               </Col>
-            </Row>
-          </div>
+                        </Row>
+                      </div>
+                    ),
+                  },
+                ]}
+              />
+            </div>
 
-          {/* Action Buttons */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: "10px",
-              marginTop: "20px",
-              paddingTop: "20px",
-              borderTop: "1px solid #f0f0f0",
-            }}
-          >
-            <Button
-              onClick={() => {
-                setModalVisible(false);
-                form.resetFields();
-              }}
-              style={{ borderRadius: "6px" }}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="primary"
-              htmlType="submit"
-              loading={loading}
+            <div
               style={{
-                background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-                border: "none",
-                borderRadius: "6px",
+                display: "flex",
+                justifyContent: "space-between",
+                gap: "10px",
+                marginTop: "20px",
+                paddingTop: "20px",
+                borderTop: "1px solid #f0f0f0",
               }}
             >
-              {editMode ? "Update Student" : "Create Student"}
-            </Button>
+              <Space wrap>
+                <Button onClick={() => setStudentFormTab("photo")}>Photo</Button>
+                <Button onClick={() => setStudentFormTab("basic")}>Basic Info</Button>
+                <Button onClick={() => setStudentFormTab("family")}>Family</Button>
+                <Button onClick={() => setStudentFormTab("additional")}>Additional</Button>
+              </Space>
+              <Space>
+                <Button
+                  onClick={() => {
+                    setModalVisible(false);
+                    form.resetFields();
+                    setStudentFormTab("photo");
+                  }}
+                  style={{ borderRadius: "6px" }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  loading={loading}
+                  style={{
+                    background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                    border: "none",
+                    borderRadius: "6px",
+                  }}
+                >
+                  {editMode ? "Update Student" : "Create Student"}
+                </Button>
+              </Space>
+            </div>
           </div>
         </Form>
       </Modal>

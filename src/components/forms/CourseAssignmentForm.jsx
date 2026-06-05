@@ -14,6 +14,7 @@ import {
   Row,
   Col,
   Input,
+  Tabs,
 } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -258,6 +259,7 @@ const CourseAssignmentForm = ({
     certificateFee: null,
   });
   const [isEditMode, setIsEditMode] = useState(false);
+  const [activeTab, setActiveTab] = useState("basic");
 
   // Ref to prevent courseId effect from resetting form values during edit initialization
   const isInitializingEditRef = useRef(false);
@@ -268,6 +270,7 @@ const CourseAssignmentForm = ({
 
   const courseId = Form.useWatch("courseId", form);
   const enrollmentDate = Form.useWatch("enrollmentDate", form);
+  const enrollmentStatus = Form.useWatch("status", form) || "Active";
   const paymentPlanType = Form.useWatch("paymentPlanType", form);
   const discountPercentage = Form.useWatch("discountPercentage", form) || 0;
   const numberOfInstallments = Form.useWatch("numberOfInstallments", form) || 1;
@@ -351,6 +354,7 @@ const CourseAssignmentForm = ({
 
   useEffect(() => {
     if (!visible) {
+      setActiveTab("basic");
       setSelectedCourse(null);
       setInstallments([]);
       setBatches([]);
@@ -377,6 +381,10 @@ const CourseAssignmentForm = ({
       form.setFieldsValue({
         courseId: enrollment.course?._id,
         enrollmentDate: dayjs(enrollment.enrollmentDate),
+        status: enrollment.status || "Active",
+        completionDate: enrollment.completionDate
+          ? dayjs(enrollment.completionDate)
+          : null,
         batchId: enrollment.batch?._id || null,
         paymentPlanType: fs?.paymentPlanType || "custom",
         discountPercentage: fs?.discountPercentage || 0,
@@ -431,6 +439,8 @@ const CourseAssignmentForm = ({
       });
       prevEnrollmentDateRef.current = null;
       form.setFieldsValue({
+        status: "Active",
+        completionDate: null,
         paymentPlanType: "custom",
         discountPercentage: 0,
         numberOfInstallments: 2,
@@ -500,6 +510,12 @@ const CourseAssignmentForm = ({
       }
     }
   }, [paymentPlanType, form]);
+
+  useEffect(() => {
+    if (enrollmentStatus !== "Completed") {
+      form.setFieldValue("completionDate", null);
+    }
+  }, [enrollmentStatus, form]);
 
   useEffect(() => {
     if (!selectedCourse || !enrollmentDate) {
@@ -612,6 +628,12 @@ const CourseAssignmentForm = ({
 
     const payload = {
       ...values,
+      status: values.status || "Active",
+      completionDate:
+        values.status === "Completed"
+          ? values.completionDate?.format("YYYY-MM-DD") ||
+            dayjs().format("YYYY-MM-DD")
+          : undefined,
       // Include overridden/custom fees - these will override course defaults in backend
       admissionFee: baseFee.admissionFee,
       courseFee: baseFee.courseFee,
@@ -703,243 +725,365 @@ const CourseAssignmentForm = ({
       open={visible}
       onCancel={onCancel}
       footer={null}
-      width={980}
+      width={1040}
       centered
       destroyOnClose
+      styles={{
+        body: {
+          paddingTop: 12,
+          maxHeight: "78vh",
+          overflow: "hidden",
+        },
+      }}
     >
       <Form form={form} layout="vertical" onFinish={handleSubmit}>
-        <Space style={{ width: "100%" }} size={16} align="start">
-          <Form.Item
-            label="Course"
-            name="courseId"
-            rules={[{ required: true, message: "Select a course" }]}
-            style={{ flex: 1 }}
-          >
-            <Select placeholder="Select course" showSearch optionFilterProp="children">
-              {courses.map((course) => (
-                <Option key={course._id} value={course._id}>
-                  {course.courseName} ({course.courseId})
-                </Option>
-              ))}
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            label="Enrollment Date"
-            name="enrollmentDate"
-            rules={[{ required: true, message: "Select enrollment date" }]}
-            style={{ minWidth: 220 }}
-          >
-            <DatePicker format="YYYY-MM-DD" style={{ width: "100%" }} />
-          </Form.Item>
-        </Space>
-
-        <Form.Item label="Batch (Optional)" name="batchId">
-          <Select
-            placeholder="Select batch"
-            allowClear
-            loading={loadingBatches}
-            disabled={!courseId || loadingBatches}
-          >
-            {batches.map((batch) => (
-              <Option key={batch._id} value={batch._id}>
-                {batch.batchName} - {batch.batchCode} ({batch.currentStudents || 0}/
-                {batch.maxStudents})
-              </Option>
-            ))}
-          </Select>
-        </Form.Item>
-
-        <Card title="Payment Plan" size="small" style={{ marginBottom: 16 }}>
-          <Space style={{ width: "100%" }} size={16} align="start">
-            <Form.Item
-              label="Plan Type"
-              name="paymentPlanType"
-              rules={[{ required: true, message: "Select plan type" }]}
-              style={{ flex: 1 }}
-            >
-              <Select>
-                {PLAN_OPTIONS.map((plan) => (
-                  <Option key={plan.value} value={plan.value}>
-                    {plan.label}
-                  </Option>
-                ))}
-              </Select>
-            </Form.Item>
-
-            <Form.Item
-              label="Discount (%)"
-              name="discountPercentage"
-              rules={[{ required: true, message: "Enter discount percentage" }]}
-              style={{ minWidth: 180 }}
-            >
-              <InputNumber min={0} max={100} precision={2} style={{ width: "100%" }} />
-            </Form.Item>
-
-            <Form.Item
-              label="Installments"
-              name="numberOfInstallments"
-              rules={[{ required: true, message: "Select installment count" }]}
-              style={{ minWidth: 180 }}
-            >
-              <Select disabled={paymentPlanType === "full_payment"}>
-                {(paymentPlanType === "full_payment"
-                  ? [1]
-                  : Array.from({ length: 23 }, (_, index) => index + 2)
-                ).map((count) => (
-                  <Option key={count} value={count}>
-                    {count}
-                  </Option>
-                ))}
-              </Select>
-            </Form.Item>
-          </Space>
-
-          <Alert
-            type="info"
-            showIcon
-            message="For additional fee rows: One-time = shown as a single separate installment. Two-installments = shown as two separate installments with fee title."
-          />
-        </Card>
-
-        <Card
-          title="Additional Fees Structure"
-          size="small"
-          style={{ marginBottom: 16 }}
-          extra={<Button onClick={addAdditionalFee}>Add Fee</Button>}
-        >
-          {additionalFees.length === 0 && (
-            <Text type="secondary">No additional fee added.</Text>
-          )}
-          <Space direction="vertical" style={{ width: "100%" }} size={8}>
-            {additionalFees.map((fee) => (
-              <Row gutter={8} key={fee.id} align="middle">
-                <Col span={5}>
-                  <Select
-                    value={fee.feeType}
-                    onChange={(value) => updateAdditionalFee(fee.id, { feeType: value })}
-                    style={{ width: "100%" }}
-                  >
-                    {ADDITIONAL_FEE_TYPES.map((type) => (
-                      <Option key={type.value} value={type.value}>
-                        {type.label}
-                      </Option>
-                    ))}
-                  </Select>
-                </Col>
-                <Col span={6}>
-                  <Input
-                    value={fee.title}
-                    placeholder="Fee title"
-                    onChange={(e) =>
-                      updateAdditionalFee(fee.id, { title: e.target.value })
-                    }
-                  />
-                </Col>
-                <Col span={5}>
-                  <InputNumber
-                    min={0}
-                    style={{ width: "100%" }}
-                    value={fee.amount}
-                    onChange={(value) => updateAdditionalFee(fee.id, { amount: value || 0 })}
-                  />
-                </Col>
-                <Col span={5}>
-                  <Select
-                    value={fee.paymentMode}
-                    onChange={(value) =>
-                      updateAdditionalFee(fee.id, { paymentMode: value })
-                    }
-                    style={{ width: "100%" }}
-                  >
-                    <Option value="one_time">One Time</Option>
-                    <Option value="two_installments">Two Installments</Option>
-                  </Select>
-                </Col>
-                <Col span={3}>
-                  <Button
-                    danger
-                    disabled={additionalFees.length === 1}
-                    onClick={() => removeAdditionalFee(fee.id)}
-                  >
-                    Remove
-                  </Button>
-                </Col>
-              </Row>
-            ))}
-          </Space>
-        </Card>
-
-        <Card title="Fee Summary" size="small" style={{ marginBottom: 16 }}>
-          <Space direction="vertical" style={{ width: "100%" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <Text>Admission Fee: PKR {baseFee.admissionFee.toLocaleString()}</Text>
-              <Button
-                type="text"
-                size="small"
-                icon={<EditOutlined />}
-                onClick={() => openFeeEditModal("admissionFee", baseFee.admissionFee)}
-              >
-                Edit
-              </Button>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <Text>Course Fee: PKR {baseFee.courseFee.toLocaleString()}</Text>
-              <Button
-                type="text"
-                size="small"
-                icon={<EditOutlined />}
-                onClick={() => openFeeEditModal("courseFee", baseFee.courseFee)}
-              >
-                Edit
-              </Button>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <Text>Certificate Fee: PKR {baseFee.certificateFee.toLocaleString()}</Text>
-              <Button
-                type="text"
-                size="small"
-                icon={<EditOutlined />}
-                onClick={() => openFeeEditModal("certificateFee", baseFee.certificateFee)}
-              >
-                Edit
-              </Button>
-            </div>
-            <Text>Additional Fees Total: PKR {baseFee.additionalFeesTotal.toLocaleString()}</Text>
-            <Text>Total Before Discount: PKR {baseFee.totalBeforeDiscount.toLocaleString()}</Text>
-            <Text type="success">
-              Course Fee Discount ({discountPercentage}%): -PKR {baseFee.discountAmount.toLocaleString()}
-            </Text>
-            <Text type="success">
-              Course Fee After Discount: PKR {baseFee.discountedCourseFee.toLocaleString()}
-            </Text>
-            <Text strong style={{ fontSize: 16 }}>
-              Final Fee: PKR {baseFee.finalFee.toLocaleString()}
-            </Text>
-            <Space>
-              <Tag color="green">Paid: {paidInstallments}</Tag>
-              <Tag color="default">Unpaid: {unpaidInstallments}</Tag>
-              <Tag color="red">Remaining: PKR {baseFee.finalFee.toLocaleString()}</Tag>
+        <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          <div style={{ marginBottom: 12 }}>
+            <Space wrap size={[8, 8]}>
+              <Tag color="blue">
+                Student: {selectedStudent?.studentName || "Student"}
+              </Tag>
+              <Tag color="green">
+                Final Fee: PKR {baseFee.finalFee.toLocaleString()}
+              </Tag>
+              <Tag color="purple">Installments: {installments.length}</Tag>
             </Space>
-          </Space>
-        </Card>
+          </div>
 
-        <Card title="Installment List" size="small" style={{ marginBottom: 16 }}>
-          <Table
-            dataSource={installments}
-            columns={installmentColumns}
-            rowKey="installmentNumber"
-            pagination={false}
-            size="small"
-            locale={{ emptyText: "Select course and enrollment date to generate installments" }}
-          />
-        </Card>
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflow: "auto",
+              paddingRight: 4,
+            }}
+          >
+            <Tabs
+              activeKey={activeTab}
+              onChange={setActiveTab}
+              items={[
+                {
+                  key: "basic",
+                  label: "Basic Info",
+                  children: (
+                    <div>
+                      <Card size="small" style={{ marginBottom: 16 }}>
+                        <Space style={{ width: "100%" }} size={16} align="start" wrap>
+                          <Form.Item
+                            label="Course"
+                            name="courseId"
+                            rules={[{ required: true, message: "Select a course" }]}
+                            style={{ flex: 1, minWidth: 230 }}
+                          >
+                            <Select
+                              placeholder="Select course"
+                              showSearch
+                              optionFilterProp="children"
+                              size="large"
+                            >
+                              {courses.map((course) => (
+                                <Option key={course._id} value={course._id}>
+                                  {course.courseName} ({course.courseId})
+                                </Option>
+                              ))}
+                            </Select>
+                          </Form.Item>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <Button onClick={onCancel}>Cancel</Button>
-          <Button type="primary" htmlType="submit" loading={loading}>
-            {isEditMode ? "Update Course" : "Assign Course"}
-          </Button>
+                          <Form.Item
+                            label="Enrollment Date"
+                            name="enrollmentDate"
+                            rules={[{ required: true, message: "Select enrollment date" }]}
+                            style={{ minWidth: 230 }}
+                          >
+                            <DatePicker format="YYYY-MM-DD" style={{ width: "100%" }} size="large" />
+                          </Form.Item>
+
+                          <Form.Item
+                            label="Status"
+                            name="status"
+                            rules={[{ required: true, message: "Select status" }]}
+                            style={{ minWidth: 210 }}
+                          >
+                            <Select size="large">
+                              <Option value="Active">Active</Option>
+                              <Option value="Completed">Passout / Completed</Option>
+                              <Option value="Dropped">Dropout</Option>
+                              <Option value="On Hold">On Hold</Option>
+                            </Select>
+                          </Form.Item>
+                        </Space>
+
+                        {enrollmentStatus === "Completed" && (
+                          <Form.Item
+                            label="Completion Date"
+                            name="completionDate"
+                            rules={[{ required: true, message: "Select completion date" }]}
+                            style={{ marginBottom: 0 }}
+                          >
+                            <DatePicker format="YYYY-MM-DD" style={{ width: "100%" }} size="large" />
+                          </Form.Item>
+                        )}
+                      </Card>
+
+                      <Card size="small" title="Batch Selection">
+                        <Form.Item label="Batch (Optional)" name="batchId" style={{ marginBottom: 0 }}>
+                          <Select
+                            placeholder="Select batch"
+                            allowClear
+                            loading={loadingBatches}
+                            disabled={!courseId || loadingBatches}
+                            size="large"
+                          >
+                            {batches.map((batch) => (
+                              <Option key={batch._id} value={batch._id}>
+                                {batch.batchName} - {batch.batchCode} ({batch.currentStudents || 0}/
+                                {batch.maxStudents})
+                              </Option>
+                            ))}
+                          </Select>
+                        </Form.Item>
+                      </Card>
+                    </div>
+                  ),
+                },
+                {
+                  key: "plan",
+                  label: "Payment Plan",
+                  children: (
+                    <Card title="Plan Setup" size="small">
+                      <Space style={{ width: "100%" }} size={16} align="start" wrap>
+                        <Form.Item
+                          label="Plan Type"
+                          name="paymentPlanType"
+                          rules={[{ required: true, message: "Select plan type" }]}
+                          style={{ flex: 1, minWidth: 220 }}
+                        >
+                          <Select size="large">
+                            {PLAN_OPTIONS.map((plan) => (
+                              <Option key={plan.value} value={plan.value}>
+                                {plan.label}
+                              </Option>
+                            ))}
+                          </Select>
+                        </Form.Item>
+
+                        <Form.Item
+                          label="Discount (%)"
+                          name="discountPercentage"
+                          rules={[{ required: true, message: "Enter discount percentage" }]}
+                          style={{ minWidth: 200 }}
+                        >
+                          <InputNumber min={0} max={100} precision={2} style={{ width: "100%" }} size="large" />
+                        </Form.Item>
+
+                        <Form.Item
+                          label="Installments"
+                          name="numberOfInstallments"
+                          rules={[{ required: true, message: "Select installment count" }]}
+                          style={{ minWidth: 200 }}
+                        >
+                          <Select disabled={paymentPlanType === "full_payment"} size="large">
+                            {(paymentPlanType === "full_payment"
+                              ? [1]
+                              : Array.from({ length: 23 }, (_, index) => index + 2)
+                            ).map((count) => (
+                              <Option key={count} value={count}>
+                                {count}
+                              </Option>
+                            ))}
+                          </Select>
+                        </Form.Item>
+                      </Space>
+
+                      <Alert
+                        type="info"
+                        showIcon
+                        style={{ marginTop: 8 }}
+                        message="Choose the plan first, then review fee summary and installment dates in the next tabs."
+                        description="For additional fee rows: One-time creates one separate installment. Two-installments splits the same fee into two scheduled installments."
+                      />
+                    </Card>
+                  ),
+                },
+                {
+                  key: "fees",
+                  label: "Fees",
+                  children: (
+                    <div>
+                      <Card
+                        title="Additional Fees Structure"
+                        size="small"
+                        style={{ marginBottom: 16 }}
+                        extra={<Button onClick={addAdditionalFee}>Add Fee</Button>}
+                      >
+                        {additionalFees.length === 0 && (
+                          <Text type="secondary">No additional fee added.</Text>
+                        )}
+                        <Space direction="vertical" style={{ width: "100%" }} size={10}>
+                          {additionalFees.map((fee) => (
+                            <Row gutter={[8, 8]} key={fee.id} align="middle">
+                              <Col xs={24} md={5}>
+                                <Select
+                                  value={fee.feeType}
+                                  onChange={(value) => updateAdditionalFee(fee.id, { feeType: value })}
+                                  style={{ width: "100%" }}
+                                  size="large"
+                                >
+                                  {ADDITIONAL_FEE_TYPES.map((type) => (
+                                    <Option key={type.value} value={type.value}>
+                                      {type.label}
+                                    </Option>
+                                  ))}
+                                </Select>
+                              </Col>
+                              <Col xs={24} md={7}>
+                                <Input
+                                  value={fee.title}
+                                  placeholder="Fee title"
+                                  size="large"
+                                  onChange={(e) =>
+                                    updateAdditionalFee(fee.id, { title: e.target.value })
+                                  }
+                                />
+                              </Col>
+                              <Col xs={24} md={5}>
+                                <InputNumber
+                                  min={0}
+                                  size="large"
+                                  style={{ width: "100%" }}
+                                  value={fee.amount}
+                                  onChange={(value) => updateAdditionalFee(fee.id, { amount: value || 0 })}
+                                />
+                              </Col>
+                              <Col xs={24} md={5}>
+                                <Select
+                                  value={fee.paymentMode}
+                                  onChange={(value) =>
+                                    updateAdditionalFee(fee.id, { paymentMode: value })
+                                  }
+                                  style={{ width: "100%" }}
+                                  size="large"
+                                >
+                                  <Option value="one_time">One Time</Option>
+                                  <Option value="two_installments">Two Installments</Option>
+                                </Select>
+                              </Col>
+                              <Col xs={24} md={2}>
+                                <Button
+                                  danger
+                                  block
+                                  disabled={additionalFees.length === 1}
+                                  onClick={() => removeAdditionalFee(fee.id)}
+                                  size="large"
+                                >
+                                  Remove
+                                </Button>
+                              </Col>
+                            </Row>
+                          ))}
+                        </Space>
+                      </Card>
+
+                      <Card title="Fee Summary" size="small">
+                        <Space direction="vertical" style={{ width: "100%" }} size={10}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <Text>Admission Fee: PKR {baseFee.admissionFee.toLocaleString()}</Text>
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<EditOutlined />}
+                              onClick={() => openFeeEditModal("admissionFee", baseFee.admissionFee)}
+                            >
+                              Edit
+                            </Button>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <Text>Course Fee: PKR {baseFee.courseFee.toLocaleString()}</Text>
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<EditOutlined />}
+                              onClick={() => openFeeEditModal("courseFee", baseFee.courseFee)}
+                            >
+                              Edit
+                            </Button>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <Text>Certificate Fee: PKR {baseFee.certificateFee.toLocaleString()}</Text>
+                            <Button
+                              type="text"
+                              size="small"
+                              icon={<EditOutlined />}
+                              onClick={() => openFeeEditModal("certificateFee", baseFee.certificateFee)}
+                            >
+                              Edit
+                            </Button>
+                          </div>
+                          <Text>Additional Fees Total: PKR {baseFee.additionalFeesTotal.toLocaleString()}</Text>
+                          <Text>Total Before Discount: PKR {baseFee.totalBeforeDiscount.toLocaleString()}</Text>
+                          <Text type="success">
+                            Course Fee Discount ({discountPercentage}%): -PKR {baseFee.discountAmount.toLocaleString()}
+                          </Text>
+                          <Text type="success">
+                            Course Fee After Discount: PKR {baseFee.discountedCourseFee.toLocaleString()}
+                          </Text>
+                          <Text strong style={{ fontSize: 16 }}>
+                            Final Fee: PKR {baseFee.finalFee.toLocaleString()}
+                          </Text>
+                          <Space wrap>
+                            <Tag color="green">Paid: {paidInstallments}</Tag>
+                            <Tag color="default">Unpaid: {unpaidInstallments}</Tag>
+                            <Tag color="red">Remaining: PKR {baseFee.finalFee.toLocaleString()}</Tag>
+                          </Space>
+                        </Space>
+                      </Card>
+                    </div>
+                  ),
+                },
+                {
+                  key: "installments",
+                  label: "Installments",
+                  children: (
+                    <Card title="Installment List" size="small">
+                      <Table
+                        dataSource={installments}
+                        columns={installmentColumns}
+                        rowKey="installmentNumber"
+                        pagination={false}
+                        size="small"
+                        scroll={{ y: 320 }}
+                        locale={{ emptyText: "Select course and enrollment date to generate installments" }}
+                      />
+                    </Card>
+                  ),
+                },
+              ]}
+            />
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 8,
+              marginTop: 12,
+              paddingTop: 12,
+              borderTop: "1px solid #F0F0F0",
+            }}
+          >
+            <Space wrap>
+              <Button onClick={() => setActiveTab("basic")}>Basic Info</Button>
+              <Button onClick={() => setActiveTab("plan")}>Payment Plan</Button>
+              <Button onClick={() => setActiveTab("fees")}>Fees</Button>
+              <Button onClick={() => setActiveTab("installments")}>Installments</Button>
+            </Space>
+            <Space>
+              <Button onClick={onCancel}>Cancel</Button>
+              <Button type="primary" htmlType="submit" loading={loading}>
+                {isEditMode ? "Update Course" : "Assign Course"}
+              </Button>
+            </Space>
+          </div>
         </div>
       </Form>
 
