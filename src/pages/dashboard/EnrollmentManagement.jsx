@@ -1,25 +1,66 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Avatar, Button, Card, Space, Statistic, Table, Tag, Tooltip, message } from "antd";
-import { EyeOutlined, ReloadOutlined } from "@ant-design/icons";
+import {
+  Avatar,
+  Button,
+  Card,
+  Modal,
+  Select,
+  Space,
+  Statistic,
+  Table,
+  Tag,
+  Tooltip,
+  Typography,
+  message,
+} from "antd";
+import { CheckCircleOutlined, EditOutlined, EyeOutlined, ReloadOutlined } from "@ant-design/icons";
 import { FaFemale, FaMale } from "react-icons/fa";
 import { MdAssignment } from "react-icons/md";
 import dayjs from "dayjs";
 import api from "../../api/axiosInstance";
-import { getAllEnrollments } from "../../services/feeService";
+import { getAllEnrollments, updateEnrollmentStatus } from "../../services/feeService";
+import { useModulePermissions } from "../../hooks/usePermissions";
 
 const normalizeStatus = (status) => String(status || "").trim().toLowerCase();
 
+const STATUS_OPTIONS = [
+  {
+    label: "Dropout",
+    value: "Dropped",
+    helper: "Remove the student from active enrolled students and show in dropout filters.",
+    color: "#DC2626",
+    bg: "#FEF2F2",
+  },
+  {
+    label: "Passout",
+    value: "Completed",
+    helper: "Remove the student from active enrolled students and show in passout filters.",
+    color: "#0F766E",
+    bg: "#ECFEFF",
+  },
+];
+
+const ACTIVE_STATUS_SET = new Set(["active", "enrolled"]);
+
 const EnrollmentManagement = () => {
   const navigate = useNavigate();
+  const permissions = useModulePermissions("students");
   const [enrollments, setEnrollments] = useState([]);
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [statusModalOpen, setStatusModalOpen] = useState(false);
+  const [statusSubmitting, setStatusSubmitting] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [selectedStatus, setSelectedStatus] = useState("Dropped");
 
   useEffect(() => {
-    fetchEnrollments();
-    fetchStudents();
+    refreshData();
   }, []);
+
+  const refreshData = async () => {
+    await Promise.all([fetchEnrollments(), fetchStudents()]);
+  };
 
   const fetchEnrollments = async () => {
     setLoading(true);
@@ -56,18 +97,19 @@ const EnrollmentManagement = () => {
 
     enrollments.forEach((enrollment) => {
       const status = normalizeStatus(enrollment.status);
-      if (status !== "active" && status !== "enrolled") {
+      if (!ACTIVE_STATUS_SET.has(status)) {
         return;
       }
 
-      const student = enrollment.student;
-      const studentId = student?._id || student;
-      if (!studentId || !student) return;
-      const fullStudent = studentMap.get(String(studentId)) || student;
+      const enrolledStudent = enrollment.student;
+      const studentId = enrolledStudent?._id || enrolledStudent;
+      if (!studentId) return;
 
-      if (!grouped.has(studentId)) {
-        grouped.set(studentId, {
-          _id: studentId,
+      const fullStudent = studentMap.get(String(studentId)) || enrolledStudent || {};
+
+      if (!grouped.has(String(studentId))) {
+        grouped.set(String(studentId), {
+          _id: String(studentId),
           student: fullStudent,
           activeEnrollments: [],
           firstEnrollmentDate: enrollment.enrollmentDate || null,
@@ -76,10 +118,11 @@ const EnrollmentManagement = () => {
         });
       }
 
-      const record = grouped.get(studentId);
+      const record = grouped.get(String(studentId));
       record.student = {
-        ...record.student,
-        ...fullStudent,
+        ...(record.student || {}),
+        ...(enrolledStudent || {}),
+        ...(fullStudent || {}),
       };
       record.activeEnrollments.push(enrollment);
 
@@ -107,6 +150,51 @@ const EnrollmentManagement = () => {
       dayjs(b.latestEnrollmentDate).valueOf() - dayjs(a.latestEnrollmentDate).valueOf(),
     );
   }, [enrollments, students]);
+
+  const openStatusModal = (record) => {
+    setSelectedRecord(record);
+    setSelectedStatus("Dropped");
+    setStatusModalOpen(true);
+  };
+
+  const closeStatusModal = (force = false) => {
+    if (statusSubmitting && !force) return;
+    setStatusModalOpen(false);
+    setSelectedRecord(null);
+    setSelectedStatus("Dropped");
+  };
+
+  const handleStatusChange = async () => {
+    if (!selectedRecord || !selectedStatus) return;
+
+    setStatusSubmitting(true);
+    try {
+      await Promise.all(
+        selectedRecord.activeEnrollments.map((enrollment) =>
+          updateEnrollmentStatus(enrollment._id, {
+            status: selectedStatus,
+            completionDate:
+              selectedStatus === "Completed" ? dayjs().format("YYYY-MM-DD") : null,
+          }),
+        ),
+      );
+
+      const selectedStatusMeta = STATUS_OPTIONS.find(
+        (option) => option.value === selectedStatus,
+      );
+      message.success(
+        `${selectedRecord.student?.studentName || "Student"} marked as ${
+          selectedStatusMeta?.label || selectedStatus
+        } successfully.`,
+      );
+      closeStatusModal(true);
+      await refreshData();
+    } catch (error) {
+      message.error(error?.message || error?.response?.data?.message || "Failed to update student status");
+    } finally {
+      setStatusSubmitting(false);
+    }
+  };
 
   const stats = useMemo(() => {
     const pendingInstallments = activeEnrolledStudents.reduce(
@@ -202,20 +290,48 @@ const EnrollmentManagement = () => {
     {
       title: "Status",
       key: "status",
-      render: () => <Tag color="green">Active Enrolled</Tag>,
+      render: (_, record) => (
+        <div className="flex flex-col gap-2">
+          <Tag color="green" style={{ width: "fit-content", marginInlineEnd: 0 }}>
+            Active Enrolled
+          </Tag>
+          <span className="text-xs text-[#64748B]">
+            {record.activeEnrollments.length} active course
+            {record.activeEnrollments.length > 1 ? "s" : ""}
+          </span>
+        </div>
+      ),
     },
     {
       title: "Actions",
       key: "actions",
       render: (_, record) => (
-        <Tooltip title="View full student details, course, installments, and payments">
-          <Button
-            type="primary"
-            icon={<EyeOutlined />}
-            onClick={() => navigate(`/dashboard/students/${record._id}`)}
-            style={{ background: "#01134C", borderColor: "#01134C" }}
-          />
-        </Tooltip>
+        <Space size="small" wrap>
+          <Tooltip title="View full student details, course, installments, and payments">
+            <Button
+              type="primary"
+              icon={<EyeOutlined />}
+              onClick={() => navigate(`/dashboard/students/${record._id}`)}
+              style={{ background: "#01134C", borderColor: "#01134C" }}
+            />
+          </Tooltip>
+          {permissions.update && (
+            <Tooltip title="Change student status to dropout or passout">
+              <Button
+                icon={<EditOutlined />}
+                onClick={() => openStatusModal(record)}
+                style={{
+                  borderColor: "#C7D2FE",
+                  color: "#312E81",
+                  background: "#EEF2FF",
+                  fontWeight: 600,
+                }}
+              >
+                Change Status
+              </Button>
+            </Tooltip>
+          )}
+        </Space>
       ),
     },
   ];
@@ -238,7 +354,7 @@ const EnrollmentManagement = () => {
             </p>
           </div>
         </div>
-        <Button icon={<ReloadOutlined />} onClick={fetchEnrollments}>
+        <Button icon={<ReloadOutlined />} onClick={refreshData}>
           Refresh
         </Button>
       </div>
@@ -276,6 +392,126 @@ const EnrollmentManagement = () => {
           locale={{ emptyText: "No active enrolled students found" }}
         />
       </Card>
+
+      <Modal
+        open={statusModalOpen}
+        centered
+        onCancel={closeStatusModal}
+        onOk={handleStatusChange}
+        confirmLoading={statusSubmitting}
+        okText="Confirm Status Change"
+        cancelText="Cancel"
+        okButtonProps={{
+          style: {
+            background: "#01134C",
+            borderColor: "#01134C",
+            height: 42,
+            borderRadius: 10,
+            fontWeight: 600,
+          },
+        }}
+        cancelButtonProps={{
+          style: {
+            height: 42,
+            borderRadius: 10,
+            fontWeight: 600,
+          },
+        }}
+        width={560}
+        title={null}
+      >
+        <div
+          style={{
+            padding: "8px 4px 4px",
+            fontFamily: "inherit",
+          }}
+        >
+          <div
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 16,
+              background: "linear-gradient(135deg, #01134C 0%, #1D4ED8 100%)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 18,
+            }}
+          >
+            <CheckCircleOutlined style={{ color: "#E8FC0A", fontSize: 24 }} />
+          </div>
+
+          <Typography.Title level={4} style={{ marginBottom: 8, color: "#0F172A" }}>
+            Update Student Status
+          </Typography.Title>
+          <Typography.Paragraph style={{ color: "#475569", marginBottom: 18 }}>
+            Change the status for{" "}
+            <strong>{selectedRecord?.student?.studentName || "this student"}</strong>.
+            After confirmation, the student will be removed from the active enrolled
+            students list and shown in the related student category tables.
+          </Typography.Paragraph>
+
+          <div
+            style={{
+              background: "#F8FAFC",
+              border: "1px solid #E2E8F0",
+              borderRadius: 14,
+              padding: 16,
+              marginBottom: 16,
+            }}
+          >
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 6 }}>
+              Student
+            </div>
+            <div style={{ fontWeight: 700, color: "#0F172A" }}>
+              {selectedRecord?.student?.studentName || "N/A"}
+            </div>
+            <div style={{ fontSize: 13, color: "#64748B", marginTop: 4 }}>
+              Registration No: {selectedRecord?.student?.registrationNo || "No registration no"}
+            </div>
+          </div>
+
+          <div>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: "#0F172A",
+                marginBottom: 8,
+              }}
+            >
+              Select new status
+            </div>
+            <Select
+              value={selectedStatus}
+              onChange={setSelectedStatus}
+              style={{ width: "100%" }}
+              size="large"
+              options={STATUS_OPTIONS.map((option) => ({
+                label: option.label,
+                value: option.value,
+              }))}
+            />
+            <div
+              style={{
+                marginTop: 12,
+                borderRadius: 12,
+                padding: "12px 14px",
+                background:
+                  STATUS_OPTIONS.find((option) => option.value === selectedStatus)?.bg ||
+                  "#F8FAFC",
+                color:
+                  STATUS_OPTIONS.find((option) => option.value === selectedStatus)?.color ||
+                  "#334155",
+                fontSize: 13,
+                fontWeight: 500,
+              }}
+            >
+              {STATUS_OPTIONS.find((option) => option.value === selectedStatus)?.helper}
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

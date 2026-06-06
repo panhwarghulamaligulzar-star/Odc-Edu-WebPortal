@@ -112,6 +112,38 @@ const matchesStudentCategory = (student, category) => {
   return true;
 };
 
+const getStudentLifecycleStatus = (student) => {
+  if (hasActiveEnrollment(student)) {
+    return {
+      label: "Active",
+      color: "green",
+      note: "Student has at least one active assigned course.",
+    };
+  }
+
+  if (hasDroppedEnrollment(student)) {
+    return {
+      label: "Dropout",
+      color: "orange",
+      note: "Student was moved to the dropout list.",
+    };
+  }
+
+  if (hasCompletedEnrollment(student)) {
+    return {
+      label: "Passout",
+      color: "purple",
+      note: "Student completed the assigned course.",
+    };
+  }
+
+  return {
+    label: "Pending",
+    color: "default",
+    note: "No active course assigned yet.",
+  };
+};
+
 // ─── PDF DESIGN CONSTANTS ──────────────────────────────────────────────────────
 const PDF_COLORS = {
   primary:      [15,  40, 100],    // Deep navy  — used for text & accents
@@ -303,6 +335,7 @@ const Students = () => {
   const [availableBatches, setAvailableBatches] = useState([]);
   const [importModalVisible, setImportModalVisible] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [exportingWorkbook, setExportingWorkbook] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const fileInputRef = useRef(null);
   const [tablePageSize, setTablePageSize] = useState(3);
@@ -472,6 +505,26 @@ const Students = () => {
     }
   };
 
+  const resetStudentTableView = () => {
+    setSearchText("");
+    setGenderFilter("all");
+    setEnrollmentFilter("all");
+    setCourseFilter("all");
+    setBatchFilter("all");
+    setActiveStudentCategory("all");
+    setTablePage(1);
+  };
+
+  const closeStudentModal = () => {
+    setModalVisible(false);
+    form.resetFields();
+    setEditMode(false);
+    setEditingStudent(null);
+    setProfilePicture(null);
+    setProfilePictureUrl(null);
+    setStudentFormTab("photo");
+  };
+
   const handleCreateStudent = async (values) => {
     if (!permissions.create) {
       message.error("You do not have permission to create students");
@@ -495,11 +548,9 @@ const Students = () => {
       });
       if (response.data.success) {
         message.success("Student created successfully!");
-        form.resetFields();
-        setProfilePicture(null);
-        setProfilePictureUrl(null);
-        setModalVisible(false);
-        fetchStudents();
+        closeStudentModal();
+        resetStudentTableView();
+        await fetchStudents();
       }
     } catch (error) {
       message.error(error.response?.data?.message || "Failed to create student");
@@ -533,12 +584,7 @@ const Students = () => {
       );
       if (response.data.success) {
         message.success("Student updated successfully!");
-        form.resetFields();
-        setProfilePicture(null);
-        setProfilePictureUrl(null);
-        setModalVisible(false);
-        setEditMode(false);
-        setEditingStudent(null);
+        closeStudentModal();
         fetchStudents();
       }
     } catch (error) {
@@ -912,6 +958,209 @@ const Students = () => {
     }
   };
 
+  const formatExcelDate = (value) =>
+    value ? dayjs(value).format("YYYY-MM-DD") : "";
+
+  const downloadStudentsWorkbook = async () => {
+    if (!permissions.export) {
+      message.error("You do not have permission to export students");
+      return;
+    }
+
+    try {
+      setExportingWorkbook(true);
+
+      const studentIds = new Set(students.map((student) => student._id));
+      const studentsById = new Map(
+        students.map((student) => [student._id, student]),
+      );
+      const feeStructureIds = new Set();
+      const studentRows = [];
+      const enrollmentRows = [];
+      const installmentRows = [];
+      const additionalFeeRows = [];
+
+      students.forEach((student) => {
+        studentRows.push({
+          "Student Name": student.studentName || "",
+          "Registration No": student.registrationNo || "",
+          "Registration Date": formatExcelDate(student.registrationDate),
+          Gender: student.gender || "",
+          "Date of Birth": formatExcelDate(student.dateOfBirth),
+          Religion: student.religion || "",
+          "CNIC/B-Form": student.cnicOrBForm || "",
+          "Mobile Number": student.mobileNumber || "",
+          "Father Name": student.fatherName || "",
+          "Father CNIC": student.fatherCnic || "",
+          "Father Contact": student.fatherContact || "",
+          "Emergency Contact": student.emergencyContactNumber || "",
+          "Permanent Address": student.permanentAddress || "",
+          "Current Address": student.currentAddress || "",
+          "WhatsApp Number": student.whatsappNumber || "",
+          Email: student.emailAddress || "",
+          District: student.district || "",
+          Tehsil: student.tehsil || "",
+          "Union Council": student.unionCouncil || "",
+          Reference: student.reference || "",
+        });
+
+        const enrollments = Array.isArray(student.enrollments)
+          ? student.enrollments
+          : [];
+
+        enrollments.forEach((enrollment) => {
+          const feeStructure = enrollment.feeStructure || {};
+
+          if (feeStructure?._id) {
+            feeStructureIds.add(feeStructure._id);
+          }
+
+          enrollmentRows.push({
+            "Registration No": student.registrationNo || "",
+            "CNIC/B-Form": student.cnicOrBForm || "",
+            "Course Name": enrollment.course?.courseName || "",
+            "Course ID": enrollment.course?.courseId || "",
+            "Batch Name": enrollment.batch?.batchName || "",
+            "Batch Code": enrollment.batch?.batchCode || "",
+            "Enrollment Date": formatExcelDate(enrollment.enrollmentDate),
+            "Enrollment Status": enrollment.status || "Active",
+            "Payment Plan Type": feeStructure.paymentPlanType || "custom",
+            "Number Of Installments": feeStructure.numberOfInstallments || 1,
+            "Admission Fee": feeStructure.admissionFee ?? "",
+            "Course Fee": feeStructure.courseFee ?? "",
+            "Certificate Fee": feeStructure.certificateFee ?? "",
+            "Exam Fee": feeStructure.examFee ?? "",
+            "Registration Fee": feeStructure.registrationFee ?? "",
+            "Practical Fee": feeStructure.practicalFee ?? "",
+            "Other Fee": feeStructure.otherFee ?? "",
+            "Discount Percentage": feeStructure.discountPercentage ?? 0,
+            "Discount On Course Fee":
+              feeStructure.discountOnCourseFee ?? feeStructure.discount ?? 0,
+            "Paid Amount": feeStructure.paidAmount ?? 0,
+            "Enrollment Notes": enrollment.notes || "",
+            "Fee Notes": feeStructure.notes || "",
+          });
+
+          (Array.isArray(feeStructure.installments)
+            ? feeStructure.installments
+            : []
+          ).forEach((installment) => {
+            installmentRows.push({
+              "Registration No": student.registrationNo || "",
+              "CNIC/B-Form": student.cnicOrBForm || "",
+              "Course Name": enrollment.course?.courseName || "",
+              "Course ID": enrollment.course?.courseId || "",
+              "Installment Number": installment.installmentNumber || "",
+              Description: installment.description || "",
+              "Due Date": formatExcelDate(installment.dueDate),
+              Amount: installment.amount ?? 0,
+              Status: installment.status || "Pending",
+              "Paid Amount": installment.paidAmount ?? 0,
+              "Admission Fee": installment.feeComponents?.admissionFee ?? 0,
+              "Course Fee": installment.feeComponents?.courseFee ?? 0,
+              "Certificate Fee": installment.feeComponents?.certificateFee ?? 0,
+              "Exam Fee": installment.feeComponents?.examFee ?? 0,
+              "Registration Fee": installment.feeComponents?.registrationFee ?? 0,
+              "Practical Fee": installment.feeComponents?.practicalFee ?? 0,
+              "Other Fee": installment.feeComponents?.otherFee ?? 0,
+            });
+          });
+
+          (Array.isArray(feeStructure.additionalFees)
+            ? feeStructure.additionalFees
+            : []
+          ).forEach((fee) => {
+            additionalFeeRows.push({
+              "Registration No": student.registrationNo || "",
+              "CNIC/B-Form": student.cnicOrBForm || "",
+              "Course Name": enrollment.course?.courseName || "",
+              "Course ID": enrollment.course?.courseId || "",
+              "Fee Type": fee.feeType || "other",
+              Title: fee.title || "",
+              Amount: fee.amount ?? 0,
+              "Payment Mode": fee.paymentMode || "one_time",
+            });
+          });
+        });
+      });
+
+      const paymentsResponse = await api.get("/fee/payment", {
+        params: { limit: 10000 },
+      });
+
+      const allPayments = paymentsResponse.data?.success
+        ? paymentsResponse.data.data || []
+        : [];
+
+      const paymentRows = allPayments
+        .filter((payment) => {
+          const studentId = payment.student?._id || payment.student;
+          const feeStructureId =
+            payment.feeStructure?._id || payment.feeStructure;
+          return studentIds.has(studentId) || feeStructureIds.has(feeStructureId);
+        })
+        .map((payment) => {
+          const studentId = payment.student?._id || payment.student;
+          const linkedStudent = studentsById.get(studentId);
+
+          return {
+            "Registration No":
+              payment.student?.registrationNo || linkedStudent?.registrationNo || "",
+            "CNIC/B-Form":
+              payment.student?.cnicOrBForm || linkedStudent?.cnicOrBForm || "",
+            "Course Name": payment.course?.courseName || "",
+            "Course ID": payment.course?.courseId || "",
+            "Installment Number": payment.installmentNumber || "",
+            Amount: payment.amount ?? 0,
+            "Payment Date": formatExcelDate(payment.paymentDate),
+            "Payment Method": payment.paymentMethod || "Cash",
+            "Voucher No": payment.voucherNo || "",
+            Remarks: payment.remarks || "",
+            "Payment Type": payment.paymentType || "",
+          };
+        });
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet(studentRows),
+        "Students",
+      );
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet(enrollmentRows),
+        "Enrollments",
+      );
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet(installmentRows),
+        "Installments",
+      );
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet(additionalFeeRows),
+        "Additional Fees",
+      );
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.json_to_sheet(paymentRows),
+        "Payments",
+      );
+
+      XLSX.writeFile(
+        workbook,
+        `students-complete-export-${dayjs().format("YYYY-MM-DD")}.xlsx`,
+      );
+
+      message.success("Excel workbook downloaded successfully");
+    } catch (error) {
+      console.error("Workbook export failed:", error);
+      message.error(error.response?.data?.message || "Failed to export workbook");
+    } finally {
+      setExportingWorkbook(false);
+    }
+  };
+
   // Handle bulk import of students from CSV/Excel
   const downloadImportTemplate = () => {
     const workbook = XLSX.utils.book_new();
@@ -1177,6 +1426,26 @@ const Students = () => {
               </p>
             </div>
             <div className="flex gap-2">
+              {permissions.export && (
+                <Button
+                  type="default"
+                  icon={<FaFileDownload />}
+                  onClick={downloadStudentsWorkbook}
+                  loading={exportingWorkbook}
+                  size="middle"
+                  style={{
+                    background: "#EFF6FF",
+                    borderColor: "#BFDBFE",
+                    color: "#1D4ED8",
+                    borderRadius: "10px",
+                    height: "40px",
+                    paddingInline: "16px",
+                    fontWeight: 600,
+                  }}
+                >
+                  Download Excel
+                </Button>
+              )}
               {permissions.import && (
                 <Button
                   type="default"
@@ -1613,14 +1882,43 @@ const Students = () => {
                 <Table.Column
                   title={
                     <span className="text-[14px] text-gray-700 font-ArialLight text-nowrap">
-                      Enrollment
+                      {activeStudentCategory === "active" ? "Enrollment" : "Student Status"}
                     </span>
                   }
                   key="courses"
                   width={260}
-                  render={(record) => (
+                  render={(record) => {
+                    const lifecycleStatus = getStudentLifecycleStatus(record);
+                    const activeEnrollments = Array.isArray(record.enrollments)
+                      ? record.enrollments.filter(
+                          (enrollment) =>
+                            normalizeEnrollmentStatus(enrollment.status) === "active",
+                        )
+                      : [];
+
+                    if (activeStudentCategory !== "active") {
+                      return (
+                        <div>
+                          <Tag
+                            color={lifecycleStatus.color}
+                            style={{
+                              width: "fit-content",
+                              margin: 0,
+                              fontSize: "12px",
+                              fontWeight: 600,
+                              paddingInline: "10px",
+                              borderRadius: "999px",
+                            }}
+                          >
+                            {lifecycleStatus.label}
+                          </Tag>
+                        </div>
+                      );
+                    }
+
+                    return (
                     <div>
-                      {record.enrollments && record.enrollments.length > 0 ? (
+                      {activeEnrollments.length > 0 ? (
                         <div
                           style={{
                             display: "flex",
@@ -1628,7 +1926,7 @@ const Students = () => {
                             gap: "6px",
                           }}
                         >
-                          {record.enrollments.slice(0, 2).map((enrollment) => (
+                          {activeEnrollments.slice(0, 2).map((enrollment) => (
                             <Tooltip
                               key={enrollment._id}
                               title={
@@ -1721,11 +2019,8 @@ const Students = () => {
                                       </span>
                                     )}
                                   </div>
-                                  <Tag
-                                    color={enrollment.status === "Active" ? "green" : "orange"}
-                                    style={{ fontSize: "10px", margin: 0 }}
-                                  >
-                                    {enrollment.status}
+                                  <Tag color="green" style={{ fontSize: "10px", margin: 0 }}>
+                                    Active
                                   </Tag>
                                 </div>
                                 {enrollment.batch && (
@@ -1780,7 +2075,7 @@ const Students = () => {
                               </div>
                             </Tooltip>
                           ))}
-                          {record.enrollments.length > 2 && (
+                          {activeEnrollments.length > 2 && (
                             <Tag
                               color="blue"
                               style={{
@@ -1789,17 +2084,18 @@ const Students = () => {
                                 textAlign: "center",
                               }}
                             >
-                              +{record.enrollments.length - 2} more courses
+                              +{activeEnrollments.length - 2} more courses
                             </Tag>
                           )}
                         </div>
                       ) : (
                         <Tag color="default" style={{ fontSize: "12px" }}>
-                          No enrollments
+                          No active enrollments
                         </Tag>
                       )}
                     </div>
-                  )}
+                    );
+                  }}
                 />
 
                 {/* Actions Column */}
@@ -1812,73 +2108,77 @@ const Students = () => {
                   key="actions"
                   width={270}
                   fixed="right"
-                  render={(record) => (
-                    <Space size="small" wrap>
-                      {permissions.create && (
-                        <Tooltip title="Assign Course">
+                  render={(record) => {
+                    const showManagementActions = activeStudentCategory === "all";
+
+                    return (
+                      <Space size="small" wrap>
+                        {showManagementActions && permissions.create && (
+                          <Tooltip title="Assign Course">
+                            <Button
+                              onClick={() => openCourseAssignModal(record)}
+                              style={{
+                                background: "#ECFDF5",
+                                borderColor: "#A7F3D0",
+                                color: "#065F46",
+                                borderRadius: "999px",
+                                fontWeight: 600,
+                              }}
+                              size="small"
+                            >
+                              Assign Course
+                            </Button>
+                          </Tooltip>
+                        )}
+                        <Tooltip title="View Full Profile">
                           <Button
-                            onClick={() => openCourseAssignModal(record)}
+                            type="primary"
+                            icon={<FaEye />}
+                            onClick={() => navigate(`/dashboard/students/${record._id}`)}
                             style={{
-                              background: "#ECFDF5",
-                              borderColor: "#A7F3D0",
-                              color: "#065F46",
-                              borderRadius: "999px",
-                              fontWeight: 600,
-                            }}
-                            size="small"
-                          >
-                            Assign Course
-                          </Button>
-                        </Tooltip>
-                      )}
-                      <Tooltip title="View Full Profile">
-                        <Button
-                          type="primary"
-                          icon={<FaEye />}
-                          onClick={() => navigate(`/dashboard/students/${record._id}`)}
-                          style={{
-                            background: "#01134C",
-                            borderColor: "#01134C",
-                            borderRadius: "8px",
-                          }}
-                          size="small"
-                        />
-                      </Tooltip>
-                      {permissions.update && (
-                        <Tooltip title="Edit Student">
-                          <Button
-                            icon={<FaEdit />}
-                            onClick={() => openEditModal(record)}
-                            style={{
-                              borderColor: "#667eea",
-                              color: "#667eea",
+                              background: "#01134C",
+                              borderColor: "#01134C",
                               borderRadius: "8px",
                             }}
                             size="small"
                           />
                         </Tooltip>
-                      )}
-                      {permissions.delete && (
-                        <Popconfirm
-                          title="Delete Student"
-                          description="Are you sure you want to delete this student?"
-                          onConfirm={() => handleDeleteStudent(record._id)}
-                          okText="Yes"
-                          cancelText="No"
-                          okButtonProps={{ danger: true }}
-                        >
-                          <Tooltip title="Delete Student">
+                        {showManagementActions && permissions.update && (
+                          <Tooltip title="Edit Student">
                             <Button
-                              danger
-                              icon={<FaTrash />}
-                              style={{ borderRadius: "8px" }}
+                              icon={<FaEdit />}
+                              onClick={() => openEditModal(record)}
+                              style={{
+                                borderColor: "#667eea",
+                                color: "#667eea",
+                                borderRadius: "8px",
+                              }}
                               size="small"
                             />
                           </Tooltip>
-                        </Popconfirm>
-                      )}
-                    </Space>
-                  )}
+                        )}
+                        {showManagementActions && permissions.delete && (
+                          <Popconfirm
+                            title="Delete Student"
+                            description="Are you sure you want to delete this student?"
+                            onConfirm={() => handleDeleteStudent(record._id)}
+                            okText="Yes"
+                            cancelText="No"
+                            okButtonProps={{ danger: true }}
+                          >
+                            <Tooltip title="Delete Student">
+                              <Button
+                                danger
+                                icon={<FaTrash />}
+                                style={{ borderRadius: "8px" }}
+                                size="small"
+                              />
+                            </Tooltip>
+                          </Popconfirm>
+                        )}
+                      </Space>
+                    );
+                  }}
                 />
               </Table>
             </div>
@@ -1894,13 +2194,7 @@ const Students = () => {
           </div>
         }
         open={modalVisible}
-        onCancel={() => {
-          setModalVisible(false);
-          form.resetFields();
-          setEditMode(false);
-          setEditingStudent(null);
-          setStudentFormTab("photo");
-        }}
+        onCancel={closeStudentModal}
         footer={null}
         width={960}
         centered
