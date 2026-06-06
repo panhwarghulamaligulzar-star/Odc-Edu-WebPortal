@@ -140,6 +140,71 @@ const SideBarManu = () => {
     },
   ];
 
+  const renderStudentsSection = () => {
+    if (!showStudents) return null;
+
+    return (
+      <li className="mb-1">
+        {appMinMixView ? (
+          <NavLink
+            to="/dashboard/students/all"
+            className={({ isActive: navIsActive }) =>
+              `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border hover:bg-[#0e215fc7] w-[60px] ${
+                navIsActive || isStudentsSectionActive
+                  ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
+                  : "bg-transparent border-primary"
+              }`
+            }
+          >
+            {StudentIcon ? <StudentIcon size={22} /> : null}
+          </NavLink>
+        ) : (
+          <>
+            <button
+              onClick={() => setStudentsOpen((prev) => !prev)}
+              className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 border w-full hover:bg-[#0e215fc7] ${
+                isStudentsSectionActive
+                  ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
+                  : "bg-transparent border-primary"
+              }`}
+            >
+              {StudentIcon ? <StudentIcon size={22} className="text-accent shrink-0" /> : null}
+              <span className="text-[14px] text-accent font-semibold flex-1 text-left">
+                Students
+              </span>
+              {studentsOpen ? (
+                <MdKeyboardArrowDown size={18} className="text-accent" />
+              ) : (
+                <MdKeyboardArrowRight size={18} className="text-accent" />
+              )}
+            </button>
+
+            {studentsOpen && (
+              <ul className="mt-2 space-y-1 pl-4">
+                {studentLinks.map((item) => (
+                  <li key={item.path}>
+                    <NavLink
+                      to={item.path}
+                      className={({ isActive: navIsActive }) =>
+                        `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border ${
+                          navIsActive
+                            ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
+                            : "bg-transparent border-primary hover:bg-[#0e215fc7]"
+                        }`
+                      }
+                    >
+                      <span className="text-[13px] text-accent">{item.title}</span>
+                    </NavLink>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+      </li>
+    );
+  };
+
   return (
     <div className="h-full shadow-lg bg-primary text-white flex flex-col">
       <div className="p-6 flex justify-center items-center flex-col gap-[15px]">
@@ -162,107 +227,49 @@ const SideBarManu = () => {
               : undefined;
 
             return (
-              <li key={link.key}>
-                {isSuperAdminDashboardLink ? (
-                  <Link
-                    to={link.path}
-                    className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border hover:bg-[#0e215fc7] ${
-                      appMinMixView ? "w-[60px]" : "w-full"
-                    } ${
-                      isActive
-                        ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
-                        : "bg-transparent border-primary"
-                    }`}
-                  >
-                    <Icon size={22} />
-                    {!appMinMixView && (
-                      <span className="text-[14px] text-accent">{link.label}</span>
-                    )}
-                  </Link>
-                ) : (
-                  <NavLink
-                    to={link.path}
-                    end={link.path === "/dashboard"}
-                    className={({ isActive: navIsActive }) =>
-                      `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border hover:bg-[#0e215fc7] ${
+              <React.Fragment key={link.key}>
+                <li>
+                  {isSuperAdminDashboardLink ? (
+                    <Link
+                      to={link.path}
+                      className={`flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border hover:bg-[#0e215fc7] ${
                         appMinMixView ? "w-[60px]" : "w-full"
                       } ${
-                        navIsActive
+                        isActive
                           ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
                           : "bg-transparent border-primary"
-                      }`
-                    }
-                  >
-                    <Icon size={22} />
-                    {!appMinMixView && (
-                      <span className="text-[14px] text-accent">{link.label}</span>
-                    )}
-                  </NavLink>
-                )}
-              </li>
+                      }`}
+                    >
+                      <Icon size={22} />
+                      {!appMinMixView && (
+                        <span className="text-[14px] text-accent">{link.label}</span>
+                      )}
+                    </Link>
+                  ) : (
+                    <NavLink
+                      to={link.path}
+                      end={link.path === "/dashboard"}
+                      className={({ isActive: navIsActive }) =>
+                        `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border hover:bg-[#0e215fc7] ${
+                          appMinMixView ? "w-[60px]" : "w-full"
+                        } ${
+                          navIsActive
+                            ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
+                            : "bg-transparent border-primary"
+                        }`
+                      }
+                    >
+                      <Icon size={22} />
+                      {!appMinMixView && (
+                        <span className="text-[14px] text-accent">{link.label}</span>
+                      )}
+                    </NavLink>
+                  )}
+                </li>
+                {link.key === "employees" && renderStudentsSection()}
+              </React.Fragment>
             );
           })}
-
-          {showStudents && (
-            <li className="mb-1">
-              {appMinMixView ? (
-                <NavLink
-                  to="/dashboard/students/all"
-                  className={({ isActive: navIsActive }) =>
-                    `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border hover:bg-[#0e215fc7] w-[60px] ${
-                      navIsActive || isStudentsSectionActive
-                        ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
-                        : "bg-transparent border-primary"
-                    }`
-                  }
-                >
-                  {StudentIcon ? <StudentIcon size={22} /> : null}
-                </NavLink>
-              ) : (
-                <>
-                  <button
-                    onClick={() => setStudentsOpen((prev) => !prev)}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 border w-full hover:bg-[#0e215fc7] ${
-                      isStudentsSectionActive
-                        ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
-                        : "bg-transparent border-primary"
-                    }`}
-                  >
-                    {StudentIcon ? <StudentIcon size={22} className="text-accent shrink-0" /> : null}
-                    <span className="text-[14px] text-accent font-semibold flex-1 text-left">
-                      Students
-                    </span>
-                    {studentsOpen ? (
-                      <MdKeyboardArrowDown size={18} className="text-accent" />
-                    ) : (
-                      <MdKeyboardArrowRight size={18} className="text-accent" />
-                    )}
-                  </button>
-
-                  {studentsOpen && (
-                    <ul className="mt-2 space-y-1 pl-4">
-                      {studentLinks.map((item) => (
-                        <li key={item.path}>
-                          <NavLink
-                            to={item.path}
-                            className={({ isActive: navIsActive }) =>
-                              `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border ${
-                                navIsActive
-                                  ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
-                                  : "bg-transparent border-primary hover:bg-[#0e215fc7]"
-                              }`
-                            }
-                          >
-                            <span className="text-[13px] text-accent">{item.title}</span>
-                          </NavLink>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </>
-              )}
-            </li>
-          )}
 
           {superAdminMode && (
             <li className="mb-2 mt-2">

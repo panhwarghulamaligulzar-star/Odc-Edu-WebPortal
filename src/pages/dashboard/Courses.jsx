@@ -9,6 +9,9 @@ import {
   Tabs,
   Pagination,
   Input,
+  Upload,
+  Card,
+  Tag,
 } from "antd";
 import LoaderSpnar from "../../components/loader/loaderSpnar";
 import React, { useState, useEffect } from "react";
@@ -30,6 +33,9 @@ import {
   FaMale,
   FaFemale,
   FaUsers,
+  FaFileDownload,
+  FaFileImport,
+  FaFileExcel,
 } from "react-icons/fa";
 import { UserOutlined } from "@ant-design/icons";
 import { MdMenuBook } from "react-icons/md";
@@ -40,10 +46,13 @@ import {
   getCourses,
   updateCourse,
   deleteCourse,
+  bulkImportCoursesWorkbook,
 } from "../../services/feeService";
-import { getBatchesByCourse } from "../../services/batchService";
+import { getAllBatches, getBatchesByCourse } from "../../services/batchService";
 import { EditIcon, GraduationCap } from "lucide-react";
 import { useModulePermissions } from "../../hooks/usePermissions";
+import * as XLSX from "xlsx";
+import dayjs from "dayjs";
 
 const COURSES_PER_PAGE = 10;
 
@@ -62,6 +71,10 @@ const Courses = () => {
   const [selectedBatchCourseId, setSelectedBatchCourseId] = useState(null);
   const [courseSearchTerm, setCourseSearchTerm] = useState("");
   const [coursePage, setCoursePage] = useState(1);
+  const [importModalVisible, setImportModalVisible] = useState(false);
+  const [importingWorkbook, setImportingWorkbook] = useState(false);
+  const [exportingWorkbook, setExportingWorkbook] = useState(false);
+  const [importResult, setImportResult] = useState(null);
 
   // Fetch courses on mount
   useEffect(() => {
@@ -81,6 +94,152 @@ const Courses = () => {
     } finally {
       setFetchingCourses(false);
     }
+  };
+
+  const downloadCoursesWorkbookTemplate = () => {
+    const workbook = XLSX.utils.book_new();
+
+    const coursesSheet = XLSX.utils.json_to_sheet([
+      {
+        "Course ID": "IT-006",
+        "Course Name": "Graphic Designing",
+        "Course Category": "IT & Vocational",
+        Duration: 4,
+        "Admission Fee": 2000,
+        "Course Fee": 22000,
+        "Certificate Fee": 3000,
+        "Exam Fee": 0,
+        "Registration Fee": 0,
+        "Practical Fee": 0,
+        "Other Fee": 0,
+        "Include Exam Fee In Installments": "No",
+        "Include Registration Fee In Installments": "No",
+        "Include Practical Fee In Installments": "No",
+        "Include Other Fee In Installments": "No",
+        "Teacher IDs": "",
+      },
+    ]);
+
+    const batchesSheet = XLSX.utils.json_to_sheet([
+      {
+        "Batch Code": "GD-M-01",
+        "Batch Name": "Graphic Design Morning Batch",
+        "Course ID": "IT-006",
+        Shift: "Morning",
+        Days: "Monday to Saturday",
+        "Hours Per Day": 2,
+        "Start Date": "2026-06-10",
+        "End Date": "2026-10-10",
+        "Max Students": 30,
+        Status: "Active",
+        Description: "Morning regular batch",
+        "Is Active": "Yes",
+      },
+    ]);
+
+    XLSX.utils.book_append_sheet(workbook, coursesSheet, "Courses");
+    XLSX.utils.book_append_sheet(workbook, batchesSheet, "Batches");
+    XLSX.writeFile(
+      workbook,
+      `courses-batches-template-${dayjs().format("YYYY-MM-DD")}.xlsx`,
+    );
+  };
+
+  const downloadCoursesWorkbook = async () => {
+    setExportingWorkbook(true);
+    try {
+      const batchesResponse = await getAllBatches();
+      const allBatches = batchesResponse?.success ? batchesResponse.data || [] : [];
+      const workbook = XLSX.utils.book_new();
+
+      const coursesSheet = XLSX.utils.json_to_sheet(
+        courses.map((course) => ({
+          "Course ID": course.courseId || "",
+          "Course Name": course.courseName || "",
+          "Course Category": course.courseCategory || "",
+          Duration: course.duration || "",
+          "Admission Fee": course.admissionFee || 0,
+          "Course Fee": course.courseFee || 0,
+          "Certificate Fee": course.certificateFee || 0,
+          "Exam Fee": course.examFee || 0,
+          "Registration Fee": course.registrationFee || 0,
+          "Practical Fee": course.practicalFee || 0,
+          "Other Fee": course.otherFee || 0,
+          "Include Exam Fee In Installments": course.includeExamFeeInInstallments
+            ? "Yes"
+            : "No",
+          "Include Registration Fee In Installments":
+            course.includeRegistrationFeeInInstallments ? "Yes" : "No",
+          "Include Practical Fee In Installments":
+            course.includePracticalFeeInInstallments ? "Yes" : "No",
+          "Include Other Fee In Installments":
+            course.includeOtherFeeInInstallments ? "Yes" : "No",
+          "Teacher IDs": Array.isArray(course.teacherId)
+            ? course.teacherId
+                .map((teacher) => teacher?.teacherId || teacher?.fullName || "")
+                .filter(Boolean)
+                .join(", ")
+            : "",
+        })),
+      );
+
+      const batchesSheet = XLSX.utils.json_to_sheet(
+        allBatches.map((batch) => ({
+          "Batch Code": batch.batchCode || "",
+          "Batch Name": batch.batchName || "",
+          "Course ID": batch.course?.courseId || "",
+          Shift: batch.shift || "",
+          Days: batch.days || "",
+          "Hours Per Day": batch.hoursPerDay || "",
+          "Start Date": batch.startDate
+            ? dayjs(batch.startDate).format("YYYY-MM-DD")
+            : "",
+          "End Date": batch.endDate ? dayjs(batch.endDate).format("YYYY-MM-DD") : "",
+          "Max Students": batch.maxStudents || 30,
+          Status: batch.status || "Active",
+          Description: batch.description || "",
+          "Is Active": batch.isActive === false ? "No" : "Yes",
+        })),
+      );
+
+      XLSX.utils.book_append_sheet(workbook, coursesSheet, "Courses");
+      XLSX.utils.book_append_sheet(workbook, batchesSheet, "Batches");
+      XLSX.writeFile(
+        workbook,
+        `courses-batches-export-${dayjs().format("YYYY-MM-DD")}.xlsx`,
+      );
+    } catch (error) {
+      message.error("Failed to export courses workbook");
+    } finally {
+      setExportingWorkbook(false);
+    }
+  };
+
+  const handleCoursesWorkbookImport = async (file) => {
+    if (!permissions.import) {
+      message.warning("You do not have permission to import courses.");
+      return Upload.LIST_IGNORE;
+    }
+
+    setImportingWorkbook(true);
+    try {
+      const response = await bulkImportCoursesWorkbook(file);
+      if (response.success) {
+        setImportResult(response.data);
+        message.success(
+          `Import completed: ${response.data.coursesImported} courses, ${response.data.batchesImported} batches added`,
+        );
+        await fetchCourses();
+      } else {
+        message.error(response.message || "Import failed");
+      }
+    } catch (error) {
+      message.error(error.message || "Failed to import course workbook");
+    } finally {
+      setImportingWorkbook(false);
+    }
+
+    return false;
   };
 
   const handleCreateCourse = async (values) => {
@@ -682,10 +841,10 @@ const Courses = () => {
         footer={null}
         width={900}
         centered
-      >
-        <div
-          style={{ maxHeight: "800px", overflowY: "auto", paddingRight: "8px" }}
         >
+          <div
+            style={{ maxHeight: "800px", overflowY: "auto", paddingRight: "8px" }}
+          >
           <CourseForm
             form={form}
             loading={loading}
@@ -693,6 +852,141 @@ const Courses = () => {
             submitLabel={editMode ? "Update Course" : "Create Course"}
           />
         </div>
+      </Modal>
+
+      <Modal
+        open={importModalVisible}
+        onCancel={() => setImportModalVisible(false)}
+        footer={null}
+        centered
+        width={640}
+        title={
+          <div className="flex items-center gap-2 text-[#166534]">
+            <FaFileExcel />
+            <span style={{ fontSize: "18px", fontWeight: 700 }}>
+              Import Courses & Batches Workbook
+            </span>
+          </div>
+        }
+      >
+        <div
+          style={{
+            border: "2px dashed #16A34A",
+            borderRadius: "18px",
+            padding: "28px 22px",
+            background: "linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 100%)",
+            textAlign: "center",
+          }}
+        >
+          <div className="flex justify-center mb-4 text-[#15803D] text-[54px]">
+            <FaFileExcel />
+          </div>
+          <div style={{ fontSize: "15px", color: "#166534", fontWeight: 600 }}>
+            Upload one workbook with both Courses and Batches tabs
+          </div>
+          <div style={{ fontSize: "13px", color: "#15803D", marginTop: "8px" }}>
+            Supported formats: `.xlsx`, `.xls`, `.csv`
+          </div>
+
+          <div className="flex justify-center gap-3 mt-6 flex-wrap">
+            <Upload
+              accept=".xlsx,.xls,.csv"
+              beforeUpload={handleCoursesWorkbookImport}
+              showUploadList={false}
+            >
+              <Button
+                type="primary"
+                icon={<FaFileImport />}
+                loading={importingWorkbook}
+                style={{
+                  background: "#15803D",
+                  borderColor: "#15803D",
+                  borderRadius: "10px",
+                  height: "40px",
+                  paddingInline: "18px",
+                  fontWeight: 600,
+                }}
+              >
+                Upload File
+              </Button>
+            </Upload>
+            <Button
+              icon={<FaFileDownload />}
+              onClick={downloadCoursesWorkbookTemplate}
+              style={{
+                borderColor: "#16A34A",
+                color: "#166534",
+                borderRadius: "10px",
+                height: "40px",
+                paddingInline: "18px",
+                fontWeight: 600,
+              }}
+            >
+              Download Template
+            </Button>
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: "18px",
+            padding: "16px",
+            borderRadius: "14px",
+            background: "#F8FAFC",
+            border: "1px solid #E2E8F0",
+          }}
+        >
+          <div style={{ fontWeight: 700, color: "#334155", marginBottom: "8px" }}>
+            Workbook Tabs
+          </div>
+          <div style={{ fontSize: "13px", color: "#64748B", lineHeight: 1.7 }}>
+            <div><strong>Courses</strong>: create or update course records.</div>
+            <div><strong>Batches</strong>: create or update batches linked with courses.</div>
+          </div>
+        </div>
+
+        {importResult && (
+          <div
+            style={{
+              marginTop: "18px",
+              padding: "16px",
+              borderRadius: "14px",
+              background: "#FEFCE8",
+              border: "1px solid #FACC15",
+            }}
+          >
+            <div style={{ fontWeight: 700, color: "#92400E", marginBottom: "10px" }}>
+              Import Summary
+            </div>
+            <div style={{ color: "#713F12", fontSize: "14px", lineHeight: 1.8 }}>
+              <div>{importResult.coursesImported || 0} new courses imported</div>
+              <div>{importResult.coursesUpdated || 0} existing courses updated</div>
+              <div>{importResult.batchesImported || 0} new batches imported</div>
+              <div>{importResult.batchesUpdated || 0} existing batches updated</div>
+              <div>{importResult.errors?.length || 0} errors</div>
+            </div>
+            {importResult.errors?.length > 0 && (
+              <div
+                style={{
+                  marginTop: "12px",
+                  maxHeight: "160px",
+                  overflowY: "auto",
+                  background: "white",
+                  borderRadius: "10px",
+                  border: "1px solid #FDE68A",
+                  padding: "10px 12px",
+                  color: "#B91C1C",
+                  fontSize: "13px",
+                  lineHeight: 1.7,
+                }}
+              >
+                {importResult.errors.map((error, index) => (
+                  <div key={`${error}-${index}`}>{error}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
 
       <div className="courses-module flex justify-between items-center mb-6">
@@ -710,16 +1004,56 @@ const Courses = () => {
             </p>
           </div>
         </div>
-        {activeTab === "courses" && permissions.create && (
-          <Button
-            onClick={openCreateModal}
-            type="primary"
-            icon={<FaPlus />}
-            size="large"
-            className="btn-lg"
-          >
-            Create New Course
-          </Button>
+        {activeTab === "courses" && (
+          <div className="flex items-center gap-2">
+            {permissions.export && (
+              <Button
+                onClick={downloadCoursesWorkbook}
+                icon={<FaFileDownload />}
+                size="large"
+                loading={exportingWorkbook}
+                style={{
+                  background: "#EFF6FF",
+                  borderColor: "#BFDBFE",
+                  color: "#1D4ED8",
+                  borderRadius: "12px",
+                  fontWeight: 600,
+                }}
+              >
+                Download Excel
+              </Button>
+            )}
+            {permissions.import && (
+              <Button
+                onClick={() => {
+                  setImportResult(null);
+                  setImportModalVisible(true);
+                }}
+                icon={<FaFileImport />}
+                size="large"
+                style={{
+                  background: "#F0FDF4",
+                  borderColor: "#BBF7D0",
+                  color: "#166534",
+                  borderRadius: "12px",
+                  fontWeight: 600,
+                }}
+              >
+                Import Excel
+              </Button>
+            )}
+            {permissions.create && (
+              <Button
+                onClick={openCreateModal}
+                type="primary"
+                icon={<FaPlus />}
+                size="large"
+                className="btn-lg"
+              >
+                Create New Course
+              </Button>
+            )}
+          </div>
         )}
       </div>
 

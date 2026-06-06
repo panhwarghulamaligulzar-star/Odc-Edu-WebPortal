@@ -1,5 +1,29 @@
 import courseModule from "../modules/courseModule.js";
 import TeacherSchema from "../modules/teacherModule.js";
+import * as XLSX from "xlsx";
+
+const getRowValue = (row, keys = []) => {
+  for (const key of keys) {
+    if (row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== "") {
+      return row[key];
+    }
+  }
+  return null;
+};
+
+const normalizeString = (value) => String(value || "").trim();
+
+const parseSkills = (value) =>
+  normalizeString(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const parseCourseRefs = (value) =>
+  normalizeString(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 
 const createTeacher = async (req, res) => {
   try {
@@ -296,6 +320,195 @@ export const deleteTeacher = async (req, res) => {
     res.status(500).json({
       success: false,
       message: error.message,
+    });
+  }
+};
+
+export const bulkImportTeachers = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No file uploaded",
+      });
+    }
+
+    const workbook = XLSX.read(req.file.buffer, {
+      type: "buffer",
+      cellDates: true,
+    });
+    const firstSheetName = workbook.SheetNames[0];
+    const rows = firstSheetName
+      ? XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], {
+          defval: "",
+          raw: false,
+        })
+      : [];
+
+    if (!rows.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No employee data found in the file",
+      });
+    }
+
+    const courses = await courseModule.find({}, "courseName courseId").lean();
+    const courseLookup = new Map();
+    courses.forEach((course) => {
+      courseLookup.set(normalizeString(course._id), String(course._id));
+      courseLookup.set(normalizeString(course.courseId).toLowerCase(), String(course._id));
+      courseLookup.set(normalizeString(course.courseName).toLowerCase(), String(course._id));
+    });
+
+    const results = {
+      imported: 0,
+      updated: 0,
+      errors: [],
+    };
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const row = rows[index];
+      const rowNumber = index + 2;
+
+      try {
+        const teacherId = normalizeString(
+          getRowValue(row, ["Employee ID", "Teacher ID", "teacherId"]),
+        );
+        const fullName = normalizeString(
+          getRowValue(row, ["Full Name", "Employee Name", "fullName"]),
+        );
+        const fatherName = normalizeString(
+          getRowValue(row, ["Father Name", "fatherName"]),
+        );
+        const gender = normalizeString(getRowValue(row, ["Gender", "gender"]));
+        const appointmentDate = normalizeString(
+          getRowValue(row, ["Appointment Date", "appointmentDate"]),
+        );
+        const contactNo = normalizeString(
+          getRowValue(row, ["Contact Number", "Phone", "contactNo"]),
+        );
+        const contractPeriod = normalizeString(
+          getRowValue(row, ["Contract Period", "contractPeriod"]),
+        );
+        const cnicNo = normalizeString(
+          getRowValue(row, ["CNIC Number", "CNIC", "cnicNo"]),
+        );
+        const address = normalizeString(getRowValue(row, ["Address", "address"]));
+
+        if (
+          !teacherId ||
+          !fullName ||
+          !fatherName ||
+          !gender ||
+          !appointmentDate ||
+          !contactNo ||
+          !contractPeriod ||
+          !cnicNo ||
+          !address
+        ) {
+          throw new Error("Missing one or more required employee fields");
+        }
+
+        const designation = normalizeString(
+          getRowValue(row, ["Designation", "designation"]),
+        );
+        const highestQualification = normalizeString(
+          getRowValue(row, ["Highest Qualification", "highestQualification"]),
+        );
+        const degreeTitle = normalizeString(
+          getRowValue(row, ["Degree Title", "degreeTitle"]),
+        );
+        const majorSubject = normalizeString(
+          getRowValue(row, ["Major Subject", "Subject", "majorSubject"]),
+        );
+        const teachingExperience = normalizeString(
+          getRowValue(row, ["Experience", "Teaching Experience", "teachingExperience"]),
+        );
+        const monthlySalary = normalizeString(
+          getRowValue(row, ["Monthly Salary", "monthlySalary"]),
+        );
+        const computerSkills = parseSkills(
+          getRowValue(row, ["Other Skills", "Computer Skills", "computerSkills"]),
+        );
+        const courseRefs = parseCourseRefs(
+          getRowValue(row, ["Assigned Courses", "Course IDs", "courseId"]),
+        );
+
+        const resolvedCourseIds = courseRefs
+          .map((ref) => courseLookup.get(ref.toLowerCase()) || courseLookup.get(ref))
+          .filter(Boolean);
+
+        const teacherData = {
+          teacherId,
+          fullName,
+          fatherName,
+          gender,
+          appointmentDate,
+          contactNo,
+          contractPeriod,
+          cnicNo,
+          address,
+          designation: designation || null,
+          highestQualification: highestQualification || null,
+          degreeTitle: degreeTitle || null,
+          majorSubject: majorSubject || null,
+          teachingExperience: teachingExperience || null,
+          computerSkills,
+          monthlySalary: monthlySalary || null,
+          courseId: resolvedCourseIds,
+        };
+
+        const existingTeacher = await TeacherSchema.findOne({
+          $or: [{ teacherId }, { cnicNo }],
+        });
+
+        if (existingTeacher) {
+          if (existingTeacher.courseId?.length) {
+            await courseModule.updateMany(
+              { _id: { $in: existingTeacher.courseId } },
+              { $pull: { teacherId: existingTeacher._id } },
+            );
+          }
+
+          await TeacherSchema.findByIdAndUpdate(existingTeacher._id, teacherData, {
+            new: true,
+            runValidators: true,
+          });
+
+          if (resolvedCourseIds.length) {
+            await courseModule.updateMany(
+              { _id: { $in: resolvedCourseIds } },
+              { $addToSet: { teacherId: existingTeacher._id } },
+            );
+          }
+
+          results.updated += 1;
+        } else {
+          const teacher = await TeacherSchema.create(teacherData);
+          if (resolvedCourseIds.length) {
+            await courseModule.updateMany(
+              { _id: { $in: resolvedCourseIds } },
+              { $addToSet: { teacherId: teacher._id } },
+            );
+          }
+          results.imported += 1;
+        }
+      } catch (error) {
+        results.errors.push(`Row ${rowNumber}: ${error.message}`);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Employee import completed",
+      data: results,
+    });
+  } catch (error) {
+    console.error("Bulk employee import error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while importing employees",
+      error: error.message,
     });
   }
 };

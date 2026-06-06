@@ -276,6 +276,38 @@ export const deleteTeacher = async (teacherId) => {
   }
 };
 
+export const bulkImportCoursesWorkbook = async (file) => {
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await api.post("/course/bulk-import", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Bulk Import Courses Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
+export const bulkImportTeachers = async (file) => {
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const response = await api.post("/teacher/bulk-import", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Bulk Import Teachers Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
 // Student Services
 export const getAllStudent = async () => {
   try {
@@ -361,11 +393,13 @@ export default {
   getCourseById,
   updateCourse,
   deleteCourse,
+  bulkImportCoursesWorkbook,
   createTeacher,
   getAllTeachers,
   getTeacherById,
   updateTeacher,
   deleteTeacher,
+  bulkImportTeachers,
   getAllStudent,
   getPaymentReceipt,
   processRefund,

@@ -29,6 +29,29 @@ const PLAN_OPTIONS = [
   { value: "full_payment", label: "Full plan", defaultDiscount: 15 },
 ];
 
+const COURSE_ASSIGNMENT_STEPS = [
+  {
+    key: "basic",
+    label: "Basic Info",
+    fields: ["courseId", "enrollmentDate", "status"],
+  },
+  {
+    key: "plan",
+    label: "Payment Plan",
+    fields: ["paymentPlanType", "discountPercentage", "numberOfInstallments"],
+  },
+  {
+    key: "fees",
+    label: "Fees",
+    fields: [],
+  },
+  {
+    key: "installments",
+    label: "Installments",
+    fields: [],
+  },
+];
+
 const ADDITIONAL_FEE_TYPES = [
   { value: "exam", label: "Exam Fee" },
   { value: "Library Charges", label: "Library Charges" },
@@ -260,6 +283,13 @@ const CourseAssignmentForm = ({
   });
   const [isEditMode, setIsEditMode] = useState(false);
   const [activeTab, setActiveTab] = useState("basic");
+  const currentStepIndex = Math.max(
+    0,
+    COURSE_ASSIGNMENT_STEPS.findIndex((step) => step.key === activeTab),
+  );
+  const currentStep = COURSE_ASSIGNMENT_STEPS[currentStepIndex];
+  const nextStep = COURSE_ASSIGNMENT_STEPS[currentStepIndex + 1];
+  const isLastStep = currentStepIndex === COURSE_ASSIGNMENT_STEPS.length - 1;
 
   // Ref to prevent courseId effect from resetting form values during edit initialization
   const isInitializingEditRef = useRef(false);
@@ -598,7 +628,126 @@ const CourseAssignmentForm = ({
     closeFeeEditModal();
   };
 
-  const handleSubmit = (values) => {
+  const validateAssignmentStep = async (stepKey = activeTab) => {
+    const step = COURSE_ASSIGNMENT_STEPS.find((item) => item.key === stepKey);
+    if (!step) return true;
+
+    if (step.fields.length > 0) {
+      await form.validateFields(step.fields);
+    }
+
+    if (step.key === "fees") {
+      if (!selectedCourse) {
+        throw new Error("Please select a course before reviewing fees");
+      }
+      if (baseFee.finalFee <= 0) {
+        throw new Error("Please review the fee setup before continuing");
+      }
+    }
+
+    if (step.key === "installments") {
+      if (!installments.length) {
+        throw new Error("Installments are required before assigning the course");
+      }
+
+      const hasInvalidInstallment = installments.some(
+        (item) => !item.amount || !item.dueDate,
+      );
+      if (hasInvalidInstallment) {
+        throw new Error("Please complete all installment amounts and due dates");
+      }
+    }
+
+    return true;
+  };
+
+  const handleStepAction = async () => {
+    if (isEditMode) {
+      form.submit();
+      return;
+    }
+
+    if (isLastStep) {
+      try {
+        await validateAssignmentStep(activeTab);
+        form.submit();
+      } catch (error) {
+        const errorMessage =
+          error?.message ||
+          `Please complete the ${currentStep.label} tab before assigning the course.`;
+        Modal.warning({
+          title: "Complete this step first",
+          content: errorMessage,
+          centered: true,
+        });
+      }
+      return;
+    }
+
+    try {
+      await validateAssignmentStep(activeTab);
+      if (nextStep) {
+        setActiveTab(nextStep.key);
+      }
+    } catch (error) {
+      const errorMessage =
+        error?.message ||
+        `Please complete the ${currentStep.label} tab before moving to the next step.`;
+      Modal.warning({
+        title: "Complete this step first",
+        content: errorMessage,
+        centered: true,
+      });
+    }
+  };
+
+  const handleTabChange = async (nextTabKey) => {
+    if (isEditMode) {
+      setActiveTab(nextTabKey);
+      return;
+    }
+
+    const nextIndex = COURSE_ASSIGNMENT_STEPS.findIndex(
+      (step) => step.key === nextTabKey,
+    );
+
+    if (nextIndex <= currentStepIndex) {
+      setActiveTab(nextTabKey);
+      return;
+    }
+
+    try {
+      await validateAssignmentStep(activeTab);
+      setActiveTab(nextTabKey);
+    } catch (error) {
+      Modal.warning({
+        title: "Complete this step first",
+        content:
+          error?.message ||
+          `Please complete the ${currentStep.label} tab before moving ahead.`,
+        centered: true,
+      });
+    }
+  };
+
+  const handleSubmit = async (values) => {
+    if (!isEditMode) {
+      try {
+        for (const step of COURSE_ASSIGNMENT_STEPS) {
+          await validateAssignmentStep(step.key);
+        }
+      } catch (error) {
+        Modal.warning({
+          title: "Complete all steps first",
+          content:
+            error?.message ||
+            "Please complete every course assignment tab before assigning the course.",
+          centered: true,
+        });
+        return;
+      }
+    }
+
     const cleanedAdditionalFees = sanitizeAdditionalFees(additionalFees);
     
     // Validate that fees are not negative
@@ -747,8 +896,34 @@ const CourseAssignmentForm = ({
                 Final Fee: PKR {baseFee.finalFee.toLocaleString()}
               </Tag>
               <Tag color="purple">Installments: {installments.length}</Tag>
+              {!isEditMode && (
+                <Tag color="geekblue">
+                  Step {currentStepIndex + 1} of {COURSE_ASSIGNMENT_STEPS.length}
+                </Tag>
+              )}
             </Space>
           </div>
+
+          {!isEditMode && (
+            <div
+              style={{
+                marginBottom: 14,
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "linear-gradient(135deg, #EEF2FF 0%, #F5F3FF 100%)",
+                border: "1px solid #C7D2FE",
+                color: "#4338CA",
+                fontSize: 13,
+                fontWeight: 500,
+              }}
+            >
+              {isLastStep
+                ? "Final step: review installments and click Assign Course to complete the enrollment."
+                : `Complete the ${currentStep.label} tab, then click Next: ${
+                    nextStep?.label || "Continue"
+                  } to continue.`}
+            </div>
+          )}
 
           <div
             style={{
@@ -760,7 +935,7 @@ const CourseAssignmentForm = ({
           >
             <Tabs
               activeKey={activeTab}
-              onChange={setActiveTab}
+              onChange={handleTabChange}
               items={[
                 {
                   key: "basic",
@@ -1072,15 +1247,34 @@ const CourseAssignmentForm = ({
             }}
           >
             <Space wrap>
-              <Button onClick={() => setActiveTab("basic")}>Basic Info</Button>
-              <Button onClick={() => setActiveTab("plan")}>Payment Plan</Button>
-              <Button onClick={() => setActiveTab("fees")}>Fees</Button>
-              <Button onClick={() => setActiveTab("installments")}>Installments</Button>
+              {COURSE_ASSIGNMENT_STEPS.map((step) => (
+                <Button
+                  key={step.key}
+                  type={activeTab === step.key ? "primary" : "default"}
+                  onClick={() => handleTabChange(step.key)}
+                  style={
+                    activeTab === step.key
+                      ? {
+                          background:
+                            "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                          border: "none",
+                          borderRadius: 8,
+                        }
+                      : { borderRadius: 8 }
+                  }
+                >
+                  {step.label}
+                </Button>
+              ))}
             </Space>
             <Space>
               <Button onClick={onCancel}>Cancel</Button>
-              <Button type="primary" htmlType="submit" loading={loading}>
-                {isEditMode ? "Update Course" : "Assign Course"}
+              <Button type="primary" onClick={handleStepAction} loading={loading}>
+                {isEditMode
+                  ? "Update Course"
+                  : isLastStep
+                    ? "Assign Course"
+                    : `Next: ${nextStep?.label || "Continue"}`}
               </Button>
             </Space>
           </div>

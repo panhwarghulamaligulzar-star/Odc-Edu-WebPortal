@@ -11,6 +11,7 @@ import {
   Avatar,
   Pagination,
   Input,
+  Upload,
 } from "antd";
 import LoaderSpnar from "../../components/loader/loaderSpnar";
 import React, { useState, useEffect } from "react";
@@ -29,6 +30,9 @@ import {
   FaBriefcase,
   FaPrint,
   FaHome,
+  FaFileExcel,
+  FaFileImport,
+  FaFileDownload,
 } from "react-icons/fa";
 import { UserOutlined, MailOutlined, PhoneOutlined } from "@ant-design/icons";
 import TeacherForm from "../../components/forms/TeacherForm";
@@ -38,8 +42,10 @@ import {
   updateTeacher,
   deleteTeacher,
   getCourses,
+  bulkImportTeachers,
 } from "../../services/feeService";
 import dayjs from "dayjs";
+import * as XLSX from "xlsx";
 import odcLogo from "../../assets/images/logos/new logo.png";
 import { MdPeopleAlt } from "react-icons/md";
 import { useModulePermissions } from "../../hooks/usePermissions";
@@ -60,6 +66,10 @@ const Teachers = () => {
   const [selectedTeacher, setSelectedTeacher] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
+  const [importModalVisible, setImportModalVisible] = useState(false);
+  const [importingEmployees, setImportingEmployees] = useState(false);
+  const [exportingEmployees, setExportingEmployees] = useState(false);
+  const [importResult, setImportResult] = useState(null);
 
   // Fetch teachers and courses on mount
   useEffect(() => {
@@ -151,6 +161,130 @@ const Teachers = () => {
     } catch (error) {
       message.error(error.message || "Failed to delete teacher");
     }
+  };
+
+  const downloadEmployeeTemplate = () => {
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet([
+      {
+        "Employee ID": "ODC/HR-2026-01",
+        "Full Name": "Azeem Khan",
+        "Father Name": "Abdul Kareem",
+        Gender: "Male",
+        "Appointment Date": "2026-06-01",
+        "Contact Number": "03354587898",
+        "Contract Period": "1 Year",
+        "CNIC Number": "4210112345671",
+        Address: "Khipro, Sindh",
+        Designation: "Director",
+        "Highest Qualification": "Master",
+        "Degree Title": "MBA",
+        "Major Subject": "Business Management",
+        Experience: "10+",
+        "Other Skills": "MS Office, Management",
+        "Monthly Salary": "85000",
+        "Assigned Courses": "",
+      },
+      {
+        "Employee ID": "ODC/HR-2026-02",
+        "Full Name": "Asad Ali",
+        "Father Name": "Nazeer Ahmed",
+        Gender: "Male",
+        "Appointment Date": "2026-06-02",
+        "Contact Number": "03331238691",
+        "Contract Period": "6 Months",
+        "CNIC Number": "4210112345672",
+        Address: "Sanghar, Sindh",
+        Designation: "Trainer",
+        "Highest Qualification": "Master",
+        "Degree Title": "MSc",
+        "Major Subject": "Computer Science",
+        Experience: "3",
+        "Other Skills": "CIT, DIT, Web Development",
+        "Monthly Salary": "50000",
+        "Assigned Courses": "English Language",
+      },
+    ]);
+
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Employees");
+    XLSX.writeFile(
+      workbook,
+      `employees-import-template-${dayjs().format("YYYY-MM-DD")}.xlsx`,
+    );
+  };
+
+  const downloadEmployeesWorkbook = () => {
+    setExportingEmployees(true);
+    try {
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(
+        teachers.map((teacher) => ({
+          "Employee ID": teacher.teacherId || "",
+          "Full Name": teacher.fullName || "",
+          "Father Name": teacher.fatherName || "",
+          Gender: teacher.gender || "",
+          "Appointment Date": teacher.appointmentDate
+            ? dayjs(teacher.appointmentDate).format("YYYY-MM-DD")
+            : "",
+          "Contact Number": teacher.contactNo || "",
+          "Contract Period": teacher.contractPeriod || "",
+          "CNIC Number": teacher.cnicNo || "",
+          Address: teacher.address || "",
+          Designation: teacher.designation || "",
+          "Highest Qualification": teacher.highestQualification || "",
+          "Degree Title": teacher.degreeTitle || "",
+          "Major Subject": teacher.majorSubject || "",
+          Experience: teacher.teachingExperience || "",
+          "Other Skills": Array.isArray(teacher.computerSkills)
+            ? teacher.computerSkills.join(", ")
+            : "",
+          "Monthly Salary": teacher.monthlySalary || "",
+          "Assigned Courses": Array.isArray(teacher.courseId)
+            ? teacher.courseId
+                .map((course) => course?.courseName || course?.courseId || "")
+                .filter(Boolean)
+                .join(", ")
+            : "",
+        })),
+      );
+
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Employees");
+      XLSX.writeFile(
+        workbook,
+        `employees-export-${dayjs().format("YYYY-MM-DD")}.xlsx`,
+      );
+    } catch (error) {
+      message.error("Failed to export employees workbook");
+    } finally {
+      setExportingEmployees(false);
+    }
+  };
+
+  const handleEmployeeImport = async (file) => {
+    if (!permissions.import) {
+      message.warning("You do not have permission to import employees.");
+      return Upload.LIST_IGNORE;
+    }
+
+    setImportingEmployees(true);
+    try {
+      const response = await bulkImportTeachers(file);
+      if (response.success) {
+        setImportResult(response.data);
+        message.success(
+          `Import completed: ${response.data.imported} new, ${response.data.updated} updated`,
+        );
+        await fetchTeachers();
+      } else {
+        message.error(response.message || "Import failed");
+      }
+    } catch (error) {
+      message.error(error.message || "Failed to import employees");
+    } finally {
+      setImportingEmployees(false);
+    }
+
+    return false;
   };
 
   const openEditModal = (teacher) => {
@@ -273,10 +407,10 @@ const Teachers = () => {
         footer={null}
         width={900}
         centered
-      >
-        <div
-          style={{ maxHeight: "800px", overflowY: "auto", paddingRight: "8px" }}
         >
+          <div
+            style={{ maxHeight: "800px", overflowY: "auto", paddingRight: "8px" }}
+          >
           <TeacherForm
             form={form}
             loading={loading}
@@ -285,6 +419,141 @@ const Teachers = () => {
             initialImage={editingTeacher?.profilePicture || null}
           />
         </div>
+      </Modal>
+
+      <Modal
+        open={importModalVisible}
+        onCancel={() => setImportModalVisible(false)}
+        footer={null}
+        centered
+        width={620}
+        title={
+          <div className="flex items-center gap-2 text-[#166534]">
+            <FaFileExcel />
+            <span style={{ fontSize: "18px", fontWeight: 700 }}>
+              Import Employees Workbook
+            </span>
+          </div>
+        }
+      >
+        <div
+          style={{
+            border: "2px dashed #16A34A",
+            borderRadius: "18px",
+            padding: "28px 22px",
+            background: "linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 100%)",
+            textAlign: "center",
+          }}
+        >
+          <div className="flex justify-center mb-4 text-[#15803D] text-[54px]">
+            <FaFileExcel />
+          </div>
+          <div style={{ fontSize: "15px", color: "#166534", fontWeight: 600 }}>
+            Upload employee Excel/CSV file or download a ready-made template
+          </div>
+          <div style={{ fontSize: "13px", color: "#15803D", marginTop: "8px" }}>
+            Supported formats: `.xlsx`, `.xls`, `.csv`
+          </div>
+
+          <div className="flex justify-center gap-3 mt-6 flex-wrap">
+            <Upload
+              accept=".xlsx,.xls,.csv"
+              beforeUpload={handleEmployeeImport}
+              showUploadList={false}
+            >
+              <Button
+                type="primary"
+                icon={<FaFileImport />}
+                loading={importingEmployees}
+                style={{
+                  background: "#15803D",
+                  borderColor: "#15803D",
+                  borderRadius: "10px",
+                  height: "40px",
+                  paddingInline: "18px",
+                  fontWeight: 600,
+                }}
+              >
+                Upload File
+              </Button>
+            </Upload>
+            <Button
+              icon={<FaFileDownload />}
+              onClick={downloadEmployeeTemplate}
+              style={{
+                borderColor: "#16A34A",
+                color: "#166534",
+                borderRadius: "10px",
+                height: "40px",
+                paddingInline: "18px",
+                fontWeight: 600,
+              }}
+            >
+              Download Template
+            </Button>
+          </div>
+        </div>
+
+        <div
+          style={{
+            marginTop: "18px",
+            padding: "16px",
+            borderRadius: "14px",
+            background: "#F8FAFC",
+            border: "1px solid #E2E8F0",
+          }}
+        >
+          <div style={{ fontWeight: 700, color: "#334155", marginBottom: "8px" }}>
+            Template Columns
+          </div>
+          <div style={{ fontSize: "13px", color: "#64748B", lineHeight: 1.7 }}>
+            Employee ID, Full Name, Father Name, Gender, Appointment Date,
+            Contact Number, Contract Period, CNIC Number, Address, Designation,
+            Highest Qualification, Degree Title, Major Subject, Experience,
+            Other Skills, Monthly Salary, Assigned Courses
+          </div>
+        </div>
+
+        {importResult && (
+          <div
+            style={{
+              marginTop: "18px",
+              padding: "16px",
+              borderRadius: "14px",
+              background: "#FEFCE8",
+              border: "1px solid #FACC15",
+            }}
+          >
+            <div style={{ fontWeight: 700, color: "#92400E", marginBottom: "10px" }}>
+              Import Summary
+            </div>
+            <div style={{ color: "#713F12", fontSize: "14px", lineHeight: 1.8 }}>
+              <div>{importResult.imported || 0} new employees imported</div>
+              <div>{importResult.updated || 0} existing employees updated</div>
+              <div>{importResult.errors?.length || 0} errors</div>
+            </div>
+            {importResult.errors?.length > 0 && (
+              <div
+                style={{
+                  marginTop: "12px",
+                  maxHeight: "160px",
+                  overflowY: "auto",
+                  background: "white",
+                  borderRadius: "10px",
+                  border: "1px solid #FDE68A",
+                  padding: "10px 12px",
+                  color: "#B91C1C",
+                  fontSize: "13px",
+                  lineHeight: 1.7,
+                }}
+              >
+                {importResult.errors.map((error, index) => (
+                  <div key={`${error}-${index}`}>{error}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
 
       <div className="flex justify-between items-center mb-6">
@@ -302,17 +571,55 @@ const Teachers = () => {
             </p>
           </div>
         </div>
-        {permissions.create && (
-          <Button
-            onClick={openCreateModal}
-            type="primary"
-            icon={<FaPlus />}
-            size="large"
-            className="btn-lg"
-          >
-            Create Employee
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {permissions.export && (
+            <Button
+              onClick={downloadEmployeesWorkbook}
+              icon={<FaFileDownload />}
+              size="large"
+              loading={exportingEmployees}
+              style={{
+                background: "#EFF6FF",
+                borderColor: "#BFDBFE",
+                color: "#1D4ED8",
+                borderRadius: "12px",
+                fontWeight: 600,
+              }}
+            >
+              Download Excel
+            </Button>
+          )}
+          {permissions.import && (
+            <Button
+              onClick={() => {
+                setImportResult(null);
+                setImportModalVisible(true);
+              }}
+              icon={<FaFileImport />}
+              size="large"
+              style={{
+                background: "#F0FDF4",
+                borderColor: "#BBF7D0",
+                color: "#166534",
+                borderRadius: "12px",
+                fontWeight: 600,
+              }}
+            >
+              Import Excel
+            </Button>
+          )}
+          {permissions.create && (
+            <Button
+              onClick={openCreateModal}
+              type="primary"
+              icon={<FaPlus />}
+              size="large"
+              className="btn-lg"
+            >
+              Create Employee
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="p-2">

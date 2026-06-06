@@ -17,7 +17,6 @@ import {
   Tooltip,
   Avatar,
   Badge,
-  Popconfirm,
   Upload,
   Table,
   Space,
@@ -71,6 +70,34 @@ const STUDENT_CATEGORY_LABELS = {
   dropout: "Dropout Students",
   passout: "Passout Students",
 };
+
+const STUDENT_FORM_STEPS = [
+  { key: "photo", label: "Photo", fields: [] },
+  {
+    key: "basic",
+    label: "Basic Info",
+    fields: [
+      "registrationDate",
+      "studentName",
+      "gender",
+      "dateOfBirth",
+      "cnicOrBForm",
+      "religion",
+      "mobileNumber",
+      "disability",
+    ],
+  },
+  {
+    key: "family",
+    label: "Family",
+    fields: ["fatherName", "fatherCnic", "fatherContact"],
+  },
+  {
+    key: "additional",
+    label: "Additional",
+    fields: ["emergencyContactNumber", "permanentAddress"],
+  },
+];
 
 const normalizeEnrollmentStatus = (status) =>
   String(status || "")
@@ -337,10 +364,21 @@ const Students = () => {
   const [importing, setImporting] = useState(false);
   const [exportingWorkbook, setExportingWorkbook] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [studentToDelete, setStudentToDelete] = useState(null);
   const fileInputRef = useRef(null);
   const [tablePageSize, setTablePageSize] = useState(3);
   const [tablePage, setTablePage] = useState(1);
   const [activeStudentCategory, setActiveStudentCategory] = useState("all");
+  const currentStudentStepIndex = Math.max(
+    0,
+    STUDENT_FORM_STEPS.findIndex((step) => step.key === studentFormTab),
+  );
+  const currentStudentStep = STUDENT_FORM_STEPS[currentStudentStepIndex];
+  const nextStudentStep = STUDENT_FORM_STEPS[currentStudentStepIndex + 1];
+  const isLastStudentStep =
+    currentStudentStepIndex === STUDENT_FORM_STEPS.length - 1;
 
   const studentCategoryStats = useMemo(
     () => ({
@@ -525,6 +563,30 @@ const Students = () => {
     setStudentFormTab("photo");
   };
 
+  const handleStudentStepAction = async () => {
+    if (isLastStudentStep) {
+      form.submit();
+      return;
+    }
+
+    try {
+      if (currentStudentStep.fields.length > 0) {
+        await form.validateFields(currentStudentStep.fields);
+      }
+
+      if (nextStudentStep) {
+        setStudentFormTab(nextStudentStep.key);
+        message.success(
+          `${currentStudentStep.label} completed. Please continue with ${nextStudentStep.label}.`,
+        );
+      }
+    } catch {
+      message.warning(
+        `Please complete the ${currentStudentStep.label} tab before moving to the next step.`,
+      );
+    }
+  };
+
   const handleCreateStudent = async (values) => {
     if (!permissions.create) {
       message.error("You do not have permission to create students");
@@ -594,19 +656,66 @@ const Students = () => {
     }
   };
 
-  const handleDeleteStudent = async (studentId) => {
+  const openDeleteStudentDialog = (student) => {
     if (!permissions.delete) {
       message.error("You do not have permission to delete students");
       return;
     }
+    setStudentToDelete(student);
+    setDeleteDialogVisible(true);
+  };
+
+  const closeDeleteStudentDialog = (force = false) => {
+    if (deleteLoading && !force) return;
+    setDeleteDialogVisible(false);
+    setStudentToDelete(null);
+  };
+
+  const handleDeleteStudentChoice = async (scope) => {
+    if (!permissions.delete) {
+      message.error("You do not have permission to delete students");
+      return;
+    }
+
+    setDeleteLoading(true);
     try {
-      const response = await api.delete(`/student/admission/${studentId}`);
-      if (response.data.success) {
-        message.success("Student deleted successfully!");
-        fetchStudents();
+      if (scope === "all") {
+        const allStudentIds = students
+          .map((student) => student?._id)
+          .filter(Boolean);
+
+        if (allStudentIds.length === 0) {
+          message.warning("No student records found to delete");
+          return;
+        }
+
+        const response = await api.post("/student/admissions/bulk-delete", {
+          ids: allStudentIds,
+        });
+
+        if (response.data.success) {
+          message.success(
+            response.data.message || "All student records deleted successfully!",
+          );
+        }
+      } else if (studentToDelete?._id) {
+        const response = await api.delete(
+          `/student/admission/${studentToDelete._id}`,
+        );
+
+        if (response.data.success) {
+          message.success("Selected student deleted successfully!");
+        }
       }
+
+      closeDeleteStudentDialog(true);
+      await fetchStudents();
     } catch (error) {
-      message.error(error.response?.data?.message || "Failed to delete student");
+      message.error(
+        error.response?.data?.message || "Failed to delete student record(s)",
+      );
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -1926,7 +2035,7 @@ const Students = () => {
                             gap: "6px",
                           }}
                         >
-                          {activeEnrollments.slice(0, 2).map((enrollment) => (
+                          {activeEnrollments.slice(0, 1).map((enrollment) => (
                             <Tooltip
                               key={enrollment._id}
                               title={
@@ -2075,16 +2184,17 @@ const Students = () => {
                               </div>
                             </Tooltip>
                           ))}
-                          {activeEnrollments.length > 2 && (
+                          {activeEnrollments.length > 1 && (
                             <Tag
                               color="blue"
                               style={{
                                 fontSize: "11px",
                                 fontWeight: "600",
                                 textAlign: "center",
+                                width: "fit-content",
                               }}
                             >
-                              +{activeEnrollments.length - 2} more courses
+                              {activeEnrollments.length} active courses
                             </Tag>
                           )}
                         </div>
@@ -2158,23 +2268,15 @@ const Students = () => {
                           </Tooltip>
                         )}
                         {showManagementActions && permissions.delete && (
-                          <Popconfirm
-                            title="Delete Student"
-                            description="Are you sure you want to delete this student?"
-                            onConfirm={() => handleDeleteStudent(record._id)}
-                            okText="Yes"
-                            cancelText="No"
-                            okButtonProps={{ danger: true }}
-                          >
-                            <Tooltip title="Delete Student">
-                              <Button
-                                danger
-                                icon={<FaTrash />}
-                                style={{ borderRadius: "8px" }}
-                                size="small"
-                              />
-                            </Tooltip>
-                          </Popconfirm>
+                          <Tooltip title="Delete Student">
+                            <Button
+                              danger
+                              icon={<FaTrash />}
+                              onClick={() => openDeleteStudentDialog(record)}
+                              style={{ borderRadius: "8px" }}
+                              size="small"
+                            />
+                          </Tooltip>
                         )}
                       </Space>
                     );
@@ -2185,6 +2287,81 @@ const Students = () => {
           )}
         </Card>
       </div>
+
+      <Modal
+        open={deleteDialogVisible}
+        onCancel={() => closeDeleteStudentDialog()}
+        footer={null}
+        centered
+        width={520}
+      >
+        <div style={{ padding: "8px 4px" }}>
+          <div
+            style={{
+              fontSize: "22px",
+              fontWeight: 700,
+              color: "#1F2937",
+              marginBottom: "10px",
+            }}
+          >
+            Delete Student Record
+          </div>
+          <p
+            style={{
+              color: "#6B7280",
+              fontSize: "14px",
+              lineHeight: 1.6,
+              marginBottom: "18px",
+            }}
+          >
+            Choose whether you want to delete only{" "}
+            <strong>{studentToDelete?.studentName || "this student"}</strong> or remove
+            all student records from the system.
+          </p>
+
+          <div
+            style={{
+              background: "#FEF2F2",
+              border: "1px solid #FECACA",
+              borderRadius: "12px",
+              padding: "12px 14px",
+              color: "#991B1B",
+              fontSize: "13px",
+              marginBottom: "18px",
+            }}
+          >
+            Warning: deleting all students will remove every student record currently loaded
+            in the Students module.
+          </div>
+
+          <div className="flex gap-3 justify-end flex-wrap">
+            <Button
+              onClick={() => closeDeleteStudentDialog()}
+              disabled={deleteLoading}
+              style={{ borderRadius: "10px", height: "40px", paddingInline: "16px" }}
+            >
+              Cancel
+            </Button>
+            <Button
+              danger
+              loading={deleteLoading}
+              onClick={() => handleDeleteStudentChoice("single")}
+              style={{ borderRadius: "10px", height: "40px", paddingInline: "16px" }}
+            >
+              Only This Student
+            </Button>
+            <Button
+              type="primary"
+              danger
+              loading={deleteLoading}
+              onClick={() => handleDeleteStudentChoice("all")}
+              style={{ borderRadius: "10px", height: "40px", paddingInline: "16px" }}
+            >
+              Delete All Students
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Student Form Modal */}
       <Modal
@@ -2222,8 +2399,34 @@ const Students = () => {
               }}
             >
               <Tag color="blue">{editMode ? "Edit Student" : "New Student"}</Tag>
-              <Tag color="purple">Step-by-step form</Tag>
+              {!editMode && <Tag color="purple">Step-by-step form</Tag>}
+              {!editMode && (
+                <Tag color="geekblue">
+                  Step {currentStudentStepIndex + 1} of {STUDENT_FORM_STEPS.length}
+                </Tag>
+              )}
             </div>
+
+            {!editMode && (
+              <div
+                style={{
+                  marginBottom: "14px",
+                  padding: "12px 14px",
+                  borderRadius: "12px",
+                  background: "linear-gradient(135deg, #EEF2FF 0%, #F5F3FF 100%)",
+                  border: "1px solid #C7D2FE",
+                  color: "#4338CA",
+                  fontSize: "13px",
+                  fontWeight: 500,
+                }}
+              >
+                {isLastStudentStep
+                  ? "Final step: review this tab and click Create Student to save the record."
+                  : `Complete the ${currentStudentStep.label} tab, then click ${
+                      nextStudentStep?.label ? `Next: ${nextStudentStep.label}` : "Next"
+                    } to continue.`}
+              </div>
+            )}
 
             <div
               style={{
@@ -2824,25 +3027,36 @@ const Students = () => {
               }}
             >
               <Space wrap>
-                <Button onClick={() => setStudentFormTab("photo")}>Photo</Button>
-                <Button onClick={() => setStudentFormTab("basic")}>Basic Info</Button>
-                <Button onClick={() => setStudentFormTab("family")}>Family</Button>
-                <Button onClick={() => setStudentFormTab("additional")}>Additional</Button>
+                {STUDENT_FORM_STEPS.map((step) => (
+                  <Button
+                    key={step.key}
+                    type={studentFormTab === step.key ? "primary" : "default"}
+                    onClick={() => setStudentFormTab(step.key)}
+                    style={
+                      studentFormTab === step.key
+                        ? {
+                            background:
+                              "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+                            border: "none",
+                            borderRadius: "8px",
+                          }
+                        : { borderRadius: "8px" }
+                    }
+                  >
+                    {step.label}
+                  </Button>
+                ))}
               </Space>
               <Space>
                 <Button
-                  onClick={() => {
-                    setModalVisible(false);
-                    form.resetFields();
-                    setStudentFormTab("photo");
-                  }}
+                  onClick={closeStudentModal}
                   style={{ borderRadius: "6px" }}
                 >
                   Cancel
                 </Button>
                 <Button
                   type="primary"
-                  htmlType="submit"
+                  onClick={editMode ? () => form.submit() : handleStudentStepAction}
                   loading={loading}
                   style={{
                     background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
@@ -2850,7 +3064,11 @@ const Students = () => {
                     borderRadius: "6px",
                   }}
                 >
-                  {editMode ? "Update Student" : "Create Student"}
+                  {editMode
+                    ? "Update Student"
+                    : isLastStudentStep
+                      ? "Create Student"
+                      : `Next: ${nextStudentStep?.label || "Continue"}`}
                 </Button>
               </Space>
             </div>

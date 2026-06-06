@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FaSearch, FaUser, FaSignOutAlt, FaCog, FaBars, FaTimes } from 'react-icons/fa';
 import { NavLink, useNavigate } from 'react-router-dom';
 import useZustandStore from '../stores/zustandStore';
@@ -7,10 +7,12 @@ import { TbArrowsMaximize } from "react-icons/tb";
 
 const AppHeader = ({ isSidebarCollapsed, toggleSidebar }) => {
 const [dropdownOpen, setDropdownOpen] = useState(false);
+const profileMenuRef = useRef(null);
 const navigate = useNavigate()
 
   const {adminInfo,setAppMinMaxWidth,appMinMixView,isSuperAdmin}=useZustandStore();
 const handleLogout = () => {
+  setDropdownOpen(false);
   const { clearToken, } = useZustandStore.getState();
   clearToken();
   localStorage.clear();
@@ -29,6 +31,22 @@ const getProfileImageSrc = (profile) => {
     return `data:image/png;base64,${profile}`;
   }
 };
+
+useEffect(() => {
+  const handleClickOutside = (event) => {
+    if (
+      profileMenuRef.current &&
+      !profileMenuRef.current.contains(event.target)
+    ) {
+      setDropdownOpen(false);
+    }
+  };
+
+  document.addEventListener("mousedown", handleClickOutside);
+  return () => {
+    document.removeEventListener("mousedown", handleClickOutside);
+  };
+}, []);
 
 
   return (
@@ -60,10 +78,12 @@ const getProfileImageSrc = (profile) => {
             </NavLink>
             <div
               className="relative"
-              onMouseEnter={() => setDropdownOpen(true)}
-              onMouseLeave={() => setDropdownOpen(false)}
+              ref={profileMenuRef}
             >
-             <div className="btn-md-cricle cursor-pointer">
+             <div
+              className="btn-md-cricle cursor-pointer"
+              onClick={() => setDropdownOpen((prev) => !prev)}
+             >
             <img
               src={getProfileImageSrc(adminInfo?.userData?.profile)}
               alt="profile"

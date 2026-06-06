@@ -3,6 +3,7 @@ import TeacherSchema from "../modules/teacherModule.js";
 import BatchSchema from "../modules/batchModule.js";
 import EnrollmentSchema from "../modules/enrollmentModule.js";
 import mongoose from "mongoose";
+import * as XLSX from "xlsx";
 
 const toNum = (value) => Math.max(0, Number(value) || 0);
 
@@ -19,6 +20,42 @@ const normalizeBatchIds = (batchIds) =>
   Array.isArray(batchIds)
     ? batchIds.filter((id) => typeof id === "string" && id.trim())
     : [];
+
+const normalizeText = (value) => String(value || "").trim();
+
+const getRowValue = (row, keys = []) => {
+  for (const key of keys) {
+    if (row?.[key] !== undefined && row?.[key] !== null && row?.[key] !== "") {
+      return row[key];
+    }
+  }
+  return null;
+};
+
+const getSheetRowsByNames = (workbook, names = []) => {
+  const match = workbook.SheetNames.find((sheetName) =>
+    names.some((name) => sheetName.toLowerCase() === name.toLowerCase()),
+  );
+
+  if (!match) return null;
+
+  return XLSX.utils.sheet_to_json(workbook.Sheets[match], {
+    defval: "",
+    raw: false,
+  });
+};
+
+const parseBoolean = (value) => {
+  if (typeof value === "boolean") return value;
+  const normalized = normalizeText(value).toLowerCase();
+  return ["true", "yes", "1", "y"].includes(normalized);
+};
+
+const parseTeacherRefs = (value) =>
+  normalizeText(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 
 const assignBatchesToCourse = async (courseId, batchIds = []) => {
   const normalizedBatchIds = normalizeBatchIds(batchIds);
@@ -476,6 +513,255 @@ export const deleteCourse = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error while deleting course",
+      error: error.message,
+    });
+  }
+};
+
+export const bulkImportCoursesWorkbook = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No file uploaded",
+      });
+    }
+
+    const workbook = XLSX.read(req.file.buffer, {
+      type: "buffer",
+      cellDates: true,
+    });
+
+    const coursesSheet =
+      getSheetRowsByNames(workbook, ["Courses", "Course"]) || [];
+    const batchesSheet =
+      getSheetRowsByNames(workbook, ["Batches", "Batch"]) || [];
+
+    if (!coursesSheet.length && !batchesSheet.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No course or batch data found in the workbook",
+      });
+    }
+
+    const teachers = await TeacherSchema.find({}, "_id teacherId fullName").lean();
+    const teacherLookup = new Map();
+    teachers.forEach((teacher) => {
+      teacherLookup.set(String(teacher._id), teacher._id);
+      teacherLookup.set(normalizeText(teacher.teacherId).toLowerCase(), teacher._id);
+      teacherLookup.set(normalizeText(teacher.fullName).toLowerCase(), teacher._id);
+    });
+
+    const results = {
+      coursesImported: 0,
+      coursesUpdated: 0,
+      batchesImported: 0,
+      batchesUpdated: 0,
+      errors: [],
+    };
+
+    const courseMap = new Map();
+
+    const existingCourses = await CourseSchema.find({}, "_id courseId courseName").lean();
+    existingCourses.forEach((course) => {
+      courseMap.set(normalizeText(course.courseId).toLowerCase(), String(course._id));
+      courseMap.set(normalizeText(course.courseName).toLowerCase(), String(course._id));
+    });
+
+    for (let index = 0; index < coursesSheet.length; index += 1) {
+      const row = coursesSheet[index];
+      const rowNumber = index + 2;
+
+      try {
+        const courseId = normalizeText(getRowValue(row, ["Course ID", "courseId"]));
+        const courseName = normalizeText(
+          getRowValue(row, ["Course Name", "courseName"]),
+        );
+        const duration = Number(getRowValue(row, ["Duration", "duration"]) || 0);
+
+        if (!courseId || !courseName || !duration) {
+          throw new Error("Missing required course fields");
+        }
+
+        const teacherRefs = parseTeacherRefs(
+          getRowValue(row, ["Teacher IDs", "Teacher Names", "teacherId"]),
+        );
+        const resolvedTeacherIds = teacherRefs
+          .map((ref) => teacherLookup.get(ref.toLowerCase()) || teacherLookup.get(ref))
+          .filter(Boolean);
+
+        const coursePayload = {
+          courseId,
+          courseName,
+          courseCategory:
+            normalizeText(
+              getRowValue(row, ["Course Category", "courseCategory"]),
+            ) || "IT & Vocational",
+          duration,
+          admissionFee: toNum(getRowValue(row, ["Admission Fee", "admissionFee"])),
+          courseFee: toNum(getRowValue(row, ["Course Fee", "courseFee"])),
+          certificateFee: toNum(
+            getRowValue(row, ["Certificate Fee", "certificateFee"]),
+          ),
+          examFee: toNum(getRowValue(row, ["Exam Fee", "examFee"])),
+          registrationFee: toNum(
+            getRowValue(row, ["Registration Fee", "registrationFee"]),
+          ),
+          practicalFee: toNum(getRowValue(row, ["Practical Fee", "practicalFee"])),
+          otherFee: toNum(getRowValue(row, ["Other Fee", "otherFee"])),
+          includeExamFeeInInstallments: parseBoolean(
+            getRowValue(row, [
+              "Include Exam Fee In Installments",
+              "includeExamFeeInInstallments",
+            ]),
+          ),
+          includeRegistrationFeeInInstallments: parseBoolean(
+            getRowValue(row, [
+              "Include Registration Fee In Installments",
+              "includeRegistrationFeeInInstallments",
+            ]),
+          ),
+          includePracticalFeeInInstallments: parseBoolean(
+            getRowValue(row, [
+              "Include Practical Fee In Installments",
+              "includePracticalFeeInInstallments",
+            ]),
+          ),
+          includeOtherFeeInInstallments: parseBoolean(
+            getRowValue(row, [
+              "Include Other Fee In Installments",
+              "includeOtherFeeInInstallments",
+            ]),
+          ),
+          teacherId: resolvedTeacherIds,
+        };
+
+        coursePayload.totalFee = calculateTotalFee(coursePayload);
+
+        const existingCourse = await CourseSchema.findOne({
+          $or: [{ courseId }, { courseName }],
+        });
+
+        if (existingCourse) {
+          if (existingCourse.teacherId?.length) {
+            await TeacherSchema.updateMany(
+              { _id: { $in: existingCourse.teacherId } },
+              { $pull: { courseId: existingCourse._id } },
+            );
+          }
+
+          const updatedCourse = await CourseSchema.findByIdAndUpdate(
+            existingCourse._id,
+            coursePayload,
+            { new: true, runValidators: true },
+          );
+
+          if (resolvedTeacherIds.length) {
+            await TeacherSchema.updateMany(
+              { _id: { $in: resolvedTeacherIds } },
+              { $addToSet: { courseId: updatedCourse._id } },
+            );
+          }
+
+          courseMap.set(courseId.toLowerCase(), String(updatedCourse._id));
+          courseMap.set(courseName.toLowerCase(), String(updatedCourse._id));
+          results.coursesUpdated += 1;
+        } else {
+          const createdCourse = await CourseSchema.create(coursePayload);
+          if (resolvedTeacherIds.length) {
+            await TeacherSchema.updateMany(
+              { _id: { $in: resolvedTeacherIds } },
+              { $addToSet: { courseId: createdCourse._id } },
+            );
+          }
+
+          courseMap.set(courseId.toLowerCase(), String(createdCourse._id));
+          courseMap.set(courseName.toLowerCase(), String(createdCourse._id));
+          results.coursesImported += 1;
+        }
+      } catch (error) {
+        results.errors.push(`Courses row ${rowNumber}: ${error.message}`);
+      }
+    }
+
+    for (let index = 0; index < batchesSheet.length; index += 1) {
+      const row = batchesSheet[index];
+      const rowNumber = index + 2;
+
+      try {
+        const batchCode = normalizeText(getRowValue(row, ["Batch Code", "batchCode"]));
+        const batchName = normalizeText(getRowValue(row, ["Batch Name", "batchName"]));
+        const courseRef = normalizeText(
+          getRowValue(row, ["Course ID", "Course Name", "course"]),
+        );
+        const shift = normalizeText(getRowValue(row, ["Shift", "shift"]));
+        const days = normalizeText(getRowValue(row, ["Days", "days"]));
+        const hoursPerDay = Number(
+          getRowValue(row, ["Hours Per Day", "hoursPerDay"]) || 0,
+        );
+        const startDate = normalizeText(
+          getRowValue(row, ["Start Date", "startDate"]),
+        );
+
+        if (!batchCode || !batchName || !courseRef || !shift || !days || !hoursPerDay || !startDate) {
+          throw new Error("Missing required batch fields");
+        }
+
+        const resolvedCourseId = courseMap.get(courseRef.toLowerCase());
+        if (!resolvedCourseId) {
+          throw new Error(`Course reference not found: ${courseRef}`);
+        }
+
+        const batchPayload = {
+          batchCode,
+          batchName,
+          course: resolvedCourseId,
+          shift,
+          days,
+          hoursPerDay,
+          startDate,
+          endDate:
+            normalizeText(getRowValue(row, ["End Date", "endDate"])) || null,
+          maxStudents: Number(
+            getRowValue(row, ["Max Students", "Maximum Students", "maxStudents"]) ||
+              30,
+          ),
+          description:
+            normalizeText(getRowValue(row, ["Description", "description"])) || "",
+          status:
+            normalizeText(getRowValue(row, ["Status", "status"])) || "Active",
+          isActive:
+            getRowValue(row, ["Is Active", "isActive"]) === null
+              ? true
+              : parseBoolean(getRowValue(row, ["Is Active", "isActive"])),
+        };
+
+        const existingBatch = await BatchSchema.findOne({ batchCode });
+
+        if (existingBatch) {
+          await BatchSchema.findByIdAndUpdate(existingBatch._id, batchPayload, {
+            new: true,
+            runValidators: true,
+          });
+          results.batchesUpdated += 1;
+        } else {
+          await BatchSchema.create(batchPayload);
+          results.batchesImported += 1;
+        }
+      } catch (error) {
+        results.errors.push(`Batches row ${rowNumber}: ${error.message}`);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Course workbook import completed",
+      data: results,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Server error while importing course workbook",
       error: error.message,
     });
   }

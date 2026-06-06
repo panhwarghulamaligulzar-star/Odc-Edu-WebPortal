@@ -5,6 +5,7 @@ import createTeacher, {
   getTeacherById,
   updateTeacher,
   deleteTeacher,
+  bulkImportTeachers,
 } from "../controller/teacherController.js";
 import authMiddleware from "../midlewear/authMiddleware.js";
 import authorize from "../midlewear/authorize.js";
@@ -35,5 +36,14 @@ teacherRouter.put("/:id", authMiddleware, authorize("employees", "update"), uplo
 
 // Delete teacher
 teacherRouter.delete("/:id", authMiddleware, authorize("employees", "delete"), deleteTeacher);
+
+// Bulk import employees from Excel/CSV
+teacherRouter.post(
+  "/bulk-import",
+  authMiddleware,
+  authorize("employees", "import"),
+  upload.single("file"),
+  bulkImportTeachers,
+);
 
 export default teacherRouter;
