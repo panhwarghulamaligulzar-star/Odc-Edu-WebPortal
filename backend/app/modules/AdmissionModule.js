@@ -199,7 +199,15 @@ const AdmissionSchema = new mongoose.Schema(
 
     reference: {
       type: String,
-      enum: ["Friend", "Facebook", "Family", "Other"],
+      enum: [
+        "Friend",
+        "Facebook",
+        "Family",
+        "School",
+        "Walk-in",
+        "Online",
+        "Other",
+      ],
     },
 
     course: {

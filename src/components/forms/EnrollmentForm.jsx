@@ -125,6 +125,9 @@ const Section = ({ title }) => (
           <Select.Option value="Friend">Friend</Select.Option>
           <Select.Option value="Facebook">Facebook</Select.Option>
           <Select.Option value="Family">Family</Select.Option>
+          <Select.Option value="School">School</Select.Option>
+          <Select.Option value="Walk-in">Walk-in</Select.Option>
+          <Select.Option value="Online">Online</Select.Option>
           <Select.Option value="Other">Other</Select.Option>
         </Select>
       </Form.Item>

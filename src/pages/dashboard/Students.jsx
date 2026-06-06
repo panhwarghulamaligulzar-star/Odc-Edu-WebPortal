@@ -56,6 +56,7 @@ import api from "../../api/axiosInstance";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
+import * as XLSX from "xlsx";
 import { MdPeople } from "react-icons/md";
 import academyConfig from "../../config/academyConfig";
 import odysseyLogo from "../../assets/images/logos/LOGO.png";
@@ -913,158 +914,156 @@ const Students = () => {
 
   // Handle bulk import of students from CSV/Excel
   const downloadImportTemplate = () => {
-    const headers = [
-      "Student Name",
-      "Registration No",
-      "Registration Date",
-      "Gender",
-      "Date of Birth",
-      "Religion",
-      "CNIC/B-Form",
-      "Mobile Number",
-      "Father Name",
-      "Father CNIC",
-      "Father Contact",
-      "Emergency Contact",
-      "Permanent Address",
-      "Course Name",
-      "Course ID",
-      "Batch Name",
-      "Batch Code",
-      "Enrollment Date",
-      "Enrollment Status",
-      "Admission Fee",
-      "Course Fee",
-      "Certificate Fee",
-      "Exam Fee",
-      "Registration Fee",
-      "Practical Fee",
-      "Other Fee",
-      "Discount",
-      "Paid Amount",
-      "Due Date",
-      "Enrollment Notes",
-      "Fee Notes",
-    ];
+    const workbook = XLSX.utils.book_new();
 
-    const rows = filteredStudents.flatMap((student) => {
-      const baseStudentCols = [
-        student.studentName || "",
-        student.registrationNo || "",
-        student.registrationDate ? dayjs(student.registrationDate).format("YYYY-MM-DD") : "",
-        student.gender || "",
-        student.dateOfBirth ? dayjs(student.dateOfBirth).format("YYYY-MM-DD") : "",
-        student.religion || "",
-        student.cnicOrBForm || "",
-        student.mobileNumber || "",
-        student.fatherName || "",
-        student.fatherCnic || "",
-        student.fatherContact || "",
-        student.emergencyContactNumber || "",
-        student.permanentAddress || "",
-      ];
+    const studentsSheet = XLSX.utils.json_to_sheet([
+      {
+        "Student Name": "Ali Raza",
+        "Registration No": "0091",
+        "Registration Date": "2026-05-17",
+        Gender: "Male",
+        "Date of Birth": "2010-01-20",
+        Religion: "Muslim",
+        "CNIC/B-Form": "4210112345678",
+        "Mobile Number": "03001234567",
+        "Father Name": "Ahmed Raza",
+        "Father CNIC": "4210111111111",
+        "Father Contact": "03007654321",
+        "Emergency Contact": "03009998888",
+        "Permanent Address": "Main Road, Khipro",
+        "Current Address": "Main Road, Khipro",
+        "WhatsApp Number": "03001234567",
+        Email: "ali@example.com",
+        District: "Sanghar",
+        Tehsil: "Khipro",
+        "Union Council": "UC-01",
+        Reference: "Friend",
+      },
+    ]);
 
-      const enrollments = Array.isArray(student.enrollments) ? student.enrollments : [];
-      if (enrollments.length === 0) {
-        return [[
-          ...baseStudentCols,
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-        ]];
-      }
+    const enrollmentsSheet = XLSX.utils.json_to_sheet([
+      {
+        "Registration No": "0091",
+        "CNIC/B-Form": "4210112345678",
+        "Course Name": "English Language",
+        "Course ID": "",
+        "Batch Name": "English 2:00 to 4:00",
+        "Batch Code": "",
+        "Enrollment Date": "2026-05-17",
+        "Enrollment Status": "Active",
+        "Payment Plan Type": "custom",
+        "Number Of Installments": 3,
+        "Admission Fee": 1000,
+        "Course Fee": 5000,
+        "Certificate Fee": 1000,
+        "Exam Fee": 0,
+        "Registration Fee": 0,
+        "Practical Fee": 0,
+        "Other Fee": 0,
+        "Discount Percentage": 10,
+        "Discount On Course Fee": 500,
+        "Paid Amount": 1000,
+        "Enrollment Notes": "Imported from workbook",
+        "Fee Notes": "Custom plan import",
+      },
+    ]);
 
-      return enrollments.map((enrollment) => {
-        const fs = enrollment.feeStructure || {};
-        return [
-          ...baseStudentCols,
-          enrollment.course?.courseName || "",
-          enrollment.course?.courseId || "",
-          enrollment.batch?.batchName || "",
-          enrollment.batch?.batchCode || "",
-          enrollment.enrollmentDate
-            ? dayjs(enrollment.enrollmentDate).format("YYYY-MM-DD")
-            : "",
-          enrollment.status || "Active",
-          fs.admissionFee ?? enrollment.course?.admissionFee ?? "",
-          fs.courseFee ?? enrollment.course?.courseFee ?? "",
-          fs.certificateFee ?? enrollment.course?.certificateFee ?? "",
-          fs.examFee ?? enrollment.course?.examFee ?? "",
-          fs.registrationFee ?? enrollment.course?.registrationFee ?? "",
-          fs.practicalFee ?? enrollment.course?.practicalFee ?? "",
-          fs.otherFee ?? enrollment.course?.otherFee ?? "",
-          fs.discount ?? "",
-          fs.paidAmount ?? "",
-          fs.installments?.[0]?.dueDate
-            ? dayjs(fs.installments[0].dueDate).format("YYYY-MM-DD")
-            : "",
-          enrollment.notes || "",
-          fs.notes || "",
-        ];
-      });
-    });
+    const installmentsSheet = XLSX.utils.json_to_sheet([
+      {
+        "Registration No": "0091",
+        "CNIC/B-Form": "4210112345678",
+        "Course Name": "English Language",
+        "Course ID": "",
+        "Installment Number": 1,
+        Description: "Admission + first installment",
+        "Due Date": "2026-05-17",
+        Amount: 2500,
+        Status: "Pending",
+        "Paid Amount": 1000,
+        "Admission Fee": 1000,
+        "Course Fee": 1500,
+        "Certificate Fee": 0,
+        "Exam Fee": 0,
+        "Registration Fee": 0,
+        "Practical Fee": 0,
+        "Other Fee": 0,
+      },
+      {
+        "Registration No": "0091",
+        "CNIC/B-Form": "4210112345678",
+        "Course Name": "English Language",
+        "Course ID": "",
+        "Installment Number": 2,
+        Description: "Second installment",
+        "Due Date": "2026-06-17",
+        Amount: 2000,
+        Status: "Pending",
+        "Paid Amount": 0,
+        "Admission Fee": 0,
+        "Course Fee": 2000,
+        "Certificate Fee": 0,
+        "Exam Fee": 0,
+        "Registration Fee": 0,
+        "Practical Fee": 0,
+        "Other Fee": 0,
+      },
+      {
+        "Registration No": "0091",
+        "CNIC/B-Form": "4210112345678",
+        "Course Name": "English Language",
+        "Course ID": "",
+        "Installment Number": 3,
+        Description: "Final installment + certificate fee",
+        "Due Date": "2026-07-17",
+        Amount: 2000,
+        Status: "Pending",
+        "Paid Amount": 0,
+        "Admission Fee": 0,
+        "Course Fee": 1500,
+        "Certificate Fee": 500,
+        "Exam Fee": 0,
+        "Registration Fee": 0,
+        "Practical Fee": 0,
+        "Other Fee": 0,
+      },
+    ]);
 
-    const exportRows = rows.length > 0 ? rows : [[
-      "Ali Raza",
-      "0091",
-      "2026-05-17",
-      "Male",
-      "2010-01-20",
-      "Muslim",
-      "4210112345678",
-      "03001234567",
-      "Ahmed Raza",
-      "4210111111111",
-      "03007654321",
-      "03009998888",
-      "Main Road, Khipro",
-      "English Language",
-      "",
-      "English 2:00 to 4:00",
-      "",
-      "2026-05-17",
-      "Active",
-      "1000",
-      "5000",
-      "1000",
-      "0",
-      "0",
-      "0",
-      "0",
-      "500",
-      "1000",
-      "2026-06-10",
-      "Imported from CSV",
-      "First installment received",
-    ]];
+    const additionalFeesSheet = XLSX.utils.json_to_sheet([
+      {
+        "Registration No": "0091",
+        "CNIC/B-Form": "4210112345678",
+        "Course Name": "English Language",
+        "Course ID": "",
+        "Fee Type": "other",
+        Title: "Library Charges",
+        Amount: 300,
+        "Payment Mode": "one_time",
+      },
+    ]);
 
-    const csvContent = [headers, ...exportRows]
-      .map((row) => row.map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`).join(","))
-      .join("\n");
+    const paymentsSheet = XLSX.utils.json_to_sheet([
+      {
+        "Registration No": "0091",
+        "CNIC/B-Form": "4210112345678",
+        "Course Name": "English Language",
+        "Course ID": "",
+        "Installment Number": 1,
+        Amount: 1000,
+        "Payment Date": "2026-05-17",
+        "Payment Method": "Cash",
+        "Voucher No": "001",
+        Remarks: "Imported opening payment",
+        "Payment Type": "Installment",
+      },
+    ]);
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", "students-course-import-template.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    XLSX.utils.book_append_sheet(workbook, studentsSheet, "Students");
+    XLSX.utils.book_append_sheet(workbook, enrollmentsSheet, "Enrollments");
+    XLSX.utils.book_append_sheet(workbook, installmentsSheet, "Installments");
+    XLSX.utils.book_append_sheet(workbook, additionalFeesSheet, "Additional Fees");
+    XLSX.utils.book_append_sheet(workbook, paymentsSheet, "Payments");
+
+    XLSX.writeFile(workbook, "students-complete-import-template.xlsx");
   };
 
   const handleBulkImport = async (file) => {
@@ -1081,7 +1080,7 @@ const Students = () => {
       });
       if (response.data.success) {
         message.success(
-          `Import completed: ${response.data.data.imported} students and ${response.data.data.coursesAssigned || 0} course assignment(s) added`,
+          `Import completed: ${response.data.data.imported} new, ${response.data.data.updated || 0} updated, ${response.data.data.coursesAssigned || 0} enrollments, ${response.data.data.paymentsImported || 0} payments`,
         );
         setImportResult(response.data.data);
         fetchStudents();
@@ -2756,7 +2755,7 @@ const Students = () => {
             }}
           >
             <FaFileExcel style={{ fontSize: "24px" }} />
-            Import Students + Course Assignments
+            Import Students Workbook
           </div>
         }
         open={importModalVisible}
@@ -2843,7 +2842,7 @@ const Students = () => {
                 fontWeight: "600",
               }}
             >
-              Required Columns:
+              Workbook Tabs:
             </h4>
             <ul
               style={{
@@ -2853,11 +2852,11 @@ const Students = () => {
                 color: "#6B7280",
               }}
             >
-              <li>Student Name, Mobile Number, Gender, Date of Birth, Religion</li>
-              <li>CNIC/B-Form, Father Name, Father CNIC, Permanent Address, Emergency Contact</li>
-              <li>Course Name or Course ID (optional but needed for course assignment)</li>
-              <li>Batch Name or Batch Code (optional)</li>
-              <li>Registration No is optional and only saved if provided in file</li>
+              <li><strong>Students</strong>: basic student information. Required for new students.</li>
+              <li><strong>Enrollments</strong>: course assignment, batch, fee values, discount, plan type.</li>
+              <li><strong>Installments</strong>: optional custom installment rows for each student-course.</li>
+              <li><strong>Additional Fees</strong>: optional extra charges like exam, registration, or other fees.</li>
+              <li><strong>Payments</strong>: optional imported payments so receipt/accounting tables also update.</li>
             </ul>
           </div>
 
@@ -2887,6 +2886,12 @@ const Students = () => {
               </p>
               <p style={{ margin: "4px 0", fontSize: "13px", color: "#374151" }}>
                 <strong>{importResult.coursesAssigned || 0}</strong> course assignments created
+              </p>
+              <p style={{ margin: "4px 0", fontSize: "13px", color: "#374151" }}>
+                <strong>{importResult.enrollmentsUpdated || 0}</strong> existing enrollments updated
+              </p>
+              <p style={{ margin: "4px 0", fontSize: "13px", color: "#374151" }}>
+                <strong>{importResult.paymentsImported || 0}</strong> payments imported
               </p>
               <p style={{ margin: "4px 0", fontSize: "13px", color: "#374151" }}>
                 <strong>{importResult.courseSkipped || 0}</strong> course assignments skipped
