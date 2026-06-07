@@ -4,6 +4,7 @@ import {
   Avatar,
   Button,
   Card,
+  Input,
   Modal,
   Select,
   Space,
@@ -53,6 +54,7 @@ const EnrollmentManagement = () => {
   const [statusSubmitting, setStatusSubmitting] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [selectedStatus, setSelectedStatus] = useState("Dropped");
+  const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
     refreshData();
@@ -219,6 +221,46 @@ const EnrollmentManagement = () => {
     };
   }, [activeEnrolledStudents]);
 
+  const filteredActiveEnrolledStudents = useMemo(() => {
+    const keyword = searchTerm.trim().toLowerCase();
+
+    if (!keyword) {
+      return activeEnrolledStudents;
+    }
+
+    return activeEnrolledStudents.filter((record) => {
+      const courseNames = record.activeEnrollments
+        .map((enrollment) => enrollment.course?.courseName || enrollment.course?.courseId || "")
+        .filter(Boolean)
+        .join(" ");
+
+      const batchNames = record.activeEnrollments
+        .map((enrollment) => enrollment.batch?.batchName || enrollment.batch?.batchCode || "")
+        .filter(Boolean)
+        .join(" ");
+
+      const searchableText = [
+        record.student?.studentName,
+        record.student?.registrationNo,
+        record.student?.mobileNumber,
+        record.student?.fatherName,
+        record.student?.fatherContact,
+        record.student?.gender,
+        courseNames,
+        batchNames,
+        "active enrolled",
+        "active course",
+        "course",
+        "student",
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return searchableText.includes(keyword);
+    });
+  }, [activeEnrolledStudents, searchTerm]);
+
   const columns = [
     {
       title: "Student",
@@ -379,13 +421,37 @@ const EnrollmentManagement = () => {
           This table only shows students who already have an active assigned course.
           Use the eye button to open the full student details page.
         </div>
+        <div className="mb-4 flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+          <div className="min-w-0">
+            <div className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[#8ea2c4]">
+              Search Filter
+            </div>
+            <div className="mt-1 text-[11px] leading-5 text-[#64748B]">
+              Search by student name, registration no, course name, father name, mobile, batch, and other related keywords.
+            </div>
+          </div>
+          <div className="flex w-full flex-col gap-1 md:w-[430px] md:shrink-0">
+            <Input.Search
+              allowClear
+              placeholder="Search by student, course, registration no, father..."
+              size="middle"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            <div className="text-right text-[10px] font-medium text-[#64748B]">
+              {filteredActiveEnrolledStudents.length} student
+              {filteredActiveEnrolledStudents.length === 1 ? "" : "s"} found
+            </div>
+          </div>
+        </div>
         <Table
           columns={columns}
-          dataSource={activeEnrolledStudents}
+          dataSource={filteredActiveEnrolledStudents}
           rowKey="_id"
           loading={loading}
           pagination={{
-            showSizeChanger: true,
+            pageSize: 4,
+            showSizeChanger: false,
             showTotal: (total, range) =>
               `${range[0]}-${range[1]} of ${total} active enrolled students`,
           }}

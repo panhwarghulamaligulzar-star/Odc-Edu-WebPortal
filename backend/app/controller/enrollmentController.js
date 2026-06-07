@@ -5,6 +5,7 @@ import AdmissionSchema from "../modules/AdmissionModule.js";
 import CourseSchema from "../modules/courseModule.js";
 import BatchSchema from "../modules/batchModule.js";
 import { calculateInstallmentPlan } from "../utils/installmentCalculator.js";
+import { syncStudentRegistrationNo } from "../utils/registrationNumberSync.js";
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const clamp = (value, min, max) =>
@@ -317,19 +318,11 @@ export const createEnrollment = async (req, res) => {
       });
     }
 
-    // Do not auto-generate registration numbers during course assignment.
-    // Keep registrationNo exactly as provided on student record/import.
     await AdmissionSchema.findByIdAndUpdate(studentId, {
       $addToSet: { enrolledCourses: courseId },
     });
 
-    const hasRegistrationNo =
-      !!student.registrationNo &&
-      student.registrationNo !== "null" &&
-      String(student.registrationNo).trim() !== "";
-    const systemGrantedNumber = hasRegistrationNo
-      ? String(student.registrationNo).trim()
-      : null;
+    const systemGrantedNumber = await syncStudentRegistrationNo(studentId);
 
     // Calculate flexible fee + installment plan
     const selectedAdmissionFee = round2(admissionFee ?? course.admissionFee ?? 0);
@@ -683,6 +676,10 @@ export const updateEnrollmentStatus = async (req, res) => {
       });
     }
 
+    const syncedRegistrationNo = await syncStudentRegistrationNo(
+      existingEnrollment.student,
+    );
+
     // ── Update the FeeStructure document with the new fee/installment data ──
     const feeStructureUpdate = {};
     if (courseId) feeStructureUpdate.course = courseId;
@@ -716,6 +713,7 @@ export const updateEnrollmentStatus = async (req, res) => {
     }
 
     if (Object.keys(feeStructureUpdate).length > 0) {
+      feeStructureUpdate.systemGrantedNumber = syncedRegistrationNo;
       // Recalculate remainingAmount = totalFee - paidAmount
       if (feeStructureUpdate.totalFee !== undefined) {
         const existingFs = await FeeStructureSchema.findOne({ enrollment: enrollmentId }).lean();
@@ -845,6 +843,8 @@ export const deleteEnrollment = async (req, res) => {
 
     // Delete the enrollment
     await EnrollmentSchema.findByIdAndDelete(enrollmentId);
+
+    await syncStudentRegistrationNo(enrollment.student);
 
     res.status(200).json({
       success: true,

@@ -571,29 +571,95 @@ const Courses = () => {
               <div style={{ flex: 1 }}>
                 <div
                   style={{
-                    fontSize: "9px",
-                    fontWeight: "700",
-                    color: "#8ea2c4",
-                    margin: "0 0 4px 0",
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase",
-                    fontFamily: "'Inter-sans', Arial, sans-serif",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    gap: "8px",
+                    marginBottom: "3px",
                   }}
                 >
-                  Course
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div
+                      style={{
+                        fontSize: "9px",
+                        fontWeight: "700",
+                        color: "#8ea2c4",
+                        margin: "0 0 4px 0",
+                        letterSpacing: "0.05em",
+                        textTransform: "uppercase",
+                        fontFamily: "'Inter-sans', Arial, sans-serif",
+                      }}
+                    >
+                      Course
+                    </div>
+                    <h3
+                      style={{
+                        fontSize: "12px",
+                        fontWeight: "700",
+                        color: "#0f172a",
+                        margin: "0",
+                        lineHeight: "1.2",
+                        fontFamily: "'Inter-sans', Arial, sans-serif",
+                      }}
+                    >
+                      {course.courseName}
+                    </h3>
+                  </div>
+
+                  <div
+                    style={{
+                      minWidth: "72px",
+                      padding: "4px 6px",
+                      borderRadius: "10px",
+                      background: "#f8fbff",
+                      border: "1px solid #dbe4f0",
+                      display: "flex",
+                      alignItems: "flex-start",
+                      justifyContent: "space-between",
+                      gap: "6px",
+                    }}
+                  >
+                    <div style={{ textAlign: "right" }}>
+                      <div
+                        style={{
+                          fontSize: "8px",
+                          color: "#8ea2c4",
+                          fontWeight: "700",
+                          textTransform: "uppercase",
+                          lineHeight: "1.1",
+                        }}
+                      >
+                        Students
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "13px",
+                          color: "#01134C",
+                          fontWeight: "800",
+                          lineHeight: "1.1",
+                          marginTop: "2px",
+                        }}
+                      >
+                        {Number(course.enrolledStudentsCount || 0)}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        width: "22px",
+                        height: "22px",
+                        borderRadius: "7px",
+                        background: "#eef4ff",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "#01134C",
+                        flexShrink: 0,
+                      }}
+                    >
+                      <GraduationCap size={14} />
+                    </div>
+                  </div>
                 </div>
-                <h3
-                  style={{
-                    fontSize: "12px",
-                    fontWeight: "700",
-                    color: "#0f172a",
-                    margin: "0 0 3px 0",
-                    lineHeight: "1.2",
-                    fontFamily: "'Inter-sans', Arial, sans-serif",
-                  }}
-                >
-                  {course.courseName}
-                </h3>
                 <div
                   style={{
                     fontSize: "9px",
@@ -603,21 +669,6 @@ const Courses = () => {
                 >
                   {course.courseId}
                 </div>
-              </div>
-              <div
-                style={{
-                  width: "24px",
-                  height: "24px",
-                  borderRadius: "8px",
-                  background: "#eef4ff",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#01134C",
-                  fontSize: "11px",
-                }}
-              >
-                <GraduationCap />
               </div>
             </div>
 

@@ -104,6 +104,17 @@ const normalizeEnrollmentStatus = (status) =>
     .trim()
     .toLowerCase();
 
+const REGISTERED_COURSE_CATEGORY = "IT & Vocational";
+
+const hasRegisteredCourseEnrollment = (student) =>
+  (Array.isArray(student?.enrollments) ? student.enrollments : []).some(
+    (enrollment) =>
+      enrollment?.course?.courseCategory === REGISTERED_COURSE_CATEGORY,
+  );
+
+const getVisibleRegistrationNo = (student) =>
+  hasRegisteredCourseEnrollment(student) ? student?.registrationNo || "" : "";
+
 const hasActiveEnrollment = (student) =>
   (Array.isArray(student?.enrollments) ? student.enrollments : []).some(
     (enrollment) => normalizeEnrollmentStatus(enrollment.status) === "active",
@@ -411,7 +422,7 @@ const Students = () => {
           student.studentName
             ?.toLowerCase()
             .includes(searchText.toLowerCase()) ||
-          student.registrationNo
+          getVisibleRegistrationNo(student)
             ?.toLowerCase()
             .includes(searchText.toLowerCase()) ||
           student.fatherName
@@ -932,7 +943,7 @@ const Students = () => {
 
       const personalFields = [
         ["Student Name",    student.studentName],
-        ["Registration No", student.registrationNo],
+        ["Registration No", getVisibleRegistrationNo(student) || "â€”"],
         ["Father Name",     student.fatherName],
         ["Gender",          student.gender],
         ["Date of Birth",   student.dateOfBirth ? dayjs(student.dateOfBirth).format("DD/MM/YYYY") : "—"],
@@ -1090,9 +1101,11 @@ const Students = () => {
       const additionalFeeRows = [];
 
       students.forEach((student) => {
+        const visibleRegistrationNo = getVisibleRegistrationNo(student);
+
         studentRows.push({
           "Student Name": student.studentName || "",
-          "Registration No": student.registrationNo || "",
+          "Registration No": visibleRegistrationNo,
           "Registration Date": formatExcelDate(student.registrationDate),
           Gender: student.gender || "",
           "Date of Birth": formatExcelDate(student.dateOfBirth),
@@ -1125,7 +1138,7 @@ const Students = () => {
           }
 
           enrollmentRows.push({
-            "Registration No": student.registrationNo || "",
+            "Registration No": visibleRegistrationNo,
             "CNIC/B-Form": student.cnicOrBForm || "",
             "Course Name": enrollment.course?.courseName || "",
             "Course ID": enrollment.course?.courseId || "",
@@ -1155,7 +1168,7 @@ const Students = () => {
             : []
           ).forEach((installment) => {
             installmentRows.push({
-              "Registration No": student.registrationNo || "",
+              "Registration No": visibleRegistrationNo,
               "CNIC/B-Form": student.cnicOrBForm || "",
               "Course Name": enrollment.course?.courseName || "",
               "Course ID": enrollment.course?.courseId || "",
@@ -1180,7 +1193,7 @@ const Students = () => {
             : []
           ).forEach((fee) => {
             additionalFeeRows.push({
-              "Registration No": student.registrationNo || "",
+              "Registration No": visibleRegistrationNo,
               "CNIC/B-Form": student.cnicOrBForm || "",
               "Course Name": enrollment.course?.courseName || "",
               "Course ID": enrollment.course?.courseId || "",
@@ -1214,7 +1227,7 @@ const Students = () => {
 
           return {
             "Registration No":
-              payment.student?.registrationNo || linkedStudent?.registrationNo || "",
+              getVisibleRegistrationNo(linkedStudent || payment.student || {}),
             "CNIC/B-Form":
               payment.student?.cnicOrBForm || linkedStudent?.cnicOrBForm || "",
             "Course Name": payment.course?.courseName || "",
@@ -1894,7 +1907,7 @@ const Students = () => {
                         >
                           {record.studentName}
                         </div>
-                        {record.registrationNo && (
+                        {getVisibleRegistrationNo(record) && (
                           <div
                             style={{
                               fontSize: "12px",
@@ -1902,7 +1915,7 @@ const Students = () => {
                               fontWeight: "500",
                             }}
                           >
-                            {record.registrationNo}
+                            {getVisibleRegistrationNo(record)}
                           </div>
                         )}
                       </div>
@@ -3517,7 +3530,7 @@ const downloadFeePDF = async (student) => {
       doc.text("Reg. No", margin + 55, y + 5);
       doc.setFont("helvetica", "normal");
       setTxt(doc, PDF_COLORS.dark);
-      doc.text(student.registrationNo || "—", margin + 55, y + 10);
+      doc.text(getVisibleRegistrationNo(student) || "—", margin + 55, y + 10);
 
       doc.setFont("helvetica", "bold");
       setTxt(doc, PDF_COLORS.primary);

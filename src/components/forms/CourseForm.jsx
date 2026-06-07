@@ -134,9 +134,9 @@ const CourseForm = ({
           className="form-input !font-ArialLight"
         >
           <Select.Option value="IT & Vocational">
-            IT & Vocational (With System Number)
+            Registered Course
           </Select.Option>
-          <Select.Option value="Coaching">Coaching</Select.Option>
+          <Select.Option value="Coaching">Unregistered Course</Select.Option>
         </Select>
       </Form.Item>
 
