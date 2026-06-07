@@ -2,11 +2,6 @@ import UserAuth from "../modules/userAuthModal.js";
 import Role from "../modules/roleModule.js";
 import { RBAC_ACTIONS, RBAC_MODULES, normalizePermissions } from "../utils/rbac.js";
 
-const roleHasEnabledAccess = (permissions = []) =>
-  permissions.some((item) =>
-    Object.values(item?.actions || {}).some((allowed) => allowed === true),
-  );
-
 const createSuperAdminPermissions = () =>
   RBAC_MODULES.map((moduleKey) => ({
     module: moduleKey,
@@ -155,20 +150,6 @@ const updateRole = async (req, res) => {
       });
     }
 
-    if (role.isSystem && req.body.name && req.body.name !== role.name) {
-      return res.status(400).json({
-        success: false,
-        message: "System role names cannot be changed",
-      });
-    }
-
-    if (role.isSystem && req.body.isSystem === false) {
-      return res.status(400).json({
-        success: false,
-        message: "System roles cannot be converted",
-      });
-    }
-
     if (req.body.name && req.body.name !== role.name) {
       const duplicate = await Role.findOne({
         _id: { $ne: role._id },
@@ -183,7 +164,7 @@ const updateRole = async (req, res) => {
       }
     }
 
-    if (req.body.name && !role.isSystem) {
+    if (req.body.name) {
       role.name = req.body.name.trim();
     }
 
@@ -222,29 +203,16 @@ const deleteRole = async (req, res) => {
       });
     }
 
-    if (role.isSystem) {
+    const assignedUsersCount = await UserAuth.countDocuments({
+      role: role._id.toString(),
+    });
+
+    if (assignedUsersCount > 0) {
       return res.status(400).json({
         success: false,
-        message: "System roles cannot be deleted",
+        message: "This role is assigned to users and cannot be deleted.",
       });
     }
-
-    if (roleHasEnabledAccess(role.permissions)) {
-      return res.status(400).json({
-        success: false,
-        message: "Remove all module access from this role before deleting it.",
-      });
-    }
-
-    await UserAuth.updateMany(
-      { role: role._id.toString() },
-      {
-        $set: {
-          role: null,
-          legacyRole: "",
-        },
-      },
-    );
 
     await role.deleteOne();
 

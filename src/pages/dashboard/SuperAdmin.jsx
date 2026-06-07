@@ -120,8 +120,7 @@ const getEnabledUserActions = (permissions = {}, moduleKey) =>
   RBAC_ACTIONS.filter((action) => permissions?.[moduleKey]?.[action]);
 
 const canDeleteRole = (role) =>
-  !role?.isSystem &&
-  countEnabledModules(buildPermissionsFromRole(role)) === 0;
+  Number(role?.userCount || 0) === 0;
 
 const shouldShowRoleInTable = (role) => Boolean(role?._id || role?.name);
 
@@ -1556,7 +1555,11 @@ const SuperAdmin = () => {
             label="Role Name"
             rules={[{ required: true, message: "Role name is required" }]}
           >
-            <Input size="large" placeholder="e.g. Branch Manager" className="form-input" />
+            <Input
+              size="large"
+              placeholder="e.g. Branch Manager"
+              className="form-input"
+            />
           </Form.Item>
 
           <Form.Item name="description" label="Description">
