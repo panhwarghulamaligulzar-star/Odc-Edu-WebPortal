@@ -57,6 +57,49 @@ const parseTeacherRefs = (value) =>
     .map((item) => item.trim())
     .filter(Boolean);
 
+const isRowBlank = (row = {}) =>
+  !Object.values(row || {}).some((value) => normalizeText(value) !== "");
+
+const normalizeCourseCategoryValue = (value) => {
+  const normalized = normalizeText(value).toLowerCase();
+
+  if (
+    normalized === "registered course" ||
+    normalized === "it & vocational" ||
+    normalized === "it and vocational"
+  ) {
+    return "IT & Vocational";
+  }
+
+  if (
+    normalized === "unregistered course" ||
+    normalized === "coaching"
+  ) {
+    return "Coaching";
+  }
+
+  return normalizeText(value);
+};
+
+const resolveCourseReferenceFromBatchRow = (row = {}, courseMap = new Map()) => {
+  const directRef = normalizeText(
+    getRowValue(row, ["Course ID", "Course Name", "course"]),
+  );
+
+  if (directRef) {
+    return directRef;
+  }
+
+  const fallbackRefs = [
+    normalizeText(getRowValue(row, ["Batch Code", "batchCode"])),
+    normalizeText(getRowValue(row, ["Batch Name", "batchName"])),
+  ].filter(Boolean);
+
+  return (
+    fallbackRefs.find((candidate) => courseMap.has(candidate.toLowerCase())) || ""
+  );
+};
+
 const assignBatchesToCourse = async (courseId, batchIds = []) => {
   const normalizedBatchIds = normalizeBatchIds(batchIds);
   if (normalizedBatchIds.length === 0) {
@@ -573,18 +616,29 @@ export const bulkImportCoursesWorkbook = async (req, res) => {
       const rowNumber = index + 2;
 
       try {
+        if (isRowBlank(row)) {
+          continue;
+        }
+
         const courseId = normalizeText(getRowValue(row, ["Course ID", "courseId"]));
         const courseName = normalizeText(
           getRowValue(row, ["Course Name", "courseName"]),
         );
-        const duration = Number(getRowValue(row, ["Duration", "duration"]) || 0);
+        const duration = Number(
+          getRowValue(row, ["Duration", "Duration (Months)", "duration"]) || 0,
+        );
 
         if (!courseId || !courseName || !duration) {
           throw new Error("Missing required course fields");
         }
 
         const teacherRefs = parseTeacherRefs(
-          getRowValue(row, ["Teacher IDs", "Teacher Names", "teacherId"]),
+          getRowValue(row, [
+            "Teacher IDs",
+            "Teacher Names",
+            "Assigned Teachers",
+            "teacherId",
+          ]),
         );
         const resolvedTeacherIds = teacherRefs
           .map((ref) => teacherLookup.get(ref.toLowerCase()) || teacherLookup.get(ref))
@@ -594,7 +648,7 @@ export const bulkImportCoursesWorkbook = async (req, res) => {
           courseId,
           courseName,
           courseCategory:
-            normalizeText(
+            normalizeCourseCategoryValue(
               getRowValue(row, ["Course Category", "courseCategory"]),
             ) || "IT & Vocational",
           duration,
@@ -689,11 +743,13 @@ export const bulkImportCoursesWorkbook = async (req, res) => {
       const rowNumber = index + 2;
 
       try {
+        if (isRowBlank(row)) {
+          continue;
+        }
+
         const batchCode = normalizeText(getRowValue(row, ["Batch Code", "batchCode"]));
         const batchName = normalizeText(getRowValue(row, ["Batch Name", "batchName"]));
-        const courseRef = normalizeText(
-          getRowValue(row, ["Course ID", "Course Name", "course"]),
-        );
+        const courseRef = resolveCourseReferenceFromBatchRow(row, courseMap);
         const shift = normalizeText(getRowValue(row, ["Shift", "shift"]));
         const days = normalizeText(getRowValue(row, ["Days", "days"]));
         const hoursPerDay = Number(
@@ -703,7 +759,11 @@ export const bulkImportCoursesWorkbook = async (req, res) => {
           getRowValue(row, ["Start Date", "startDate"]),
         );
 
-        if (!batchCode || !batchName || !courseRef || !shift || !days || !hoursPerDay || !startDate) {
+        if (!courseRef) {
+          continue;
+        }
+
+        if (!batchCode || !batchName || !shift || !days || !hoursPerDay || !startDate) {
           throw new Error("Missing required batch fields");
         }
 

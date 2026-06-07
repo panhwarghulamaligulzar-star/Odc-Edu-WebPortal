@@ -13,6 +13,9 @@ const getRowValue = (row, keys = []) => {
 
 const normalizeString = (value) => String(value || "").trim();
 
+const isRowBlank = (row = {}) =>
+  !Object.values(row).some((value) => normalizeString(value));
+
 const parseSkills = (value) =>
   normalizeString(value)
     .split(",")
@@ -371,8 +374,12 @@ export const bulkImportTeachers = async (req, res) => {
       const rowNumber = index + 2;
 
       try {
+        if (isRowBlank(row)) {
+          continue;
+        }
+
         const teacherId = normalizeString(
-          getRowValue(row, ["Employee ID", "Teacher ID", "teacherId"]),
+          getRowValue(row, ["Employee ID", "Teacher ID", "teacherId", "ID"]),
         );
         const fullName = normalizeString(
           getRowValue(row, ["Full Name", "Employee Name", "fullName"]),
@@ -382,16 +389,16 @@ export const bulkImportTeachers = async (req, res) => {
         );
         const gender = normalizeString(getRowValue(row, ["Gender", "gender"]));
         const appointmentDate = normalizeString(
-          getRowValue(row, ["Appointment Date", "appointmentDate"]),
+          getRowValue(row, ["Appointment Date", "Date of Joining", "appointmentDate"]),
         );
         const contactNo = normalizeString(
-          getRowValue(row, ["Contact Number", "Phone", "contactNo"]),
+          getRowValue(row, ["Contact Number", "Contact No", "Phone", "contactNo"]),
         );
         const contractPeriod = normalizeString(
           getRowValue(row, ["Contract Period", "contractPeriod"]),
         );
         const cnicNo = normalizeString(
-          getRowValue(row, ["CNIC Number", "CNIC", "cnicNo"]),
+          getRowValue(row, ["CNIC Number", "CNIC No", "CNIC", "cnicNo"]),
         );
         const address = normalizeString(getRowValue(row, ["Address", "address"]));
 

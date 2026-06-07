@@ -171,8 +171,9 @@ const BatchManagement = ({
     try {
       const response = await deleteBatch(batchId);
       if (response.success) {
-        message.success("Batch deleted successfully");
-        fetchBatches();
+        message.success(response.message || "Batch deleted successfully");
+        setBatches((current) => current.filter((batch) => batch._id !== batchId));
+        fetchBatches(normalizedCourseId || selectedCourseId || null);
       }
     } catch (error) {
       message.error(error.response?.data?.message || "Failed to delete batch");

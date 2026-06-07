@@ -307,19 +307,7 @@ const deleteBatch = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Check if batch has enrolled students
-    const enrolledStudents = await EnrollmentSchema.countDocuments({
-      batch: id,
-    });
-
-    if (enrolledStudents > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot delete batch. It has ${enrolledStudents} enrolled student(s)`,
-      });
-    }
-
-    const batch = await BatchSchema.findByIdAndDelete(id);
+    const batch = await BatchSchema.findById(id);
     if (!batch) {
       return res.status(404).json({
         success: false,
@@ -327,9 +315,25 @@ const deleteBatch = async (req, res) => {
       });
     }
 
+    const linkedEnrollments = await EnrollmentSchema.countDocuments({
+      batch: id,
+    });
+
+    if (linkedEnrollments > 0) {
+      await EnrollmentSchema.updateMany(
+        { batch: id },
+        { $unset: { batch: 1 } },
+      );
+    }
+
+    await BatchSchema.findByIdAndDelete(id);
+
     res.status(200).json({
       success: true,
-      message: "Batch deleted successfully",
+      message:
+        linkedEnrollments > 0
+          ? `Batch deleted successfully and removed from ${linkedEnrollments} linked enrollment(s)`
+          : "Batch deleted successfully",
     });
   } catch (error) {
     console.error("Error deleting batch:", error);
