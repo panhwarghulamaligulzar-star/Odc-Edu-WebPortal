@@ -123,10 +123,43 @@ const canDeleteRole = (role) =>
   !role?.isSystem &&
   countEnabledModules(buildPermissionsFromRole(role)) === 0;
 
-const shouldShowRoleInTable = (role) =>
-  !role?.isSystem ||
-  Number(role?.userCount || 0) > 0 ||
-  countEnabledModules(buildPermissionsFromRole(role)) > 0;
+const shouldShowRoleInTable = (role) => Boolean(role?._id || role?.name);
+
+const extractRolesPayload = (response) => {
+  if (Array.isArray(response)) {
+    return response;
+  }
+
+  if (Array.isArray(response?.data)) {
+    return response.data;
+  }
+
+  if (Array.isArray(response?.roles)) {
+    return response.roles;
+  }
+
+  if (Array.isArray(response?.result)) {
+    return response.result;
+  }
+
+  return [];
+};
+
+const extractRoleRecord = (response) => {
+  if (response?.data && !Array.isArray(response.data)) {
+    return response.data;
+  }
+
+  if (response?.role && !Array.isArray(response.role)) {
+    return response.role;
+  }
+
+  if (response && !Array.isArray(response) && response._id) {
+    return response;
+  }
+
+  return null;
+};
 
 const isCustomRoleUser = (user, roles) =>
   roles.some((role) => !role.isSystem && role._id === user?.roleId);
@@ -280,7 +313,7 @@ const SuperAdmin = () => {
     setLoadingRoles(true);
     try {
       const response = await getRoles();
-      const nextRoles = response.data || [];
+      const nextRoles = extractRolesPayload(response);
       setRoles(nextRoles);
       return nextRoles;
     } catch (error) {
@@ -416,10 +449,27 @@ const SuperAdmin = () => {
       };
 
       if (editingRole) {
-        await updateRole(editingRole._id, payload);
+        const response = await updateRole(editingRole._id, payload);
+        const savedRole = extractRoleRecord(response);
+        if (savedRole?._id) {
+          setRoles((prev) =>
+            prev.map((role) => (role._id === savedRole._id ? { ...role, ...savedRole } : role)),
+          );
+        }
         message.success("Role updated successfully");
       } else {
-        await createRole(payload);
+        const response = await createRole(payload);
+        const savedRole = extractRoleRecord(response);
+        if (savedRole?._id) {
+          setRoles((prev) => {
+            const exists = prev.some((role) => role._id === savedRole._id);
+            if (exists) {
+              return prev.map((role) => (role._id === savedRole._id ? { ...role, ...savedRole } : role));
+            }
+
+            return [savedRole, ...prev];
+          });
+        }
         message.success("Role created successfully");
       }
 
