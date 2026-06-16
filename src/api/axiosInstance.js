@@ -1,13 +1,10 @@
 import axios from "axios";
 import useZustandStore from "../stores/zustandStore";
 
-// In local development, always use the local backend to avoid auth/session
-// mismatches with the production API.
-const baseURL = import.meta.env.DEV
-  ? import.meta.env.VITE_BACKEND_URL ||
-    import.meta.env.VITE_API_URL ||
-    "http://localhost:5028"
-  : import.meta.env.VITE_API_URL || window.location.origin;
+const baseURL =
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_BACKEND_URL ||
+  (import.meta.env.DEV ? "http://localhost:5028" : window.location.origin);
 
 console.log("Axios baseURL:", baseURL);
 console.log("Mode:", import.meta.env.MODE);
