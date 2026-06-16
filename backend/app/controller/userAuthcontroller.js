@@ -8,6 +8,18 @@ import {
   serializeRoleForClient,
 } from "../utils/rbac.js";
 
+const persistUserStateByEmail = async (user, updates = {}) => {
+  if (!user?.email || !updates || Object.keys(updates).length === 0) {
+    return;
+  }
+
+  await UserAuth.updateOne(
+    { email: String(user.email).trim().toLowerCase() },
+    { $set: updates },
+  );
+  Object.assign(user, updates);
+};
+
 const createUser = async (req, res) => {
   try {
     const { name, roleId, role, password, isSuperAdmin = false } = req.body;
@@ -91,8 +103,7 @@ const userLogin = async (req, res) => {
     }
 
     if (user.isSuperAdmin && user.isActive === false) {
-      user.isActive = true;
-      await user.save();
+      await persistUserStateByEmail(user, { isActive: true });
     }
 
     if (user.isActive === false) {
@@ -104,11 +115,14 @@ const userLogin = async (req, res) => {
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      user.failedLoginAttempts = Number(user.failedLoginAttempts || 0) + 1;
+      const nextFailedAttempts = Number(user.failedLoginAttempts || 0) + 1;
+      const updates = {
+        failedLoginAttempts: nextFailedAttempts,
+      };
 
-      if (!user.isSuperAdmin && user.failedLoginAttempts >= 3) {
-        user.isActive = false;
-        await user.save();
+      if (!user.isSuperAdmin && nextFailedAttempts >= 3) {
+        updates.isActive = false;
+        await persistUserStateByEmail(user, updates);
 
         return res.status(403).json({
           status: "error",
@@ -117,19 +131,15 @@ const userLogin = async (req, res) => {
         });
       }
 
-      await user.save();
+      await persistUserStateByEmail(user, updates);
 
       return res.status(400).json({
         status: "error",
         message: `Invalid email or password. ${Math.max(
           0,
-          3 - Number(user.failedLoginAttempts || 0),
+          3 - nextFailedAttempts,
         )} attempts remaining.`,
       });
-    }
-
-    if (user.failedLoginAttempts) {
-      user.failedLoginAttempts = 0;
     }
 
     const resolvedRole = await resolveRoleForUser(user);
@@ -147,8 +157,15 @@ const userLogin = async (req, res) => {
       { expiresIn: "1h" },
     );
 
-    user.lastLogin = new Date();
-    await user.save();
+    const loginUpdates = {
+      lastLogin: new Date(),
+    };
+
+    if (user.failedLoginAttempts) {
+      loginUpdates.failedLoginAttempts = 0;
+    }
+
+    await persistUserStateByEmail(user, loginUpdates);
 
     const safeUser = {
       _id: user._id,

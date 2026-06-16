@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 const connectDB = async () => {
   try {
-    const mongoUri = process.env.DB_URI || process.env.LOCAL_DB_URI;
+    const mongoUri = process.env.LOCAL_DB_URI || process.env.DB_URI;
 
     if (!mongoUri) {
       throw new Error(
