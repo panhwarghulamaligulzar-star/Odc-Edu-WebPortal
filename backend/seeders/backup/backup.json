@@ -304,7 +304,7 @@
       ],
       "monthlySalary": null,
       "createdAt": "2026-05-17T10:44:30.474Z",
-      "updatedAt": "2026-05-25T05:38:35.250Z",
+      "updatedAt": "2026-06-16T11:11:53.548Z",
       "__v": 0
     }
   ],
@@ -351,6 +351,592 @@
       "_id": "6941d431831846a231bbc3a8"
     }
   ],
+  "roles": [
+    {
+      "_id": "6a25a35ec80028b4c085b961",
+      "name": "Super Admin",
+      "description": "Protected system role for platform super administrators.",
+      "isDefault": false,
+      "isSystem": true,
+      "permissions": [
+        {
+          "module": "dashboard",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "courses",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "employees",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "students",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "attendance",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "accounting",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "certifications",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "announcements",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        }
+      ],
+      "createdAt": "2026-06-07T16:59:10.550Z",
+      "updatedAt": "2026-06-07T16:59:10.550Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a25cb66c4c772c20db0fcea",
+      "name": "admin",
+      "description": "system admin",
+      "isDefault": false,
+      "isSystem": false,
+      "permissions": [
+        {
+          "module": "dashboard",
+          "actions": {
+            "view": false,
+            "create": false,
+            "update": false,
+            "delete": false,
+            "import": false,
+            "export": false,
+            "print": false,
+            "approve": false
+          }
+        },
+        {
+          "module": "courses",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "employees",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "students",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "attendance",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "accounting",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "certifications",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "announcements",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        }
+      ],
+      "createdBy": "6a259beff521cc98cb1c8349",
+      "createdAt": "2026-06-07T19:49:58.211Z",
+      "updatedAt": "2026-06-07T19:59:00.950Z",
+      "__v": 6
+    },
+    {
+      "_id": "6a269195c4c772c20db1013f",
+      "name": "Admission",
+      "description": "Admissions",
+      "isDefault": false,
+      "isSystem": false,
+      "permissions": [
+        {
+          "module": "dashboard",
+          "actions": {
+            "view": true,
+            "create": false,
+            "update": false,
+            "delete": false,
+            "import": false,
+            "export": false,
+            "print": false,
+            "approve": false
+          }
+        },
+        {
+          "module": "courses",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "employees",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "students",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "attendance",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "accounting",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "certifications",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "announcements",
+          "actions": {
+            "view": false,
+            "create": false,
+            "update": false,
+            "delete": false,
+            "import": false,
+            "export": false,
+            "print": false,
+            "approve": false
+          }
+        }
+      ],
+      "createdBy": "6a259beff521cc98cb1c8349",
+      "createdAt": "2026-06-08T09:55:33.298Z",
+      "updatedAt": "2026-06-08T11:06:04.301Z",
+      "__v": 2
+    },
+    {
+      "_id": "6a269415c4c772c20db1015f",
+      "name": "Accountant",
+      "description": "To record fees",
+      "isDefault": false,
+      "isSystem": false,
+      "permissions": [
+        {
+          "module": "dashboard",
+          "actions": {
+            "view": false,
+            "create": false,
+            "update": false,
+            "delete": false,
+            "import": false,
+            "export": false,
+            "print": false,
+            "approve": false
+          }
+        },
+        {
+          "module": "courses",
+          "actions": {
+            "view": false,
+            "create": false,
+            "update": false,
+            "delete": false,
+            "import": false,
+            "export": false,
+            "print": false,
+            "approve": false
+          }
+        },
+        {
+          "module": "employees",
+          "actions": {
+            "view": false,
+            "create": false,
+            "update": false,
+            "delete": false,
+            "import": false,
+            "export": false,
+            "print": false,
+            "approve": false
+          }
+        },
+        {
+          "module": "students",
+          "actions": {
+            "view": false,
+            "create": false,
+            "update": false,
+            "delete": false,
+            "import": false,
+            "export": false,
+            "print": false,
+            "approve": false
+          }
+        },
+        {
+          "module": "attendance",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "accounting",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "certifications",
+          "actions": {
+            "view": false,
+            "create": false,
+            "update": false,
+            "delete": false,
+            "import": false,
+            "export": false,
+            "print": false,
+            "approve": false
+          }
+        },
+        {
+          "module": "announcements",
+          "actions": {
+            "view": false,
+            "create": false,
+            "update": false,
+            "delete": false,
+            "import": false,
+            "export": false,
+            "print": false,
+            "approve": false
+          }
+        }
+      ],
+      "createdBy": "6a259beff521cc98cb1c8349",
+      "createdAt": "2026-06-08T10:06:13.925Z",
+      "updatedAt": "2026-06-08T11:08:19.841Z",
+      "__v": 1
+    },
+    {
+      "_id": "6a2c08e9c4c772c20db11828",
+      "name": "TechnicalSupport",
+      "description": "Technical support For Systme Bug Fixes",
+      "isDefault": false,
+      "isSystem": false,
+      "permissions": [
+        {
+          "module": "dashboard",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "courses",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "employees",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "students",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "attendance",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "accounting",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "certifications",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "announcements",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        }
+      ],
+      "createdBy": "6a259beff521cc98cb1c8349",
+      "createdAt": "2026-06-12T13:26:01.234Z",
+      "updatedAt": "2026-06-12T13:28:30.575Z",
+      "__v": 1
+    }
+  ],
   "studentcertificates": [
     {
       "_id": "6a0a1cd3c212bd870dc70edb",
@@ -367,7 +953,7 @@
       "grade": "80%",
       "skills": "Microsoft Office (Word, Excel & Power Point), Graphic Design, Internet Browsing & Typing",
       "createdAt": "2026-05-17T19:53:55.533Z",
-      "updatedAt": "2026-05-17T19:54:17.664Z",
+      "updatedAt": "2026-06-08T11:46:15.401Z",
       "__v": 0
     },
     {
@@ -2662,13 +3248,13 @@
       "_id": "6a0b2e63c212bd870dc742b7",
       "registrationNo": "0058",
       "registrationDate": "2029-01-07T12:00:00.000Z",
-      "studentName": "Babar Ali",
+      "studentName": "Narain",
       "gender": "Male",
       "dateOfBirth": "2009-01-07T12:00:00.000Z",
-      "religion": "Muslim",
+      "religion": "Non-Muslim",
       "cnicOrBForm": "4420367819311",
       "disability": false,
-      "fatherName": "Muhammad Qasim",
+      "fatherName": "Kanji Mal",
       "fatherCnic": "9638204645496",
       "fatherContact": "3017482643",
       "mobileNumber": "3010316854",
@@ -2681,11 +3267,11 @@
       "profilePicture": "",
       "isActive": true,
       "createdAt": "2026-05-18T15:21:07.948Z",
-      "updatedAt": "2026-06-02T08:49:19.021Z",
+      "updatedAt": "2026-06-10T04:32:43.707Z",
       "__v": 0,
-      "caste": "Wasan",
+      "caste": "Oad",
       "fatherOccupation": "undefined",
-      "guardianContact": "undefined",
+      "guardianContact": "",
       "guardianName": "undefined",
       "lastClassAttended": "undefined",
       "previousSchoolCollege": "undefined"
@@ -7232,30 +7818,6 @@
       "createdAt": "2026-05-24T10:02:27.581Z",
       "updatedAt": "2026-05-24T10:02:27.594Z",
       "__v": 0
-    },
-    {
-      "_id": "6a22ad8dc212bd870dc79733",
-      "registrationNo": "110",
-      "registrationDate": "2026-05-29T12:00:00.000Z",
-      "studentName": "Kamran Butt",
-      "gender": "Male",
-      "dateOfBirth": "2008-04-09T12:00:00.000Z",
-      "religion": "Muslim",
-      "cnicOrBForm": "4211912345687",
-      "disability": false,
-      "fatherName": "Butt Sahib",
-      "fatherCnic": "4211911111130",
-      "fatherContact": "3187654340",
-      "mobileNumber": "3181234586",
-      "permanentAddress": "Saddar, Karachi",
-      "emergencyContactNumber": "3189998907",
-      "enrolledCourses": [],
-      "photo": "",
-      "profilePicture": "",
-      "isActive": true,
-      "createdAt": "2026-06-05T11:05:49.088Z",
-      "updatedAt": "2026-06-05T11:05:49.088Z",
-      "__v": 0
     }
   ],
   "feepayments": [
@@ -9247,6 +9809,27 @@
       "createdAt": "2026-05-17T10:59:19.536Z",
       "updatedAt": "2026-05-17T10:59:19.536Z",
       "__v": 0
+    },
+    {
+      "_id": "6a2b0b66c4c772c20db11148",
+      "receiptNo": "RCP-202606-0099",
+      "voucherNo": "059",
+      "student": "6a0b2e64c212bd870dc74335",
+      "course": "69886d5a294dd3b3805ae189",
+      "feeStructure": "6a0b2e64c212bd870dc7433d",
+      "installmentNumber": 1,
+      "amount": 7700,
+      "paymentDate": "2025-07-24T12:00:00.000Z",
+      "paymentMethod": "Cash",
+      "accountingPaymentMethodId": "6999f9b6f087c1c041596ef8",
+      "status": "Completed",
+      "paymentType": "Installment",
+      "refundDetails": {
+        "refundAmount": 0
+      },
+      "createdAt": "2026-06-11T19:24:22.255Z",
+      "updatedAt": "2026-06-11T19:24:22.255Z",
+      "__v": 0
     }
   ],
   "headofaccounts": [
@@ -9795,6 +10378,21 @@
       "details": "Student : Noor Khatoon (0030) | Mobile: 03585478493\nCourse  : Certificate in Information Technology-CIT\nPay Type: Installment — Installment #1\nMethod  : Cash\nReceipt : RCP-202605-0098\nVoucher : 058",
       "createdAt": "2026-05-17T10:59:19.584Z",
       "updatedAt": "2026-05-17T10:59:19.584Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a2b0b66c4c772c20db11153",
+      "transactionNo": "TXN-2026-00026",
+      "name": "Fee Payment — Aijaz Ahmed (Inst. #1)",
+      "type": "6999f725f21eab03f7520419",
+      "head": "6a05b9783ebc2b5952223d9c",
+      "paymentMethod": "6999f9b6f087c1c041596ef8",
+      "paymentDate": "2025-07-24T12:00:00.000Z",
+      "amount": 7700,
+      "billReference": "RCP-202606-0099",
+      "details": "Student : Aijaz Ahmed (0067) | Mobile: 3473797812\nCourse  : Diploma In Information Technology-DIT\nPay Type: Installment — Installment #1\nMethod  : Cash\nReceipt : RCP-202606-0099\nVoucher : 059",
+      "createdAt": "2026-06-11T19:24:22.401Z",
+      "updatedAt": "2026-06-11T19:24:22.401Z",
       "__v": 0
     }
   ],
@@ -10642,7 +11240,7 @@
       "isSuperAdmin": true,
       "isActive": true,
       "failedLoginAttempts": 0,
-      "lastLogin": null,
+      "lastLogin": "2026-06-12T13:24:28.289Z",
       "password": "$2b$10$CcgMt96Eyo8NZh4yWdwy3OtjVGdAcdjgqbDGA8iiRNR652BK7USFC",
       "profile": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQIf4R5qPKHPNMyAqV-FjS_OTBB8pfUV29Phg&s",
       "details": {
@@ -10664,7 +11262,285 @@
       },
       "permissions": [],
       "createdAt": "2026-06-07T00:00:00.000Z",
-      "updatedAt": "2026-06-07T00:00:00.000Z"
+      "updatedAt": "2026-06-12T13:24:28.290Z"
+    },
+    {
+      "_id": "6a25cb98c4c772c20db0fcf2",
+      "name": "Admin",
+      "email": "admin@gmail.com",
+      "role": "6a25cb66c4c772c20db0fcea",
+      "legacyRole": "admin",
+      "isSuperAdmin": false,
+      "isActive": true,
+      "failedLoginAttempts": 0,
+      "lastLogin": "2026-06-07T19:58:53.967Z",
+      "password": "$2b$10$RdTuHxVuyVPOfsH2qpFze.yXnRbtdvmIu0ewbtLIeBOTSoGEFsOjW",
+      "profile": null,
+      "permissions": [
+        {
+          "module": "dashboard",
+          "actions": {
+            "view": false,
+            "create": false,
+            "update": false,
+            "delete": false,
+            "import": false,
+            "export": false,
+            "print": false,
+            "approve": false
+          }
+        },
+        {
+          "module": "courses",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "employees",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "students",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "attendance",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "accounting",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "certifications",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "announcements",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        }
+      ],
+      "createdAt": "2026-06-07T19:50:48.254Z",
+      "updatedAt": "2026-06-07T19:59:43.667Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a269e07c4c772c20db10228",
+      "name": "Wali Muhammad",
+      "email": "walimsamejo@gmail.com",
+      "role": "6a269195c4c772c20db1013f",
+      "legacyRole": "6a269195c4c772c20db1013f",
+      "isSuperAdmin": false,
+      "isActive": true,
+      "failedLoginAttempts": 0,
+      "lastLogin": "2026-06-16T11:27:16.499Z",
+      "password": "$2b$10$m.X2nNrP1B6G6Yq8kAlYMuNGBMClQ.HaPiYT5UmPZ/Xb50OP.vLAO",
+      "profile": null,
+      "permissions": [],
+      "createdAt": "2026-06-08T10:48:39.498Z",
+      "updatedAt": "2026-06-16T11:27:16.518Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a26a326c4c772c20db104a5",
+      "name": "Shahzad Gul",
+      "email": "shahzadgul@gmail.com",
+      "role": "6a269415c4c772c20db1015f",
+      "legacyRole": "6a269415c4c772c20db1015f",
+      "isSuperAdmin": false,
+      "isActive": true,
+      "failedLoginAttempts": 0,
+      "lastLogin": "2026-06-08T11:11:18.243Z",
+      "password": "$2b$10$6AiaAHmI576vh8KSGEMLbev4wmurzQkDogf7fUbVhdzWItbdeDoBO",
+      "profile": null,
+      "permissions": [],
+      "createdAt": "2026-06-08T11:10:30.465Z",
+      "updatedAt": "2026-06-08T11:11:18.244Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a2c0955c4c772c20db11830",
+      "name": "Ghulam Ali",
+      "email": "techsupport@gmail.com",
+      "role": "6a2c08e9c4c772c20db11828",
+      "legacyRole": "6a2c08e9c4c772c20db11828",
+      "isSuperAdmin": false,
+      "isActive": true,
+      "failedLoginAttempts": 0,
+      "lastLogin": "2026-06-16T11:10:05.365Z",
+      "password": "$2b$10$ljtklSYGdladpgiw0Yxj9.k9RDtEwNNdlwuqiu9O.3DjXBIa789T.",
+      "profile": null,
+      "permissions": [
+        {
+          "module": "dashboard",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "courses",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "employees",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "students",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "attendance",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "accounting",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "certifications",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        },
+        {
+          "module": "announcements",
+          "actions": {
+            "view": true,
+            "create": true,
+            "update": true,
+            "delete": true,
+            "import": true,
+            "export": true,
+            "print": true,
+            "approve": true
+          }
+        }
+      ],
+      "createdAt": "2026-06-12T13:27:49.515Z",
+      "updatedAt": "2026-06-16T11:10:05.371Z",
+      "__v": 0
     }
   ],
   "attendances": [
@@ -23755,11 +24631,12 @@
       "course": "69ac08670092937d0dc35c55",
       "batch": "6a1aa959c212bd870dc781c2",
       "enrollmentDate": "2025-02-05T12:00:00.000Z",
-      "status": "Active",
+      "status": "Completed",
       "notes": "no",
       "createdAt": "2026-05-18T15:21:05.730Z",
-      "updatedAt": "2026-05-30T09:10:22.480Z",
-      "__v": 0
+      "updatedAt": "2026-06-12T12:46:36.407Z",
+      "__v": 0,
+      "completionDate": "2026-06-12T12:00:00.000Z"
     },
     {
       "_id": "6a0b2e61c212bd870dc73fac",
@@ -24353,84 +25230,77 @@
       "_id": "6a0b2e63c212bd870dc7425a",
       "student": "6a0b2e63c212bd870dc74255",
       "course": "69ac08670092937d0dc35c55",
-      "batch": "6a1ab647c212bd870dc788a5",
       "enrollmentDate": "2025-01-07T12:00:00.000Z",
       "status": "Active",
       "notes": "no",
       "createdAt": "2026-05-18T15:21:07.742Z",
-      "updatedAt": "2026-05-30T10:08:00.501Z",
+      "updatedAt": "2026-06-08T18:56:55.241Z",
       "__v": 0
     },
     {
       "_id": "6a0b2e63c212bd870dc74268",
       "student": "6a0b2e63c212bd870dc74263",
       "course": "69ac08670092937d0dc35c55",
-      "batch": "6a1ab647c212bd870dc788a5",
       "enrollmentDate": "2025-01-07T12:00:00.000Z",
       "status": "Active",
       "notes": "no",
       "createdAt": "2026-05-18T15:21:07.771Z",
-      "updatedAt": "2026-05-30T10:07:22.790Z",
+      "updatedAt": "2026-06-08T18:56:55.241Z",
       "__v": 0
     },
     {
       "_id": "6a0b2e63c212bd870dc74276",
       "student": "6a0b2e63c212bd870dc74271",
       "course": "69ac08670092937d0dc35c55",
-      "batch": "6a1ab647c212bd870dc788a5",
       "enrollmentDate": "2025-01-07T12:00:00.000Z",
       "status": "Active",
       "notes": "no",
       "createdAt": "2026-05-18T15:21:07.805Z",
-      "updatedAt": "2026-05-30T10:07:32.639Z",
+      "updatedAt": "2026-06-08T18:56:55.241Z",
       "__v": 0
     },
     {
       "_id": "6a0b2e63c212bd870dc74284",
       "student": "6a0b2e63c212bd870dc7427f",
       "course": "69ac08670092937d0dc35c55",
-      "batch": "6a1ab647c212bd870dc788a5",
       "enrollmentDate": "2025-01-07T12:00:00.000Z",
       "status": "Active",
       "notes": "no",
       "createdAt": "2026-05-18T15:21:07.839Z",
-      "updatedAt": "2026-05-30T10:05:41.076Z",
+      "updatedAt": "2026-06-08T18:56:55.241Z",
       "__v": 0
     },
     {
       "_id": "6a0b2e63c212bd870dc74292",
       "student": "6a0b2e63c212bd870dc7428d",
       "course": "69ac08670092937d0dc35c55",
-      "batch": "6a1ab647c212bd870dc788a5",
       "enrollmentDate": "2026-01-07T12:00:00.000Z",
       "status": "Active",
       "notes": "no",
       "createdAt": "2026-05-18T15:21:07.866Z",
-      "updatedAt": "2026-05-30T10:05:59.566Z",
+      "updatedAt": "2026-06-08T18:56:55.241Z",
       "__v": 0
     },
     {
       "_id": "6a0b2e63c212bd870dc742a0",
       "student": "6a0b2e63c212bd870dc7429b",
       "course": "69ac08670092937d0dc35c55",
-      "batch": "6a1ab647c212bd870dc788a5",
       "enrollmentDate": "2027-01-07T12:00:00.000Z",
       "status": "Active",
       "notes": "no",
       "createdAt": "2026-05-18T15:21:07.902Z",
-      "updatedAt": "2026-05-30T10:06:35.723Z",
+      "updatedAt": "2026-06-08T18:56:55.241Z",
       "__v": 0
     },
     {
       "_id": "6a0b2e63c212bd870dc742ae",
       "student": "6a0b2e63c212bd870dc742a9",
       "course": "69ac08670092937d0dc35c55",
-      "batch": "6a1ab647c212bd870dc788a5",
       "enrollmentDate": "2028-01-07T12:00:00.000Z",
       "status": "Active",
       "notes": "no",
       "createdAt": "2026-05-18T15:21:07.934Z",
-      "updatedAt": "2026-05-30T10:07:01.998Z",
+      "updatedAt": "2026-06-08T18:56:55.241Z",
       "__v": 0
     },
     {
@@ -24487,11 +25357,12 @@
       "course": "69ac08670092937d0dc35c55",
       "batch": "69ac0a6d0092937d0dc35c8d",
       "enrollmentDate": "2033-01-07T12:00:00.000Z",
-      "status": "Active",
+      "status": "Completed",
       "notes": "no",
       "createdAt": "2026-05-18T15:21:08.073Z",
-      "updatedAt": "2026-05-18T15:21:08.073Z",
-      "__v": 0
+      "updatedAt": "2026-06-15T12:55:33.657Z",
+      "__v": 0,
+      "completionDate": "2026-06-15T12:00:00.000Z"
     },
     {
       "_id": "6a0b2e64c212bd870dc74302",
@@ -24499,11 +25370,12 @@
       "course": "69ac08670092937d0dc35c55",
       "batch": "69ac0a6d0092937d0dc35c8d",
       "enrollmentDate": "2034-01-07T12:00:00.000Z",
-      "status": "Active",
+      "status": "Completed",
       "notes": "no",
       "createdAt": "2026-05-18T15:21:08.109Z",
-      "updatedAt": "2026-05-18T15:21:08.109Z",
-      "__v": 0
+      "updatedAt": "2026-06-12T12:45:38.808Z",
+      "__v": 0,
+      "completionDate": "2026-06-12T12:00:00.000Z"
     },
     {
       "_id": "6a0b2e64c212bd870dc74310",
@@ -24511,11 +25383,12 @@
       "course": "69ac08670092937d0dc35c55",
       "batch": "69ac0a6d0092937d0dc35c8d",
       "enrollmentDate": "2035-01-07T12:00:00.000Z",
-      "status": "Active",
+      "status": "Completed",
       "notes": "no",
       "createdAt": "2026-05-18T15:21:08.140Z",
-      "updatedAt": "2026-05-18T15:21:08.140Z",
-      "__v": 0
+      "updatedAt": "2026-06-12T12:17:34.657Z",
+      "__v": 0,
+      "completionDate": "2026-06-12T12:00:00.000Z"
     },
     {
       "_id": "6a0b2e64c212bd870dc7431f",
@@ -27342,7 +28215,7 @@
       "status": "Active",
       "notes": "no",
       "createdAt": "2026-05-24T10:02:27.553Z",
-      "updatedAt": "2026-05-24T10:04:51.995Z",
+      "updatedAt": "2026-06-08T18:51:36.260Z",
       "__v": 0
     },
     {
@@ -27536,6 +28409,96 @@
       "notes": "Imported from CSV",
       "createdAt": "2026-06-05T11:05:49.128Z",
       "updatedAt": "2026-06-05T11:05:49.128Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a270fb9c4c772c20db10980",
+      "student": "6a22ad8dc212bd870dc79733",
+      "course": "6a088b43207aa6f4efcf4381",
+      "batch": null,
+      "enrollmentDate": "2026-06-08T12:00:00.000Z",
+      "status": "Active",
+      "createdAt": "2026-06-08T18:53:45.605Z",
+      "updatedAt": "2026-06-08T18:53:45.605Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a2bee8ec4c772c20db1124f",
+      "student": "6a2bee8ec4c772c20db1124a",
+      "course": "69ac08670092937d0dc35c55",
+      "batch": "69ac0a6d0092937d0dc35c8d",
+      "enrollmentDate": "+045693-01-01T12:00:00.000Z",
+      "status": "Active",
+      "notes": "no",
+      "createdAt": "2026-06-12T11:33:34.978Z",
+      "updatedAt": "2026-06-12T11:34:14.340Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a2bef63c4c772c20db1128e",
+      "student": "6a2bef63c4c772c20db11289",
+      "course": "69ac08670092937d0dc35c55",
+      "batch": "69ac0a6d0092937d0dc35c8d",
+      "enrollmentDate": "+045693-01-01T12:00:00.000Z",
+      "status": "Active",
+      "notes": "no",
+      "createdAt": "2026-06-12T11:37:07.555Z",
+      "updatedAt": "2026-06-12T11:37:07.555Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a2d536dc4c772c20db119ed",
+      "student": "6a2c09edc4c772c20db118a0",
+      "course": "6a099f64207aa6f4efcf4b74",
+      "batch": null,
+      "enrollmentDate": "2026-06-13T12:00:00.000Z",
+      "status": "Active",
+      "createdAt": "2026-06-13T12:56:13.554Z",
+      "updatedAt": "2026-06-13T12:56:13.554Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a2d53b4c4c772c20db11a29",
+      "student": "6a2c09edc4c772c20db118a0",
+      "course": "69ac08670092937d0dc35c55",
+      "batch": null,
+      "enrollmentDate": "2026-06-13T12:00:00.000Z",
+      "status": "Active",
+      "createdAt": "2026-06-13T12:57:24.036Z",
+      "updatedAt": "2026-06-13T12:57:24.036Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a2fca31c4c772c20db1223d",
+      "student": "6a2fc9d7c4c772c20db1220d",
+      "course": "69ac08670092937d0dc35c55",
+      "batch": null,
+      "enrollmentDate": "2026-06-15T12:00:00.000Z",
+      "status": "Active",
+      "createdAt": "2026-06-15T09:47:29.092Z",
+      "updatedAt": "2026-06-15T09:47:29.092Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a312990c4c772c20db127e2",
+      "student": "6a2f7706c4c772c20db11e22",
+      "course": "6988766d294dd3b3805ae3ac",
+      "batch": null,
+      "enrollmentDate": "2026-06-16T12:00:00.000Z",
+      "status": "Active",
+      "createdAt": "2026-06-16T10:46:40.132Z",
+      "updatedAt": "2026-06-16T10:46:40.132Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a3129cac4c772c20db1288c",
+      "student": "6a2f7706c4c772c20db11e22",
+      "course": "69ac08670092937d0dc35c55",
+      "batch": null,
+      "enrollmentDate": "2026-06-16T12:00:00.000Z",
+      "status": "Active",
+      "createdAt": "2026-06-16T10:47:38.594Z",
+      "updatedAt": "2026-06-16T10:47:38.594Z",
       "__v": 0
     }
   ],
@@ -91004,8 +91967,8 @@
       "discountOnCourseFee": 0,
       "discountType": "none",
       "totalFee": 39400,
-      "paidAmount": 0,
-      "remainingAmount": 39400,
+      "paidAmount": 7700,
+      "remainingAmount": 31700,
       "installmentEnabled": true,
       "numberOfInstallments": 12,
       "installmentAmount": 10000,
@@ -91024,9 +91987,12 @@
           },
           "amount": 7700,
           "dueDate": "2025-07-24T12:00:00.000Z",
-          "status": "Pending",
-          "paidAmount": 0,
-          "_id": "6a1aa094c212bd870dc77f52"
+          "status": "Paid",
+          "paidAmount": 7700,
+          "_id": "6a1aa094c212bd870dc77f52",
+          "paidDate": "2025-07-24T12:00:00.000Z",
+          "receiptNumber": "RCP-202606-0099",
+          "voucherNo": "059"
         },
         {
           "installmentNumber": 2,
@@ -91263,7 +92229,7 @@
           "_id": "6a1aa094c212bd870dc77f5f"
         }
       ],
-      "feeStatus": "Unpaid",
+      "feeStatus": "Partial",
       "systemGrantedNumber": "0067",
       "notes": "install",
       "additionalFees": [
@@ -91277,7 +92243,7 @@
         }
       ],
       "createdAt": "2026-05-18T15:21:08.249Z",
-      "updatedAt": "2026-05-30T08:32:20.517Z",
+      "updatedAt": "2026-06-11T19:24:22.306Z",
       "__v": 0
     },
     {
@@ -127043,7 +128009,7 @@
           "dueDate": "2026-05-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e2f"
+          "_id": "6a270f38c4c772c20db108c3"
         },
         {
           "installmentNumber": 2,
@@ -127058,10 +128024,10 @@
             "otherFee": 0
           },
           "amount": 1500,
-          "dueDate": "2026-06-01T12:00:00.000Z",
+          "dueDate": "2026-06-08T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e30"
+          "_id": "6a270f38c4c772c20db108c4"
         },
         {
           "installmentNumber": 3,
@@ -127079,7 +128045,7 @@
           "dueDate": "2026-07-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e31"
+          "_id": "6a270f38c4c772c20db108c5"
         },
         {
           "installmentNumber": 4,
@@ -127097,7 +128063,7 @@
           "dueDate": "2026-08-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e32"
+          "_id": "6a270f38c4c772c20db108c6"
         },
         {
           "installmentNumber": 5,
@@ -127115,7 +128081,7 @@
           "dueDate": "2026-09-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e33"
+          "_id": "6a270f38c4c772c20db108c7"
         },
         {
           "installmentNumber": 6,
@@ -127133,7 +128099,7 @@
           "dueDate": "2026-10-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e34"
+          "_id": "6a270f38c4c772c20db108c8"
         },
         {
           "installmentNumber": 7,
@@ -127151,7 +128117,7 @@
           "dueDate": "2026-11-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e35"
+          "_id": "6a270f38c4c772c20db108c9"
         },
         {
           "installmentNumber": 8,
@@ -127169,7 +128135,7 @@
           "dueDate": "2026-12-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e36"
+          "_id": "6a270f38c4c772c20db108ca"
         },
         {
           "installmentNumber": 9,
@@ -127187,7 +128153,7 @@
           "dueDate": "2027-01-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e37"
+          "_id": "6a270f38c4c772c20db108cb"
         },
         {
           "installmentNumber": 10,
@@ -127205,7 +128171,7 @@
           "dueDate": "2027-02-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e38"
+          "_id": "6a270f38c4c772c20db108cc"
         },
         {
           "installmentNumber": 11,
@@ -127223,7 +128189,7 @@
           "dueDate": "2027-03-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e39"
+          "_id": "6a270f38c4c772c20db108cd"
         },
         {
           "installmentNumber": 12,
@@ -127241,7 +128207,7 @@
           "dueDate": "2027-04-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e3a"
+          "_id": "6a270f38c4c772c20db108ce"
         },
         {
           "installmentNumber": 13,
@@ -127259,7 +128225,7 @@
           "dueDate": "2027-05-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e3b"
+          "_id": "6a270f38c4c772c20db108cf"
         },
         {
           "installmentNumber": 14,
@@ -127277,7 +128243,7 @@
           "dueDate": "2027-06-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e3c"
+          "_id": "6a270f38c4c772c20db108d0"
         },
         {
           "installmentNumber": 15,
@@ -127295,7 +128261,7 @@
           "dueDate": "2027-07-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e3d"
+          "_id": "6a270f38c4c772c20db108d1"
         },
         {
           "installmentNumber": 16,
@@ -127313,7 +128279,7 @@
           "dueDate": "2027-08-01T12:00:00.000Z",
           "status": "Pending",
           "paidAmount": 0,
-          "_id": "6a12cd44c212bd870dc75e3e"
+          "_id": "6a270f38c4c772c20db108d2"
         }
       ],
       "feeStatus": "Unpaid",
@@ -127321,7 +128287,7 @@
       "notes": "install",
       "additionalFees": [],
       "createdAt": "2026-05-24T10:02:27.560Z",
-      "updatedAt": "2026-05-24T10:04:52.031Z",
+      "updatedAt": "2026-06-08T18:51:36.311Z",
       "__v": 0
     },
     {
@@ -130505,6 +131471,929 @@
       "createdAt": "2026-06-05T11:05:49.135Z",
       "updatedAt": "2026-06-05T11:05:49.135Z",
       "__v": 0
+    },
+    {
+      "_id": "6a270fb9c4c772c20db10986",
+      "student": "6a22ad8dc212bd870dc79733",
+      "course": "6a088b43207aa6f4efcf4381",
+      "enrollment": "6a270fb9c4c772c20db10980",
+      "admissionFee": 1000,
+      "courseFee": 14000,
+      "certificateFee": 1000,
+      "examFee": 0,
+      "registrationFee": 0,
+      "practicalFee": 0,
+      "otherFee": 0,
+      "additionalFees": [],
+      "discount": 0,
+      "discountPercentage": 0,
+      "paymentPlanType": "custom",
+      "discountOnAdmission": 0,
+      "discountOnCourseFee": 0,
+      "discountType": "courseFee",
+      "totalFee": 16000,
+      "paidAmount": 0,
+      "remainingAmount": 16000,
+      "installmentEnabled": true,
+      "numberOfInstallments": 6,
+      "installmentAmount": 0,
+      "installments": [
+        {
+          "installmentNumber": 1,
+          "description": "Admission Fee + Course Fee",
+          "feeComponents": {
+            "admissionFee": 1000,
+            "courseFee": 2333.33,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 3333.33,
+          "dueDate": "2026-06-08T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a270fb9c4c772c20db10987"
+        },
+        {
+          "installmentNumber": 2,
+          "description": "Course Fee Installment 2",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2333.33,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2333.33,
+          "dueDate": "2026-07-31T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a270fb9c4c772c20db10988"
+        },
+        {
+          "installmentNumber": 3,
+          "description": "Course Fee Installment 3",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2333.33,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2333.33,
+          "dueDate": "2026-08-08T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a270fb9c4c772c20db10989"
+        },
+        {
+          "installmentNumber": 4,
+          "description": "Course Fee Installment 4",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2333.33,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2333.33,
+          "dueDate": "2026-09-08T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a270fb9c4c772c20db1098a"
+        },
+        {
+          "installmentNumber": 5,
+          "description": "Course Fee Installment 5",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2333.33,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2333.33,
+          "dueDate": "2026-10-08T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a270fb9c4c772c20db1098b"
+        },
+        {
+          "installmentNumber": 6,
+          "description": "Course Fee + Certificate Fee",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2333.35,
+            "certificateFee": 1000,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 3333.35,
+          "dueDate": "2026-11-08T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a270fb9c4c772c20db1098c"
+        }
+      ],
+      "feeStatus": "Unpaid",
+      "systemGrantedNumber": "110",
+      "createdAt": "2026-06-08T18:53:45.647Z",
+      "updatedAt": "2026-06-08T18:53:45.647Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a2bee8fc4c772c20db11254",
+      "student": "6a2bee8ec4c772c20db1124a",
+      "course": "69ac08670092937d0dc35c55",
+      "enrollment": "6a2bee8ec4c772c20db1124f",
+      "admissionFee": 0,
+      "courseFee": 9000,
+      "certificateFee": 1000,
+      "examFee": 0,
+      "registrationFee": 0,
+      "practicalFee": 0,
+      "otherFee": 0,
+      "additionalFees": [],
+      "discount": 0,
+      "discountPercentage": 0,
+      "paymentPlanType": "custom",
+      "discountOnAdmission": 0,
+      "discountOnCourseFee": 0,
+      "discountType": "none",
+      "totalFee": 10000,
+      "paidAmount": 0,
+      "remainingAmount": 10000,
+      "installmentEnabled": false,
+      "numberOfInstallments": 1,
+      "installmentAmount": 10000,
+      "installments": [
+        {
+          "installmentNumber": 1,
+          "description": "Full Payment",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 9000,
+            "certificateFee": 1000,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 10000,
+          "dueDate": "+045693-01-01T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2beeb6c4c772c20db11264"
+        }
+      ],
+      "feeStatus": "Unpaid",
+      "systemGrantedNumber": "1",
+      "notes": "install",
+      "createdAt": "2026-06-12T11:33:35.066Z",
+      "updatedAt": "2026-06-12T11:34:14.371Z",
+      "__v": 1
+    },
+    {
+      "_id": "6a2bef63c4c772c20db11293",
+      "student": "6a2bef63c4c772c20db11289",
+      "course": "69ac08670092937d0dc35c55",
+      "enrollment": "6a2bef63c4c772c20db1128e",
+      "admissionFee": 0,
+      "courseFee": 9000,
+      "certificateFee": 1000,
+      "examFee": 0,
+      "registrationFee": 0,
+      "practicalFee": 0,
+      "otherFee": 0,
+      "additionalFees": [],
+      "discount": 0,
+      "discountPercentage": 0,
+      "paymentPlanType": "custom",
+      "discountOnAdmission": 0,
+      "discountOnCourseFee": 0,
+      "discountType": "none",
+      "totalFee": 10000,
+      "paidAmount": 0,
+      "remainingAmount": 10000,
+      "installmentEnabled": false,
+      "numberOfInstallments": 1,
+      "installmentAmount": 10000,
+      "installments": [
+        {
+          "installmentNumber": 1,
+          "description": "Full Payment",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 9000,
+            "certificateFee": 1000,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 10000,
+          "dueDate": "+045693-01-01T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2bef63c4c772c20db11294"
+        }
+      ],
+      "feeStatus": "Unpaid",
+      "systemGrantedNumber": null,
+      "notes": "install",
+      "createdAt": "2026-06-12T11:37:07.588Z",
+      "updatedAt": "2026-06-12T11:37:07.588Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a2d536ec4c772c20db119f3",
+      "student": "6a2c09edc4c772c20db118a0",
+      "course": "6a099f64207aa6f4efcf4b74",
+      "enrollment": "6a2d536dc4c772c20db119ed",
+      "admissionFee": 1000,
+      "courseFee": 48000,
+      "certificateFee": 0,
+      "examFee": 0,
+      "registrationFee": 0,
+      "practicalFee": 0,
+      "otherFee": 0,
+      "additionalFees": [],
+      "discount": 0,
+      "discountPercentage": 0,
+      "paymentPlanType": "custom",
+      "discountOnAdmission": 0,
+      "discountOnCourseFee": 0,
+      "discountType": "courseFee",
+      "totalFee": 49000,
+      "paidAmount": 0,
+      "remainingAmount": 49000,
+      "installmentEnabled": true,
+      "numberOfInstallments": 2,
+      "installmentAmount": 0,
+      "installments": [
+        {
+          "installmentNumber": 1,
+          "description": "Admission Fee + Course Fee",
+          "feeComponents": {
+            "admissionFee": 1000,
+            "courseFee": 24000,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 25000,
+          "dueDate": "2026-06-13T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2d536ec4c772c20db119f4"
+        },
+        {
+          "installmentNumber": 2,
+          "description": "Course Fee + Certificate Fee",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 24000,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 24000,
+          "dueDate": "2026-07-13T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2d536ec4c772c20db119f5"
+        }
+      ],
+      "feeStatus": "Unpaid",
+      "systemGrantedNumber": null,
+      "createdAt": "2026-06-13T12:56:14.493Z",
+      "updatedAt": "2026-06-13T12:56:14.493Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a2d53b4c4c772c20db11a31",
+      "student": "6a2c09edc4c772c20db118a0",
+      "course": "69ac08670092937d0dc35c55",
+      "enrollment": "6a2d53b4c4c772c20db11a29",
+      "admissionFee": 1000,
+      "courseFee": 16000,
+      "certificateFee": 1000,
+      "examFee": 0,
+      "registrationFee": 0,
+      "practicalFee": 0,
+      "otherFee": 0,
+      "additionalFees": [],
+      "discount": 0,
+      "discountPercentage": 0,
+      "paymentPlanType": "custom",
+      "discountOnAdmission": 0,
+      "discountOnCourseFee": 0,
+      "discountType": "courseFee",
+      "totalFee": 18000,
+      "paidAmount": 0,
+      "remainingAmount": 18000,
+      "installmentEnabled": true,
+      "numberOfInstallments": 6,
+      "installmentAmount": 0,
+      "installments": [
+        {
+          "installmentNumber": 1,
+          "description": "Admission Fee + Course Fee",
+          "feeComponents": {
+            "admissionFee": 1000,
+            "courseFee": 2666.66,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 3666.66,
+          "dueDate": "2026-06-13T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2d53b4c4c772c20db11a32"
+        },
+        {
+          "installmentNumber": 2,
+          "description": "Course Fee Installment 2",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2666.66,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2666.66,
+          "dueDate": "2026-07-13T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2d53b4c4c772c20db11a33"
+        },
+        {
+          "installmentNumber": 3,
+          "description": "Course Fee Installment 3",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2666.66,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2666.66,
+          "dueDate": "2026-08-13T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2d53b4c4c772c20db11a34"
+        },
+        {
+          "installmentNumber": 4,
+          "description": "Course Fee Installment 4",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2666.66,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2666.66,
+          "dueDate": "2026-09-13T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2d53b4c4c772c20db11a35"
+        },
+        {
+          "installmentNumber": 5,
+          "description": "Course Fee Installment 5",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2666.66,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2666.66,
+          "dueDate": "2026-10-13T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2d53b4c4c772c20db11a36"
+        },
+        {
+          "installmentNumber": 6,
+          "description": "Course Fee + Certificate Fee",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2666.7,
+            "certificateFee": 1000,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 3666.7,
+          "dueDate": "2026-11-13T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2d53b4c4c772c20db11a37"
+        }
+      ],
+      "feeStatus": "Unpaid",
+      "systemGrantedNumber": "0191",
+      "createdAt": "2026-06-13T12:57:24.168Z",
+      "updatedAt": "2026-06-13T12:57:24.168Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a2fca31c4c772c20db12245",
+      "student": "6a2fc9d7c4c772c20db1220d",
+      "course": "69ac08670092937d0dc35c55",
+      "enrollment": "6a2fca31c4c772c20db1223d",
+      "admissionFee": 0,
+      "courseFee": 12000,
+      "certificateFee": 1000,
+      "examFee": 0,
+      "registrationFee": 0,
+      "practicalFee": 0,
+      "otherFee": 0,
+      "additionalFees": [],
+      "discount": 0,
+      "discountPercentage": 0,
+      "paymentPlanType": "custom",
+      "discountOnAdmission": 0,
+      "discountOnCourseFee": 0,
+      "discountType": "courseFee",
+      "totalFee": 13000,
+      "paidAmount": 0,
+      "remainingAmount": 13000,
+      "installmentEnabled": true,
+      "numberOfInstallments": 6,
+      "installmentAmount": 0,
+      "installments": [
+        {
+          "installmentNumber": 1,
+          "description": "Admission Fee + Course Fee",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2000,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2000,
+          "dueDate": "2026-06-01T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2fca31c4c772c20db12246"
+        },
+        {
+          "installmentNumber": 2,
+          "description": "Course Fee Installment 2",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2000,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2000,
+          "dueDate": "2026-07-15T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2fca31c4c772c20db12247"
+        },
+        {
+          "installmentNumber": 3,
+          "description": "Course Fee Installment 3",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2000,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2000,
+          "dueDate": "2026-08-15T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2fca31c4c772c20db12248"
+        },
+        {
+          "installmentNumber": 4,
+          "description": "Course Fee Installment 4",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2000,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2000,
+          "dueDate": "2026-09-15T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2fca31c4c772c20db12249"
+        },
+        {
+          "installmentNumber": 5,
+          "description": "Course Fee Installment 5",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2000,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2000,
+          "dueDate": "2026-10-15T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2fca31c4c772c20db1224a"
+        },
+        {
+          "installmentNumber": 6,
+          "description": "Course Fee + Certificate Fee",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2000,
+            "certificateFee": 1000,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 3000,
+          "dueDate": "2026-11-15T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a2fca31c4c772c20db1224b"
+        }
+      ],
+      "feeStatus": "Unpaid",
+      "systemGrantedNumber": "0192",
+      "createdAt": "2026-06-15T09:47:29.258Z",
+      "updatedAt": "2026-06-15T09:47:29.258Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a312990c4c772c20db127e8",
+      "student": "6a2f7706c4c772c20db11e22",
+      "course": "6988766d294dd3b3805ae3ac",
+      "enrollment": "6a312990c4c772c20db127e2",
+      "admissionFee": 1000,
+      "courseFee": 14400,
+      "certificateFee": 0,
+      "examFee": 0,
+      "registrationFee": 0,
+      "practicalFee": 0,
+      "otherFee": 0,
+      "additionalFees": [],
+      "discount": 0,
+      "discountPercentage": 0,
+      "paymentPlanType": "custom",
+      "discountOnAdmission": 0,
+      "discountOnCourseFee": 0,
+      "discountType": "courseFee",
+      "totalFee": 15400,
+      "paidAmount": 0,
+      "remainingAmount": 15400,
+      "installmentEnabled": true,
+      "numberOfInstallments": 7,
+      "installmentAmount": 0,
+      "installments": [
+        {
+          "installmentNumber": 1,
+          "description": "Admission Fee + Course Fee",
+          "feeComponents": {
+            "admissionFee": 1000,
+            "courseFee": 2057.14,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 3057.14,
+          "dueDate": "2026-06-01T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a312990c4c772c20db127e9"
+        },
+        {
+          "installmentNumber": 2,
+          "description": "Course Fee Installment 2",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2057.14,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2057.14,
+          "dueDate": "2026-07-16T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a312990c4c772c20db127ea"
+        },
+        {
+          "installmentNumber": 3,
+          "description": "Course Fee Installment 3",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2057.14,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2057.14,
+          "dueDate": "2026-08-16T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a312990c4c772c20db127eb"
+        },
+        {
+          "installmentNumber": 4,
+          "description": "Course Fee Installment 4",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2057.14,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2057.14,
+          "dueDate": "2026-09-01T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a312990c4c772c20db127ec"
+        },
+        {
+          "installmentNumber": 5,
+          "description": "Course Fee Installment 5",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2057.14,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2057.14,
+          "dueDate": "2026-10-16T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a312990c4c772c20db127ed"
+        },
+        {
+          "installmentNumber": 6,
+          "description": "Course Fee Installment 6",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2057.14,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2057.14,
+          "dueDate": "2026-11-16T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a312990c4c772c20db127ee"
+        },
+        {
+          "installmentNumber": 7,
+          "description": "Course Fee + Certificate Fee",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2057.16,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2057.16,
+          "dueDate": "2026-12-16T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a312990c4c772c20db127ef"
+        }
+      ],
+      "feeStatus": "Unpaid",
+      "systemGrantedNumber": null,
+      "createdAt": "2026-06-16T10:46:40.228Z",
+      "updatedAt": "2026-06-16T10:46:40.228Z",
+      "__v": 0
+    },
+    {
+      "_id": "6a3129cac4c772c20db12894",
+      "student": "6a2f7706c4c772c20db11e22",
+      "course": "69ac08670092937d0dc35c55",
+      "enrollment": "6a3129cac4c772c20db1288c",
+      "admissionFee": 1000,
+      "courseFee": 12000,
+      "certificateFee": 1000,
+      "examFee": 0,
+      "registrationFee": 0,
+      "practicalFee": 0,
+      "otherFee": 0,
+      "additionalFees": [],
+      "discount": 0,
+      "discountPercentage": 0,
+      "paymentPlanType": "custom",
+      "discountOnAdmission": 0,
+      "discountOnCourseFee": 0,
+      "discountType": "courseFee",
+      "totalFee": 14000,
+      "paidAmount": 0,
+      "remainingAmount": 14000,
+      "installmentEnabled": true,
+      "numberOfInstallments": 6,
+      "installmentAmount": 0,
+      "installments": [
+        {
+          "installmentNumber": 1,
+          "description": "Admission Fee + Course Fee",
+          "feeComponents": {
+            "admissionFee": 1000,
+            "courseFee": 2000,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 3000,
+          "dueDate": "2026-06-16T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a3129cac4c772c20db12895"
+        },
+        {
+          "installmentNumber": 2,
+          "description": "Course Fee Installment 2",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2000,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2000,
+          "dueDate": "2026-07-16T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a3129cac4c772c20db12896"
+        },
+        {
+          "installmentNumber": 3,
+          "description": "Course Fee Installment 3",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2000,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2000,
+          "dueDate": "2026-08-16T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a3129cac4c772c20db12897"
+        },
+        {
+          "installmentNumber": 4,
+          "description": "Course Fee Installment 4",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2000,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2000,
+          "dueDate": "2026-09-16T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a3129cac4c772c20db12898"
+        },
+        {
+          "installmentNumber": 5,
+          "description": "Course Fee Installment 5",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2000,
+            "certificateFee": 0,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 2000,
+          "dueDate": "2026-10-16T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a3129cac4c772c20db12899"
+        },
+        {
+          "installmentNumber": 6,
+          "description": "Course Fee + Certificate Fee",
+          "feeComponents": {
+            "admissionFee": 0,
+            "courseFee": 2000,
+            "certificateFee": 1000,
+            "examFee": 0,
+            "registrationFee": 0,
+            "practicalFee": 0,
+            "otherFee": 0
+          },
+          "amount": 3000,
+          "dueDate": "2026-11-16T12:00:00.000Z",
+          "status": "Pending",
+          "paidAmount": 0,
+          "_id": "6a3129cac4c772c20db1289a"
+        }
+      ],
+      "feeStatus": "Unpaid",
+      "systemGrantedNumber": "0193",
+      "createdAt": "2026-06-16T10:47:38.682Z",
+      "updatedAt": "2026-06-16T10:47:38.682Z",
+      "__v": 0
+    }
+  ],
+  "appsettings": [
+    {
+      "_id": "6a25a360c80028b4c085b96d",
+      "schoolName": "School Management System",
+      "tagline": "",
+      "logo": "",
+      "favicon": "",
+      "pdfLogo": "",
+      "pdfHeaderText": "",
+      "pdfFooterText": "",
+      "pdfPrimaryColor": "#1a73e8",
+      "pdfFontFamily": "Helvetica",
+      "pdfPageSize": "A4",
+      "themeColor": "#1a73e8",
+      "accentColor": "#f59e0b",
+      "fontFamily": "Inter",
+      "address": "",
+      "phone": "",
+      "email": "",
+      "website": "",
+      "maintenanceMode": false,
+      "showAccountingBalancesToUsers": false,
+      "createdAt": "2026-06-07T16:59:12.100Z",
+      "updatedAt": "2026-06-07T16:59:12.100Z",
+      "__v": 0
     }
   ],
   "batches": [
@@ -130760,8 +132649,9 @@
       "status": "Active",
       "isActive": true,
       "createdAt": "2026-05-12T14:25:55.209Z",
-      "updatedAt": "2026-05-30T05:21:14.181Z",
-      "__v": 0
+      "updatedAt": "2026-06-16T11:23:31.375Z",
+      "__v": 0,
+      "description": ""
     },
     {
       "_id": "6a033972d6e33708eb9fca85",
@@ -130778,8 +132668,9 @@
       "status": "Active",
       "isActive": true,
       "createdAt": "2026-05-12T14:30:10.394Z",
-      "updatedAt": "2026-05-30T08:06:25.458Z",
-      "__v": 0
+      "updatedAt": "2026-06-16T11:23:30.964Z",
+      "__v": 0,
+      "description": ""
     },
     {
       "_id": "6a12d1f7c212bd870dc76410",
@@ -130796,8 +132687,9 @@
       "status": "Active",
       "isActive": true,
       "createdAt": "2026-05-24T10:24:55.315Z",
-      "updatedAt": "2026-05-24T10:24:55.315Z",
-      "__v": 0
+      "updatedAt": "2026-06-16T11:23:30.556Z",
+      "__v": 0,
+      "description": ""
     },
     {
       "_id": "6a12d241c212bd870dc7641e",
@@ -130814,8 +132706,9 @@
       "status": "Active",
       "isActive": true,
       "createdAt": "2026-05-24T10:26:09.109Z",
-      "updatedAt": "2026-05-30T04:58:23.863Z",
-      "__v": 0
+      "updatedAt": "2026-06-16T11:23:30.145Z",
+      "__v": 0,
+      "description": ""
     },
     {
       "_id": "6a12d261c212bd870dc7642d",
@@ -130832,8 +132725,9 @@
       "status": "Active",
       "isActive": true,
       "createdAt": "2026-05-24T10:26:41.079Z",
-      "updatedAt": "2026-05-24T12:18:28.693Z",
-      "__v": 0
+      "updatedAt": "2026-06-16T11:23:29.737Z",
+      "__v": 0,
+      "description": ""
     },
     {
       "_id": "6a12d27fc212bd870dc7643d",
@@ -130850,8 +132744,9 @@
       "status": "Active",
       "isActive": true,
       "createdAt": "2026-05-24T10:27:11.912Z",
-      "updatedAt": "2026-05-24T10:27:11.912Z",
-      "__v": 0
+      "updatedAt": "2026-06-16T11:23:29.326Z",
+      "__v": 0,
+      "description": ""
     },
     {
       "_id": "6a1a75adc212bd870dc76ebd",
@@ -130868,8 +132763,9 @@
       "status": "Active",
       "isActive": true,
       "createdAt": "2026-05-30T05:29:17.602Z",
-      "updatedAt": "2026-05-30T05:29:17.602Z",
-      "__v": 0
+      "updatedAt": "2026-06-16T11:23:28.918Z",
+      "__v": 0,
+      "description": ""
     },
     {
       "_id": "6a1a7e5ec212bd870dc77199",
@@ -130886,8 +132782,9 @@
       "status": "Active",
       "isActive": true,
       "createdAt": "2026-05-30T06:06:22.459Z",
-      "updatedAt": "2026-05-30T06:06:22.459Z",
-      "__v": 0
+      "updatedAt": "2026-06-16T11:23:28.508Z",
+      "__v": 0,
+      "description": ""
     },
     {
       "_id": "6a1a7e85c212bd870dc771a5",
@@ -130904,8 +132801,9 @@
       "status": "Active",
       "isActive": true,
       "createdAt": "2026-05-30T06:07:01.126Z",
-      "updatedAt": "2026-06-02T12:31:40.633Z",
-      "__v": 0
+      "updatedAt": "2026-06-16T11:23:28.098Z",
+      "__v": 0,
+      "description": ""
     },
     {
       "_id": "6a1a809fc212bd870dc77381",
@@ -130922,8 +132820,9 @@
       "status": "Active",
       "isActive": true,
       "createdAt": "2026-05-30T06:15:59.934Z",
-      "updatedAt": "2026-06-05T13:26:32.307Z",
-      "__v": 0
+      "updatedAt": "2026-06-16T11:23:27.690Z",
+      "__v": 0,
+      "description": ""
     },
     {
       "_id": "6a1a80c5c212bd870dc7738d",
@@ -130940,8 +132839,9 @@
       "status": "Active",
       "isActive": true,
       "createdAt": "2026-05-30T06:16:37.882Z",
-      "updatedAt": "2026-05-30T06:16:37.882Z",
-      "__v": 0
+      "updatedAt": "2026-06-16T11:25:40.371Z",
+      "__v": 0,
+      "description": ""
     },
     {
       "_id": "6a1a8259c212bd870dc774c1",
@@ -130958,8 +132858,9 @@
       "status": "Active",
       "isActive": true,
       "createdAt": "2026-05-30T06:23:21.191Z",
-      "updatedAt": "2026-05-30T06:23:21.191Z",
-      "__v": 0
+      "updatedAt": "2026-06-16T11:23:26.869Z",
+      "__v": 0,
+      "description": ""
     },
     {
       "_id": "6a1aa959c212bd870dc781c2",
@@ -130976,11 +132877,30 @@
       "status": "Active",
       "isActive": true,
       "createdAt": "2026-05-30T09:09:45.104Z",
-      "updatedAt": "2026-05-30T09:09:45.104Z",
+      "updatedAt": "2026-06-16T11:23:26.460Z",
+      "__v": 0,
+      "description": ""
+    },
+    {
+      "_id": "6a2c0495c4c772c20db117d0",
+      "batchName": "10th-01",
+      "batchCode": "10th-01",
+      "course": "6a099f64207aa6f4efcf4b74",
+      "shift": "Morning",
+      "days": "Monday to Saturday",
+      "hoursPerDay": 1,
+      "startDate": "2026-06-01T12:00:00.000Z",
+      "endDate": "2026-06-30T12:00:00.000Z",
+      "maxStudents": 30,
+      "currentStudents": 0,
+      "status": "Active",
+      "isActive": true,
+      "createdAt": "2026-06-12T13:07:33.227Z",
+      "updatedAt": "2026-06-16T11:25:40.371Z",
       "__v": 0
     },
     {
-      "_id": "6a1ab647c212bd870dc788a5",
+      "_id": "6a31322ef58a76bf3d0d2596",
       "batchName": "2025 Evening 2:00 to 3:00",
       "batchCode": "IT-Batch-0002",
       "course": "69ac08670092937d0dc35c55",
@@ -130992,9 +132912,10 @@
       "maxStudents": 30,
       "currentStudents": 0,
       "status": "Active",
+      "description": "",
       "isActive": true,
-      "createdAt": "2026-05-30T10:04:55.479Z",
-      "updatedAt": "2026-05-30T10:04:55.479Z",
+      "createdAt": "2026-06-16T11:23:26.068Z",
+      "updatedAt": "2026-06-16T11:23:26.068Z",
       "__v": 0
     }
   ],
@@ -131023,7 +132944,7 @@
       "totalFee": 39000,
       "teacherId": [],
       "createdAt": "2026-02-08T11:02:50.541Z",
-      "updatedAt": "2026-05-17T11:50:45.316Z",
+      "updatedAt": "2026-06-16T11:23:25.641Z",
       "__v": 0,
       "examFee": 0,
       "includeExamFeeInInstallments": false,
@@ -131046,7 +132967,7 @@
       "totalFee": 22000,
       "teacherId": [],
       "createdAt": "2026-02-08T11:40:15.315Z",
-      "updatedAt": "2026-05-17T10:50:25.814Z",
+      "updatedAt": "2026-06-16T11:23:25.231Z",
       "__v": 0,
       "examFee": 0,
       "includeExamFeeInInstallments": false,
@@ -131069,7 +132990,7 @@
       "totalFee": 8000,
       "teacherId": [],
       "createdAt": "2026-02-08T11:41:06.197Z",
-      "updatedAt": "2026-05-19T14:28:24.253Z",
+      "updatedAt": "2026-06-16T11:23:24.821Z",
       "__v": 0,
       "examFee": 0,
       "includeExamFeeInInstallments": false,
@@ -131090,11 +133011,9 @@
       "courseFee": 14400,
       "certificateFee": 0,
       "totalFee": 15400,
-      "teacherId": [
-        "69ae951a0092937d0dc37f55"
-      ],
+      "teacherId": [],
       "createdAt": "2026-02-08T11:41:33.599Z",
-      "updatedAt": "2026-03-09T10:36:15.120Z",
+      "updatedAt": "2026-06-16T11:23:24.411Z",
       "__v": 0,
       "examFee": 0,
       "includeExamFeeInInstallments": false,
@@ -131103,7 +133022,8 @@
       "includeRegistrationFeeInInstallments": false,
       "otherFee": 0,
       "practicalFee": 0,
-      "registrationFee": 0
+      "registrationFee": 0,
+      "courseCategory": "IT & Vocational"
     },
     {
       "_id": "698876ae294dd3b3805ae3b2",
@@ -131116,7 +133036,7 @@
       "totalFee": 19000,
       "teacherId": [],
       "createdAt": "2026-02-08T11:42:38.946Z",
-      "updatedAt": "2026-05-20T09:57:42.505Z",
+      "updatedAt": "2026-06-16T11:23:24.003Z",
       "__v": 0,
       "examFee": 0,
       "includeExamFeeInInstallments": false,
@@ -131125,12 +133045,13 @@
       "includeRegistrationFeeInInstallments": false,
       "otherFee": 0,
       "practicalFee": 0,
-      "registrationFee": 0
+      "registrationFee": 0,
+      "courseCategory": "IT & Vocational"
     },
     {
       "_id": "6995cda6485b917d93e6aeea",
       "courseId": "IT-005",
-      "courseName": "Web Designing",
+      "courseName": "Web Designing update",
       "duration": 4,
       "admissionFee": 1000,
       "courseFee": 25000,
@@ -131138,7 +133059,7 @@
       "totalFee": 27000,
       "teacherId": [],
       "createdAt": "2026-02-18T14:33:10.309Z",
-      "updatedAt": "2026-05-20T09:57:42.505Z",
+      "updatedAt": "2026-06-16T11:23:56.565Z",
       "__v": 0,
       "examFee": 0,
       "includeExamFeeInInstallments": false,
@@ -131161,7 +133082,7 @@
       "totalFee": 49000,
       "teacherId": [],
       "createdAt": "2026-03-03T14:54:43.844Z",
-      "updatedAt": "2026-05-30T06:08:02.312Z",
+      "updatedAt": "2026-06-16T11:23:23.225Z",
       "__v": 0,
       "examFee": 0,
       "includeExamFeeInInstallments": false,
@@ -131192,7 +133113,7 @@
       "totalFee": 18000,
       "teacherId": [],
       "createdAt": "2026-03-07T11:13:43.610Z",
-      "updatedAt": "2026-05-20T09:56:05.090Z",
+      "updatedAt": "2026-06-16T11:23:22.877Z",
       "__v": 0,
       "courseCategory": "IT & Vocational"
     },
@@ -131215,7 +133136,7 @@
       "totalFee": 26000,
       "teacherId": [],
       "createdAt": "2026-03-10T19:24:24.246Z",
-      "updatedAt": "2026-05-19T13:45:48.530Z",
+      "updatedAt": "2026-06-16T11:23:22.465Z",
       "__v": 0,
       "courseCategory": "IT & Vocational"
     },
@@ -131239,7 +133160,7 @@
       "totalFee": 16000,
       "teacherId": [],
       "createdAt": "2026-05-16T15:20:35.283Z",
-      "updatedAt": "2026-05-17T10:39:54.969Z",
+      "updatedAt": "2026-06-16T11:23:22.056Z",
       "__v": 0
     },
     {
@@ -131262,7 +133183,7 @@
       "totalFee": 49000,
       "teacherId": [],
       "createdAt": "2026-05-17T10:58:44.842Z",
-      "updatedAt": "2026-05-30T06:07:53.106Z",
+      "updatedAt": "2026-06-16T11:25:40.340Z",
       "__v": 0
     }
   ]

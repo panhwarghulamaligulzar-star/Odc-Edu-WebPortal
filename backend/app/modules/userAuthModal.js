@@ -31,6 +31,10 @@ const permissionSchema = new mongoose.Schema(
 
 const authSchema = new mongoose.Schema(
   {
+    _id: {
+      type: String,
+      default: () => new mongoose.Types.ObjectId().toString(),
+    },
     name: {
       type: String,
       required: true,

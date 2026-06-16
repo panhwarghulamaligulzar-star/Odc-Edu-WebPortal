@@ -30,6 +30,10 @@ const permissionSchema = new mongoose.Schema(
 
 const roleSchema = new mongoose.Schema(
   {
+    _id: {
+      type: String,
+      default: () => new mongoose.Types.ObjectId().toString(),
+    },
     name: { type: String, required: true, unique: true, trim: true },
     description: { type: String, default: "" },
     isDefault: { type: Boolean, default: false },
@@ -38,7 +42,7 @@ const roleSchema = new mongoose.Schema(
       type: [permissionSchema],
       default: () => normalizePermissions(),
     },
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    createdBy: { type: String, ref: "User" },
   },
   { timestamps: true },
 );

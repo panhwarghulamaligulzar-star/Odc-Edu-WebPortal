@@ -60,6 +60,7 @@ import { MdPeople } from "react-icons/md";
 import academyConfig from "../../config/academyConfig";
 import odysseyLogo from "../../assets/images/logos/LOGO.png";
 import { useModulePermissions } from "../../hooks/usePermissions";
+import { updateEnrollmentStatus } from "../../services/feeService";
 
 const { TextArea } = Input;
 const { Option } = Select;
@@ -104,6 +105,35 @@ const normalizeEnrollmentStatus = (status) =>
     .trim()
     .toLowerCase();
 
+const ACTIVE_ENROLLMENT_STATUS_SET = new Set(["active", "enrolled"]);
+
+const STUDENT_STATUS_OPTIONS = [
+  {
+    label: "Active",
+    value: "Active",
+    helper:
+      "Move this student back to the active students list and active enrollments flow.",
+    color: "#166534",
+    bg: "#F0FDF4",
+  },
+  {
+    label: "Dropout",
+    value: "Dropped",
+    helper:
+      "Remove the student from the active students list and show in the dropout filter.",
+    color: "#B91C1C",
+    bg: "#FEF2F2",
+  },
+  {
+    label: "Passout",
+    value: "Completed",
+    helper:
+      "Remove the student from the active students list and show in the passout filter.",
+    color: "#7C3AED",
+    bg: "#F5F3FF",
+  },
+];
+
 const REGISTERED_COURSE_CATEGORY = "IT & Vocational";
 
 const hasRegisteredCourseEnrollment = (student) =>
@@ -117,7 +147,10 @@ const getVisibleRegistrationNo = (student) =>
 
 const hasActiveEnrollment = (student) =>
   (Array.isArray(student?.enrollments) ? student.enrollments : []).some(
-    (enrollment) => normalizeEnrollmentStatus(enrollment.status) === "active",
+    (enrollment) =>
+      ACTIVE_ENROLLMENT_STATUS_SET.has(
+        normalizeEnrollmentStatus(enrollment.status),
+      ),
   );
 
 const hasDroppedEnrollment = (student) =>
@@ -378,6 +411,13 @@ const Students = () => {
   const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [studentToDelete, setStudentToDelete] = useState(null);
+  const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
+  const [selectedDeleteIds, setSelectedDeleteIds] = useState([]);
+  const [statusModalVisible, setStatusModalVisible] = useState(false);
+  const [statusLoading, setStatusLoading] = useState(false);
+  const [studentStatusRecord, setStudentStatusRecord] = useState(null);
+  const [selectedStudentStatus, setSelectedStudentStatus] =
+    useState("Dropped");
   const fileInputRef = useRef(null);
   const [tablePageSize, setTablePageSize] = useState(3);
   const [tablePage, setTablePage] = useState(1);
@@ -489,6 +529,18 @@ const Students = () => {
     activeStudentCategory,
   ]);
 
+  useEffect(() => {
+    if (!bulkDeleteMode) return;
+
+    const visibleStudentIds = new Set(
+      filteredStudents.map((student) => student?._id).filter(Boolean),
+    );
+
+    setSelectedDeleteIds((prev) =>
+      prev.filter((studentId) => visibleStudentIds.has(studentId)),
+    );
+  }, [bulkDeleteMode, filteredStudents]);
+
   const fetchStudents = async () => {
     setLoading(true);
     try {
@@ -551,6 +603,123 @@ const Students = () => {
       }
     } catch (error) {
       console.error("Failed to fetch courses");
+    }
+  };
+
+  const getTargetEnrollmentsForStatusChange = (student, sourceCategory) => {
+    const enrollments = Array.isArray(student?.enrollments)
+      ? student.enrollments
+      : [];
+
+    if (sourceCategory === "active") {
+      return enrollments.filter((enrollment) =>
+        ACTIVE_ENROLLMENT_STATUS_SET.has(
+          normalizeEnrollmentStatus(enrollment.status),
+        ),
+      );
+    }
+
+    if (sourceCategory === "dropout") {
+      return enrollments.filter(
+        (enrollment) => normalizeEnrollmentStatus(enrollment.status) === "dropped",
+      );
+    }
+
+    if (sourceCategory === "passout") {
+      return enrollments.filter(
+        (enrollment) =>
+          normalizeEnrollmentStatus(enrollment.status) === "completed",
+      );
+    }
+
+    return [];
+  };
+
+  const getAvailableStatusOptions = (sourceCategory) => {
+    if (sourceCategory === "active") {
+      return STUDENT_STATUS_OPTIONS.filter(
+        (option) => option.value !== "Active",
+      );
+    }
+
+    if (sourceCategory === "dropout" || sourceCategory === "passout") {
+      return STUDENT_STATUS_OPTIONS.filter(
+        (option) => option.value === "Active",
+      );
+    }
+
+    return [];
+  };
+
+  const openStatusChangeModal = (student) => {
+    if (!permissions.update) {
+      message.error("You do not have permission to update students");
+      return;
+    }
+
+    const options = getAvailableStatusOptions(activeStudentCategory);
+    if (!options.length) return;
+
+    setStudentStatusRecord(student);
+    setSelectedStudentStatus(options[0].value);
+    setStatusModalVisible(true);
+  };
+
+  const closeStatusChangeModal = () => {
+    if (statusLoading) return;
+    setStatusModalVisible(false);
+    setStudentStatusRecord(null);
+    setSelectedStudentStatus("Dropped");
+  };
+
+  const handleStudentStatusUpdate = async () => {
+    if (!studentStatusRecord) return;
+
+    const targetEnrollments = getTargetEnrollmentsForStatusChange(
+      studentStatusRecord,
+      activeStudentCategory,
+    );
+
+    if (!targetEnrollments.length) {
+      message.warning("No enrollments found to update for this student.");
+      closeStatusChangeModal();
+      return;
+    }
+
+    setStatusLoading(true);
+    try {
+      await Promise.all(
+        targetEnrollments.map((enrollment) =>
+          updateEnrollmentStatus(enrollment._id, {
+            status: selectedStudentStatus,
+            completionDate:
+              selectedStudentStatus === "Completed"
+                ? dayjs().format("YYYY-MM-DD")
+                : null,
+          }),
+        ),
+      );
+
+      const selectedOption = STUDENT_STATUS_OPTIONS.find(
+        (option) => option.value === selectedStudentStatus,
+      );
+
+      message.success(
+        `${studentStatusRecord.studentName || "Student"} marked as ${
+          selectedOption?.label || selectedStudentStatus
+        } successfully.`,
+      );
+
+      closeStatusChangeModal();
+      await fetchStudents();
+    } catch (error) {
+      message.error(
+        error?.message ||
+          error?.response?.data?.message ||
+          "Failed to update student status",
+      );
+    } finally {
+      setStatusLoading(false);
     }
   };
 
@@ -682,6 +851,24 @@ const Students = () => {
     setStudentToDelete(null);
   };
 
+  const startBulkDeleteMode = () => {
+    if (!permissions.delete) {
+      message.error("You do not have permission to delete students");
+      return;
+    }
+
+    const initialSelection = studentToDelete?._id ? [studentToDelete._id] : [];
+    setSelectedDeleteIds(initialSelection);
+    setBulkDeleteMode(true);
+    closeDeleteStudentDialog(true);
+  };
+
+  const cancelBulkDeleteMode = () => {
+    if (deleteLoading) return;
+    setBulkDeleteMode(false);
+    setSelectedDeleteIds([]);
+  };
+
   const handleDeleteStudentChoice = async (scope) => {
     if (!permissions.delete) {
       message.error("You do not have permission to delete students");
@@ -690,26 +877,7 @@ const Students = () => {
 
     setDeleteLoading(true);
     try {
-      if (scope === "all") {
-        const allStudentIds = students
-          .map((student) => student?._id)
-          .filter(Boolean);
-
-        if (allStudentIds.length === 0) {
-          message.warning("No student records found to delete");
-          return;
-        }
-
-        const response = await api.post("/student/admissions/bulk-delete", {
-          ids: allStudentIds,
-        });
-
-        if (response.data.success) {
-          message.success(
-            response.data.message || "All student records deleted successfully!",
-          );
-        }
-      } else if (studentToDelete?._id) {
+      if (scope === "single" && studentToDelete?._id) {
         const response = await api.delete(
           `/student/admission/${studentToDelete._id}`,
         );
@@ -724,6 +892,40 @@ const Students = () => {
     } catch (error) {
       message.error(
         error.response?.data?.message || "Failed to delete student record(s)",
+      );
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleDeleteSelectedStudents = async () => {
+    if (!permissions.delete) {
+      message.error("You do not have permission to delete students");
+      return;
+    }
+
+    if (selectedDeleteIds.length === 0) {
+      message.warning("Select at least one student to delete");
+      return;
+    }
+
+    setDeleteLoading(true);
+    try {
+      const response = await api.post("/student/admissions/bulk-delete", {
+        ids: selectedDeleteIds,
+      });
+
+      if (response.data.success) {
+        message.success(
+          response.data.message || "Selected student records deleted successfully!",
+        );
+      }
+
+      cancelBulkDeleteMode();
+      await fetchStudents();
+    } catch (error) {
+      message.error(
+        error.response?.data?.message || "Failed to delete selected students",
       );
     } finally {
       setDeleteLoading(false);
@@ -1817,10 +2019,65 @@ const Students = () => {
             />
           ) : (
             <div className="bg-[#fff]  rounded-md overflow-x-auto">
+              {bulkDeleteMode && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: "12px",
+                    flexWrap: "wrap",
+                    padding: "12px 16px",
+                    borderBottom: "1px solid #E5E7EB",
+                    background: "#FFF7ED",
+                  }}
+                >
+                  <div
+                    style={{
+                      color: "#9A3412",
+                      fontSize: "14px",
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    Delete more mode is active. Use the checkboxes in the table to
+                    select students, or use the header checkbox to select all visible
+                    records.
+                  </div>
+                  <Space wrap>
+                    <Button
+                      onClick={cancelBulkDeleteMode}
+                      disabled={deleteLoading}
+                      style={{ borderRadius: "8px" }}
+                    >
+                      Cancel Selection
+                    </Button>
+                    <Button
+                      danger
+                      type="primary"
+                      loading={deleteLoading}
+                      disabled={selectedDeleteIds.length === 0}
+                      onClick={handleDeleteSelectedStudents}
+                      style={{ borderRadius: "8px" }}
+                    >
+                      Delete Selected ({selectedDeleteIds.length})
+                    </Button>
+                  </Space>
+                </div>
+              )}
               <Table
                 dataSource={filteredStudents}
                 rowKey="_id"
                 className="custom-pagination-table"
+                rowSelection={
+                  bulkDeleteMode
+                    ? {
+                        selectedRowKeys: selectedDeleteIds,
+                        onChange: (selectedRowKeys) =>
+                          setSelectedDeleteIds(selectedRowKeys),
+                        preserveSelectedRowKeys: false,
+                      }
+                    : undefined
+                }
                 pagination={{
                   current: tablePage,
                   pageSize: tablePageSize,
@@ -2014,7 +2271,9 @@ const Students = () => {
                     const activeEnrollments = Array.isArray(record.enrollments)
                       ? record.enrollments.filter(
                           (enrollment) =>
-                            normalizeEnrollmentStatus(enrollment.status) === "active",
+                            ACTIVE_ENROLLMENT_STATUS_SET.has(
+                              normalizeEnrollmentStatus(enrollment.status),
+                            ),
                         )
                       : [];
 
@@ -2187,12 +2446,42 @@ const Students = () => {
                                   )}
                                 <div
                                   style={{
-                                    marginTop: "8px",
-                                    fontSize: "11px",
-                                    color: "#64748B",
+                                    marginTop: "10px",
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    gap: "8px",
+                                    flexWrap: "wrap",
                                   }}
                                 >
-                                  Manage course operations from the Enroll Students tab.
+                                  <div
+                                    style={{
+                                      fontSize: "11px",
+                                      color: "#64748B",
+                                    }}
+                                  >
+                                    Assigned on{" "}
+                                    {dayjs(enrollment.enrollmentDate).format("DD MMM YYYY")}
+                                  </div>
+                                  {permissions.update && (
+                                    <Button
+                                      size="small"
+                                      icon={<FaEdit />}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openEditCourseModal(record, enrollment);
+                                      }}
+                                      style={{
+                                        borderColor: "#C7D2FE",
+                                        color: "#312E81",
+                                        background: "#EEF2FF",
+                                        borderRadius: "999px",
+                                        fontWeight: 600,
+                                      }}
+                                    >
+                                      Edit Course
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
                             </Tooltip>
@@ -2233,6 +2522,11 @@ const Students = () => {
                   fixed="right"
                   render={(record) => {
                     const showManagementActions = activeStudentCategory === "all";
+                    const showStatusAction =
+                      permissions.update &&
+                      ["active", "dropout", "passout"].includes(
+                        activeStudentCategory,
+                      );
 
                     return (
                       <Space size="small" wrap>
@@ -2266,6 +2560,24 @@ const Students = () => {
                             size="small"
                           />
                         </Tooltip>
+                        {showStatusAction && (
+                          <Tooltip title="Change Student Status">
+                            <Button
+                              icon={<FaEdit />}
+                              onClick={() => openStatusChangeModal(record)}
+                              style={{
+                                borderColor: "#C7D2FE",
+                                color: "#312E81",
+                                background: "#EEF2FF",
+                                borderRadius: "8px",
+                                fontWeight: 600,
+                              }}
+                              size="small"
+                            >
+                              Change Status
+                            </Button>
+                          </Tooltip>
+                        )}
                         {showManagementActions && permissions.update && (
                           <Tooltip title="Edit Student">
                             <Button
@@ -2302,6 +2614,142 @@ const Students = () => {
       </div>
 
       <Modal
+        open={statusModalVisible}
+        centered
+        onCancel={closeStatusChangeModal}
+        onOk={handleStudentStatusUpdate}
+        confirmLoading={statusLoading}
+        okText="Confirm Status Change"
+        cancelText="Cancel"
+        okButtonProps={{
+          style: {
+            background: "#01134C",
+            borderColor: "#01134C",
+            height: 42,
+            borderRadius: 10,
+            fontWeight: 600,
+          },
+        }}
+        cancelButtonProps={{
+          style: {
+            height: 42,
+            borderRadius: 10,
+            fontWeight: 600,
+          },
+        }}
+        width={560}
+        title={null}
+      >
+        <div
+          style={{
+            padding: "8px 4px 4px",
+            fontFamily: "inherit",
+          }}
+        >
+          <div
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 16,
+              background: "linear-gradient(135deg, #01134C 0%, #1D4ED8 100%)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 18,
+            }}
+          >
+            <FaEdit style={{ color: "#E8FC0A", fontSize: 22 }} />
+          </div>
+
+          <h3
+            style={{
+              marginBottom: 8,
+              color: "#0F172A",
+              fontSize: "22px",
+              fontWeight: 700,
+            }}
+          >
+            Update Student Status
+          </h3>
+          <p style={{ color: "#475569", marginBottom: 18 }}>
+            Change the status for{" "}
+            <strong>{studentStatusRecord?.studentName || "this student"}</strong>.
+            After confirmation, the student will move to the matching category
+            automatically.
+          </p>
+
+          <div
+            style={{
+              background: "#F8FAFC",
+              border: "1px solid #E2E8F0",
+              borderRadius: 14,
+              padding: 16,
+              marginBottom: 16,
+            }}
+          >
+            <div style={{ fontSize: 13, color: "#64748B", marginBottom: 6 }}>
+              Student
+            </div>
+            <div style={{ fontWeight: 700, color: "#0F172A" }}>
+              {studentStatusRecord?.studentName || "N/A"}
+            </div>
+            <div style={{ fontSize: 13, color: "#64748B", marginTop: 4 }}>
+              Registration No:{" "}
+              {studentStatusRecord?.registrationNo || "No registration no"}
+            </div>
+          </div>
+
+          <div>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: "#0F172A",
+                marginBottom: 8,
+              }}
+            >
+              Select new status
+            </div>
+            <Select
+              value={selectedStudentStatus}
+              onChange={setSelectedStudentStatus}
+              style={{ width: "100%" }}
+              size="large"
+              options={getAvailableStatusOptions(activeStudentCategory).map(
+                (option) => ({
+                  label: option.label,
+                  value: option.value,
+                }),
+              )}
+            />
+            <div
+              style={{
+                marginTop: 12,
+                borderRadius: 12,
+                padding: "12px 14px",
+                background:
+                  STUDENT_STATUS_OPTIONS.find(
+                    (option) => option.value === selectedStudentStatus,
+                  )?.bg || "#F8FAFC",
+                color:
+                  STUDENT_STATUS_OPTIONS.find(
+                    (option) => option.value === selectedStudentStatus,
+                  )?.color || "#334155",
+                fontSize: 13,
+                fontWeight: 500,
+              }}
+            >
+              {
+                STUDENT_STATUS_OPTIONS.find(
+                  (option) => option.value === selectedStudentStatus,
+                )?.helper
+              }
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
         open={deleteDialogVisible}
         onCancel={() => closeDeleteStudentDialog()}
         footer={null}
@@ -2328,23 +2776,23 @@ const Students = () => {
             }}
           >
             Choose whether you want to delete only{" "}
-            <strong>{studentToDelete?.studentName || "this student"}</strong> or remove
-            all student records from the system.
+            <strong>{studentToDelete?.studentName || "this student"}</strong> or switch
+            to multi-select mode and choose several student records from the table.
           </p>
 
           <div
             style={{
-              background: "#FEF2F2",
-              border: "1px solid #FECACA",
+              background: "#FFF7ED",
+              border: "1px solid #FED7AA",
               borderRadius: "12px",
               padding: "12px 14px",
-              color: "#991B1B",
+              color: "#9A3412",
               fontSize: "13px",
               marginBottom: "18px",
             }}
           >
-            Warning: deleting all students will remove every student record currently loaded
-            in the Students module.
+            Delete more will open checkboxes for all records in the current table so the
+            admin can choose exactly which students to remove.
           </div>
 
           <div className="flex gap-3 justify-end flex-wrap">
@@ -2365,12 +2813,11 @@ const Students = () => {
             </Button>
             <Button
               type="primary"
-              danger
               loading={deleteLoading}
-              onClick={() => handleDeleteStudentChoice("all")}
+              onClick={startBulkDeleteMode}
               style={{ borderRadius: "10px", height: "40px", paddingInline: "16px" }}
             >
-              Delete All Students
+              Delete More
             </Button>
           </div>
         </div>
