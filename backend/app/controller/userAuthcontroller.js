@@ -13,7 +13,10 @@ const persistUserStateByEmail = async (user, updates = {}) => {
     return;
   }
 
-  await UserAuth.updateOne({ email: user.email }, { $set: updates });
+  await UserAuth.updateOne(
+    { email: String(user.email).trim().toLowerCase() },
+    { $set: updates },
+  );
   Object.assign(user, updates);
 };
 

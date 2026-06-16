@@ -12,7 +12,7 @@ import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const backendUrl = env.VITE_BACKEND_URL || "http://localhost:5020";
+  const backendUrl = env.DB_URI || "http://localhost:5020";
 
   return {
     build: {

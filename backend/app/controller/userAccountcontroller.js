@@ -9,9 +9,51 @@ import {
   serializeRoleForClient,
 } from "../utils/rbac.js";
 
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+
+const findUserByAuthContext = async (authUser) => {
+  const authId = authUser?._id || authUser?.id;
+  let user = null;
+
+  if (authId) {
+    user = await UserAuth.findById(authId);
+  }
+
+  if (!user && authUser?.email) {
+    user = await UserAuth.findOne({ email: normalizeEmail(authUser.email) });
+  }
+
+  return user;
+};
+
+const findLeanUserByAuthContext = async (authUser) => {
+  const user = await findUserByAuthContext(authUser);
+  return user?.toObject ? user.toObject() : user;
+};
+
+const findTargetUser = async (targetId, authUser) => {
+  let user = null;
+
+  if (targetId) {
+    user = await UserAuth.findById(targetId);
+  }
+
+  const authId = authUser?._id || authUser?.id;
+  if (
+    !user &&
+    authUser?.email &&
+    authId &&
+    String(targetId) === String(authId)
+  ) {
+    user = await UserAuth.findOne({ email: normalizeEmail(authUser.email) });
+  }
+
+  return user;
+};
+
 const canManageAllUsers = async (authUser) => {
-  if (!authUser?._id) return false;
-  const currentUser = await UserAuth.findById(authUser._id).lean();
+  if (!authUser?._id && !authUser?.id) return false;
+  const currentUser = await findLeanUserByAuthContext(authUser);
   if (!currentUser) return false;
   const resolvedRole = await resolveRoleForUser(currentUser);
   return currentUser.isSuperAdmin || isLegacyAdminUser(currentUser, resolvedRole);
@@ -48,7 +90,12 @@ const getUserAccount = async (req, res) => {
       });
     }
 
-    const canViewAll = await canManageAllUsers({ _id: currentUserId });
+    const authContext = {
+      _id: currentUserId,
+      id: currentUserId,
+      email: req.user?.email,
+    };
+    const canViewAll = await canManageAllUsers(authContext);
     if (!canViewAll && String(userId) !== String(currentUserId)) {
       return res.status(403).json({
         status: 403,
@@ -56,7 +103,7 @@ const getUserAccount = async (req, res) => {
       });
     }
 
-    const userData = await UserAuth.findById(userId);
+    const userData = await findTargetUser(userId, authContext);
     if (!userData) {
       return res.status(404).json({ status: 404, message: "User not found!" });
     }
@@ -84,7 +131,12 @@ const updateUserAccount = async (req, res) => {
       return res.status(404).json({ status: "error", message: "User ID missing" });
     }
 
-    const canViewAll = await canManageAllUsers({ _id: currentUserId });
+    const authContext = {
+      _id: currentUserId,
+      id: currentUserId,
+      email: req.user?.email,
+    };
+    const canViewAll = await canManageAllUsers(authContext);
     if (!canViewAll && String(userId) !== String(currentUserId)) {
       return res.status(403).json({
         status: "error",
@@ -92,7 +144,7 @@ const updateUserAccount = async (req, res) => {
       });
     }
 
-    const user = await UserAuth.findById(userId);
+    const user = await findTargetUser(userId, authContext);
     if (!user) {
       return res.status(404).json({ status: "error", message: "User not found!" });
     }
@@ -134,11 +186,8 @@ const updateUserAccount = async (req, res) => {
       updatedData.profile = req.file.buffer.toString("base64");
     }
 
-    const updatedUser = await UserAuth.findByIdAndUpdate(
-      userId,
-      { $set: updatedData },
-      { new: true },
-    );
+    await UserAuth.updateOne({ email: normalizeEmail(user.email) }, { $set: updatedData });
+    const updatedUser = await UserAuth.findOne({ email: normalizeEmail(user.email) });
 
     return res.status(200).json({
       status: "success",
@@ -158,7 +207,12 @@ const deleteUserAccount = async (req, res) => {
   try {
     const userId = req.params.id;
     const currentUserId = req.user?._id || req.user?.id;
-    const canViewAll = await canManageAllUsers({ _id: currentUserId });
+    const authContext = {
+      _id: currentUserId,
+      id: currentUserId,
+      email: req.user?.email,
+    };
+    const canViewAll = await canManageAllUsers(authContext);
 
     if (!canViewAll && String(userId) !== String(currentUserId)) {
       return res.status(403).json({
@@ -167,7 +221,7 @@ const deleteUserAccount = async (req, res) => {
       });
     }
 
-    const userToDelete = await UserAuth.findById(userId);
+    const userToDelete = await findTargetUser(userId, authContext);
     if (!userToDelete) {
       return res.status(404).json({ status: 404, message: "User not found!" });
     }
@@ -179,7 +233,9 @@ const deleteUserAccount = async (req, res) => {
       });
     }
 
-    const deletedUser = await UserAuth.findByIdAndDelete(userId);
+    const deletedUser = await UserAuth.findOneAndDelete({
+      email: normalizeEmail(userToDelete.email),
+    });
 
     return res.status(200).json({
       status: 200,
@@ -198,9 +254,17 @@ const deleteUserAccount = async (req, res) => {
 const getAllProfileData = async (req, res) => {
   try {
     const currentUserId = req.user?._id || req.user?.id;
-    const canViewAll = await canManageAllUsers({ _id: currentUserId });
+    const authContext = {
+      _id: currentUserId,
+      id: currentUserId,
+      email: req.user?.email,
+    };
+    const canViewAll = await canManageAllUsers(authContext);
 
-    const query = canViewAll ? {} : { _id: currentUserId };
+    const currentUser = canViewAll
+      ? null
+      : await findTargetUser(currentUserId, authContext);
+    const query = canViewAll ? {} : currentUser ? { email: normalizeEmail(currentUser.email) } : { _id: currentUserId };
     const users = await UserAuth.find(query).sort({ createdAt: -1 });
     const data = await Promise.all(users.map((user) => serializeUser(user)));
 
@@ -222,7 +286,12 @@ const completeUserProfile = async (req, res) => {
   try {
     const userId = req.params.id;
     const currentUserId = req.user?._id || req.user?.id;
-    const canViewAll = await canManageAllUsers({ _id: currentUserId });
+    const authContext = {
+      _id: currentUserId,
+      id: currentUserId,
+      email: req.user?.email,
+    };
+    const canViewAll = await canManageAllUsers(authContext);
 
     if (!canViewAll && String(userId) !== String(currentUserId)) {
       return res.status(403).json({
@@ -231,15 +300,16 @@ const completeUserProfile = async (req, res) => {
       });
     }
 
-    const updatedUser = await UserAuth.findByIdAndUpdate(
-      userId,
-      { details: req.body },
-      { new: true },
-    );
-
-    if (!updatedUser) {
+    const user = await findTargetUser(userId, authContext);
+    if (!user) {
       return res.status(404).json({ status: 404, message: "User not found!" });
     }
+
+    await UserAuth.updateOne(
+      { email: normalizeEmail(user.email) },
+      { $set: { details: req.body } },
+    );
+    const updatedUser = await UserAuth.findOne({ email: normalizeEmail(user.email) });
 
     res.status(200).json({
       status: 200,
@@ -258,7 +328,7 @@ const completeUserProfile = async (req, res) => {
 const updateUserRole = async (req, res) => {
   try {
     const { roleId } = req.body;
-    const user = await UserAuth.findById(req.params.id);
+    const user = await findTargetUser(req.params.id, req.user);
 
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
@@ -294,7 +364,7 @@ const updateUserRole = async (req, res) => {
 
 const updateUserStatus = async (req, res) => {
   try {
-    const user = await UserAuth.findById(req.params.id);
+    const user = await findTargetUser(req.params.id, req.user);
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
@@ -334,7 +404,7 @@ const updateUserStatus = async (req, res) => {
 
 const getMyPermissions = async (req, res) => {
   try {
-    const user = await UserAuth.findById(req.user?._id || req.user?.id);
+    const user = await findUserByAuthContext(req.user);
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
