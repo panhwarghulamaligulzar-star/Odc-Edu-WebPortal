@@ -121,6 +121,25 @@ const TeacherSchema = new mongoose.Schema(
       default: null,
       // Can store: "50000", "50000 PKR", "50%"
     },
+
+    salaryType: {
+      type: String,
+      enum: ["fixed", "per_student"],
+      default: "fixed",
+    },
+
+    salaryPerStudent: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
+
+    attendanceThreshold: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: 50,
+    },
   },
   {
     timestamps: true,

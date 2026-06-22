@@ -1,5 +1,9 @@
 import courseModule from "../modules/courseModule.js";
 import TeacherSchema from "../modules/teacherModule.js";
+import EnrollmentSchema from "../modules/enrollmentModule.js";
+import AttendanceSchema from "../modules/attendanceModule.js";
+import BatchSchema from "../modules/batchModule.js";
+import HolidaySchema from "../modules/holidayModule.js";
 import * as XLSX from "xlsx";
 
 const getRowValue = (row, keys = []) => {
@@ -28,6 +32,81 @@ const parseCourseRefs = (value) =>
     .map((item) => item.trim())
     .filter(Boolean);
 
+const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+const batchDaysToDowSet = (days) => {
+  const map = {
+    "Monday to Saturday": [1, 2, 3, 4, 5, 6],
+    "Monday to Thursday": [1, 2, 3, 4],
+    "Saturday & Sunday": [6, 0],
+  };
+  return new Set(map[days] || []);
+};
+
+const getMonthWindow = (year, month) => {
+  const from = new Date(year, month - 1, 1);
+  from.setHours(0, 0, 0, 0);
+  const to = new Date(year, month, 0);
+  to.setHours(23, 59, 59, 999);
+  return { from, to };
+};
+
+const getDateKey = (dateValue) => {
+  const date = new Date(dateValue);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+};
+
+const getBatchHolidayDateSet = async (batchId, from, to) => {
+  const holidays = await HolidaySchema.find({
+    isActive: true,
+    $and: [
+      {
+        $or: [
+          { date: { $gte: from, $lte: to } },
+          { date: { $lte: to }, endDate: { $ne: null, $gte: from } },
+        ],
+      },
+      {
+        $or: [{ affectedBatches: { $size: 0 } }, { affectedBatches: batchId }],
+      },
+    ],
+  })
+    .select("date endDate")
+    .lean();
+
+  const holidayDateSet = new Set();
+  holidays.forEach((holiday) => {
+    const start = new Date(holiday.date);
+    const end = holiday.endDate ? new Date(holiday.endDate) : new Date(holiday.date);
+    start.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+
+    for (let current = new Date(start); current <= end; current.setDate(current.getDate() + 1)) {
+      if (current >= from && current <= to) {
+        holidayDateSet.add(getDateKey(current));
+      }
+    }
+  });
+
+  return holidayDateSet;
+};
+
+const getBatchWorkingDaysCount = async (batch, from, to) => {
+  if (!batch?.days) return 0;
+  const workingDow = batchDaysToDowSet(batch.days);
+  const holidayDateSet = await getBatchHolidayDateSet(batch._id, from, to);
+  let total = 0;
+
+  for (let current = new Date(from); current <= to; current.setDate(current.getDate() + 1)) {
+    const dateKey = getDateKey(current);
+    if (workingDow.has(current.getDay()) && !holidayDateSet.has(dateKey)) {
+      total += 1;
+    }
+  }
+
+  return total;
+};
+
 const createTeacher = async (req, res) => {
   try {
     console.log("=== CREATE TEACHER REQUEST ===");
@@ -51,6 +130,9 @@ const createTeacher = async (req, res) => {
       teachingExperience,
       computerSkills,
       monthlySalary,
+      salaryType,
+      salaryPerStudent,
+      attendanceThreshold,
     } = req.body;
 
     // Parse courseId if it's a JSON string (from FormData)
@@ -122,6 +204,15 @@ const createTeacher = async (req, res) => {
       teachingExperience: teachingExperience || null,
       computerSkills: computerSkills,
       monthlySalary: monthlySalary || null,
+      salaryType: salaryType === "per_student" ? "per_student" : "fixed",
+      salaryPerStudent:
+        salaryPerStudent !== undefined && salaryPerStudent !== null && salaryPerStudent !== ""
+          ? Number(salaryPerStudent)
+          : null,
+      attendanceThreshold:
+        attendanceThreshold !== undefined && attendanceThreshold !== null && attendanceThreshold !== ""
+          ? Number(attendanceThreshold)
+          : 50,
     };
 
     console.log("Teacher Data to save:", teacherData);
@@ -200,6 +291,221 @@ export const getTeacherById = async (req, res) => {
   }
 };
 
+export const getTeacherCompensationDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const now = new Date();
+    const year = Number(req.query.year) || now.getFullYear();
+    const month = Number(req.query.month) || now.getMonth() + 1;
+    const { from, to } = getMonthWindow(year, month);
+
+    const teacher = await TeacherSchema.findById(id).populate(
+      "courseId",
+      "courseName courseId",
+    );
+
+    if (!teacher) {
+      return res.status(404).json({
+        success: false,
+        message: "Teacher not found",
+      });
+    }
+
+    const assignedCourseIds = (teacher.courseId || []).map((course) => course?._id).filter(Boolean);
+    const enrollments = await EnrollmentSchema.find({
+      course: { $in: assignedCourseIds },
+      status: "Active",
+    })
+      .populate("student", "studentName registrationNo mobileNumber isActive")
+      .populate("batch", "batchName batchCode days")
+      .lean();
+
+    const activeEnrollments = enrollments.filter(
+      (enrollment) => enrollment.student && enrollment.student.isActive !== false,
+    );
+
+    const uniqueStudentIds = [
+      ...new Set(activeEnrollments.map((enrollment) => String(enrollment.student._id))),
+    ];
+    const batchIds = [
+      ...new Set(activeEnrollments.map((enrollment) => enrollment.batch?._id?.toString()).filter(Boolean)),
+    ];
+
+    const attendanceRecords = batchIds.length
+      ? await AttendanceSchema.find({
+          batch: { $in: batchIds },
+          personType: "student",
+          person: { $in: uniqueStudentIds },
+          date: { $gte: from, $lte: to },
+        })
+          .select("batch person status date")
+          .lean()
+      : [];
+
+    const batchMap = new Map();
+    for (const enrollment of activeEnrollments) {
+      if (enrollment.batch?._id) {
+        batchMap.set(String(enrollment.batch._id), enrollment.batch);
+      }
+    }
+
+    const batchWorkingDaysMap = new Map();
+    for (const [batchId, batch] of batchMap.entries()) {
+      batchWorkingDaysMap.set(batchId, await getBatchWorkingDaysCount(batch, from, to));
+    }
+
+    const attendanceMap = new Map();
+    attendanceRecords.forEach((record) => {
+      const key = `${String(record.person)}:${String(record.batch)}`;
+      if (!attendanceMap.has(key)) attendanceMap.set(key, []);
+      attendanceMap.get(key).push(record);
+    });
+
+    const studentMonthMap = new Map();
+    const courseSummariesMap = new Map();
+
+    activeEnrollments.forEach((enrollment) => {
+      const courseId = String(enrollment.course);
+      const courseMeta =
+        (teacher.courseId || []).find((course) => String(course?._id) === courseId) || null;
+      if (!courseSummariesMap.has(courseId)) {
+        courseSummariesMap.set(courseId, {
+          _id: courseId,
+          courseId: courseMeta?.courseId || "N/A",
+          courseName: courseMeta?.courseName || "Unnamed Course",
+          activeStudents: [],
+        });
+      }
+
+      const studentId = String(enrollment.student._id);
+      const batchId = enrollment.batch?._id ? String(enrollment.batch._id) : null;
+      const attendanceKey = batchId ? `${studentId}:${batchId}` : null;
+      const records = attendanceKey ? attendanceMap.get(attendanceKey) || [] : [];
+
+      let attendedUnits = 0;
+      let presentDays = 0;
+      let halfDays = 0;
+      let absentDays = 0;
+      let leaveDays = 0;
+      let holidayDays = 0;
+
+      records.forEach((record) => {
+        if (record.status === "Present") {
+          attendedUnits += 1;
+          presentDays += 1;
+        } else if (record.status === "Half Day") {
+          attendedUnits += 0.5;
+          halfDays += 1;
+        } else if (record.status === "Absent") {
+          absentDays += 1;
+        } else if (record.status === "Leave") {
+          leaveDays += 1;
+        } else if (record.status === "Holiday") {
+          holidayDays += 1;
+        }
+      });
+
+      const totalWorkingDays = batchId ? batchWorkingDaysMap.get(batchId) || 0 : 0;
+      const attendancePercentage =
+        totalWorkingDays > 0 ? round2((attendedUnits / totalWorkingDays) * 100) : 0;
+
+      const studentMonthEntry = {
+        enrollmentId: String(enrollment._id),
+        studentId,
+        studentName: enrollment.student.studentName,
+        registrationNo: enrollment.student.registrationNo || "N/A",
+        mobileNumber: enrollment.student.mobileNumber || "N/A",
+        batchId,
+        batchName: enrollment.batch?.batchName || "Batch not linked",
+        batchCode: enrollment.batch?.batchCode || "N/A",
+        totalWorkingDays,
+        presentDays,
+        halfDays,
+        absentDays,
+        leaveDays,
+        holidayDays,
+        attendancePercentage,
+      };
+
+      courseSummariesMap.get(courseId).activeStudents.push(studentMonthEntry);
+
+      if (!studentMonthMap.has(studentId)) {
+        studentMonthMap.set(studentId, {
+          studentId,
+          studentName: enrollment.student.studentName,
+          registrationNo: enrollment.student.registrationNo || "N/A",
+          totalWorkingDays: 0,
+          attendedUnits: 0,
+        });
+      }
+
+      const aggregated = studentMonthMap.get(studentId);
+      aggregated.totalWorkingDays += totalWorkingDays;
+      aggregated.attendedUnits += attendedUnits;
+    });
+
+    const attendanceThreshold = Number(teacher.attendanceThreshold ?? 50);
+    const salaryPerStudent = Number(teacher.salaryPerStudent ?? 0);
+
+    const uniqueStudentSummaries = Array.from(studentMonthMap.values()).map((student) => {
+      const monthlyAttendancePercentage =
+        student.totalWorkingDays > 0
+          ? round2((student.attendedUnits / student.totalWorkingDays) * 100)
+          : 0;
+      const isSalaryEligible = monthlyAttendancePercentage >= attendanceThreshold;
+
+      return {
+        studentId: student.studentId,
+        studentName: student.studentName,
+        registrationNo: student.registrationNo,
+        totalWorkingDays: student.totalWorkingDays,
+        monthlyAttendancePercentage,
+        isSalaryEligible,
+        calculatedSalaryAmount:
+          teacher.salaryType === "per_student" && isSalaryEligible ? salaryPerStudent : 0,
+      };
+    });
+
+    const eligibleStudents = uniqueStudentSummaries.filter((student) => student.isSalaryEligible);
+    const calculatedMonthlySalary =
+      teacher.salaryType === "per_student"
+        ? round2(eligibleStudents.length * salaryPerStudent)
+        : teacher.monthlySalary;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        teacher,
+        month: {
+          year,
+          month,
+          label: `${year}-${String(month).padStart(2, "0")}`,
+        },
+        salaryConfig: {
+          salaryType: teacher.salaryType || "fixed",
+          monthlySalary: teacher.monthlySalary || null,
+          salaryPerStudent: teacher.salaryPerStudent ?? null,
+          attendanceThreshold,
+        },
+        summary: {
+          totalAssignedCourses: assignedCourseIds.length,
+          totalActiveStudents: uniqueStudentSummaries.length,
+          eligibleStudents: eligibleStudents.length,
+          calculatedMonthlySalary,
+        },
+        studentsForSalary: uniqueStudentSummaries,
+        courses: Array.from(courseSummariesMap.values()),
+      },
+    });
+  } catch (error) {
+    console.error("Get teacher compensation details error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 // Update teacher
 export const updateTeacher = async (req, res) => {
   try {
@@ -233,6 +539,26 @@ export const updateTeacher = async (req, res) => {
     console.log("Parsed computerSkills for update:", updateData.computerSkills);
 
     // monthlySalary is already a string, no conversion needed
+    if (updateData.salaryType) {
+      updateData.salaryType =
+        updateData.salaryType === "per_student" ? "per_student" : "fixed";
+    }
+    if (Object.prototype.hasOwnProperty.call(updateData, "salaryPerStudent")) {
+      updateData.salaryPerStudent =
+        updateData.salaryPerStudent !== undefined &&
+        updateData.salaryPerStudent !== null &&
+        updateData.salaryPerStudent !== ""
+          ? Number(updateData.salaryPerStudent)
+          : null;
+    }
+    if (Object.prototype.hasOwnProperty.call(updateData, "attendanceThreshold")) {
+      updateData.attendanceThreshold =
+        updateData.attendanceThreshold !== undefined &&
+        updateData.attendanceThreshold !== null &&
+        updateData.attendanceThreshold !== ""
+          ? Number(updateData.attendanceThreshold)
+          : 50;
+    }
 
     // Handle profile picture if uploaded
     if (req.file) {

@@ -12,6 +12,9 @@ import {
   Pagination,
   Input,
   Upload,
+  Tabs,
+  Spin,
+  InputNumber,
 } from "antd";
 import LoaderSpnar from "../../components/loader/loaderSpnar";
 import React, { useState, useEffect } from "react";
@@ -43,6 +46,7 @@ import {
   deleteTeacher,
   getCourses,
   bulkImportTeachers,
+  getTeacherCompensationDetails,
 } from "../../services/feeService";
 import dayjs from "dayjs";
 import * as XLSX from "xlsx";
@@ -70,6 +74,14 @@ const Teachers = () => {
   const [importingEmployees, setImportingEmployees] = useState(false);
   const [exportingEmployees, setExportingEmployees] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [teacherCompensation, setTeacherCompensation] = useState(null);
+  const [loadingTeacherCompensation, setLoadingTeacherCompensation] =
+    useState(false);
+  const [savingSalaryConfig, setSavingSalaryConfig] = useState(false);
+  const [salaryConfigDraft, setSalaryConfigDraft] = useState({
+    salaryPerStudent: null,
+    attendanceThreshold: 50,
+  });
 
   // Fetch teachers and courses on mount
   useEffect(() => {
@@ -100,6 +112,78 @@ const Teachers = () => {
       }
     } catch (error) {
       console.error("Failed to fetch courses");
+    }
+  };
+
+  const fetchTeacherCompensation = async (teacherId) => {
+    setLoadingTeacherCompensation(true);
+    try {
+      const response = await getTeacherCompensationDetails(teacherId, {
+        year: dayjs().year(),
+        month: dayjs().month() + 1,
+      });
+      if (response.success) {
+        setTeacherCompensation(response.data);
+        setSalaryConfigDraft({
+          salaryPerStudent: response.data?.salaryConfig?.salaryPerStudent ?? null,
+          attendanceThreshold:
+            response.data?.salaryConfig?.attendanceThreshold ?? 50,
+        });
+      }
+    } catch (error) {
+      setTeacherCompensation(null);
+      message.error(
+        error.message || "Failed to load course and student attendance details",
+      );
+    } finally {
+      setLoadingTeacherCompensation(false);
+    }
+  };
+
+  const handleSaveSalaryConfig = async () => {
+    if (!selectedTeacher?._id) return;
+    if (!permissions.update) {
+      message.warning("You do not have permission to update employees.");
+      return;
+    }
+    if (
+      salaryConfigDraft.salaryPerStudent === null ||
+      salaryConfigDraft.salaryPerStudent === undefined
+    ) {
+      message.warning("Please enter salary amount per student.");
+      return;
+    }
+
+    const normalizedAttendanceThreshold =
+      salaryConfigDraft.attendanceThreshold === null ||
+      salaryConfigDraft.attendanceThreshold === undefined
+        ? 50
+        : Number(salaryConfigDraft.attendanceThreshold);
+
+    setSavingSalaryConfig(true);
+    try {
+      const payload = {
+        salaryType: "per_student",
+        salaryPerStudent: salaryConfigDraft.salaryPerStudent,
+        attendanceThreshold: normalizedAttendanceThreshold,
+      };
+      const response = await updateTeacher(selectedTeacher._id, payload);
+      if (response.success) {
+        message.success("Teacher salary rule updated successfully!");
+        await fetchTeachers();
+        const updatedTeacher = {
+          ...selectedTeacher,
+          salaryType: "per_student",
+          salaryPerStudent: salaryConfigDraft.salaryPerStudent,
+          attendanceThreshold: normalizedAttendanceThreshold,
+        };
+        setSelectedTeacher(updatedTeacher);
+        await fetchTeacherCompensation(selectedTeacher._id);
+      }
+    } catch (error) {
+      message.error(error.message || "Failed to update teacher salary rule");
+    } finally {
+      setSavingSalaryConfig(false);
     }
   };
 
@@ -315,6 +399,9 @@ const Teachers = () => {
       teachingExperience: teacher.teachingExperience,
       computerSkills: teacher.computerSkills || [],
       monthlySalary: teacher.monthlySalary,
+      salaryType: teacher.salaryType || "fixed",
+      salaryPerStudent: teacher.salaryPerStudent ?? null,
+      attendanceThreshold: teacher.attendanceThreshold ?? 50,
     });
     setOpenModal(true);
   };
@@ -327,6 +414,11 @@ const Teachers = () => {
     setEditMode(false);
     setEditingTeacher(null);
     form.resetFields();
+    form.setFieldsValue({
+      salaryType: "fixed",
+      attendanceThreshold: 50,
+      salaryPerStudent: null,
+    });
     setOpenModal(true);
   };
 
@@ -336,7 +428,13 @@ const Teachers = () => {
       return;
     }
     setSelectedTeacher(teacher);
+    setTeacherCompensation(null);
+    setSalaryConfigDraft({
+      salaryPerStudent: teacher.salaryPerStudent ?? null,
+      attendanceThreshold: teacher.attendanceThreshold ?? 50,
+    });
     setShowIdCard(true);
+    fetchTeacherCompensation(teacher._id);
   };
 
   // Get teacher initials for avatar fallback
@@ -355,6 +453,475 @@ const Teachers = () => {
     if (value === "Fresh") return "Fresh";
     if (value === "1") return "1 Year";
     return `${value} Years`;
+  };
+
+  const formatCurrency = (value) => {
+    const amount = Number(value);
+    if (Number.isNaN(amount)) return value || "N/A";
+    return new Intl.NumberFormat("en-PK", {
+      style: "currency",
+      currency: "PKR",
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  const getTeacherSalaryText = (teacher) => {
+    if (!teacher) return "N/A";
+    if (teacher.salaryType === "per_student") {
+      const perStudent =
+        teacher.salaryPerStudent !== null && teacher.salaryPerStudent !== undefined
+          ? `${formatCurrency(teacher.salaryPerStudent)} / student`
+          : "Per student";
+      const threshold = teacher.attendanceThreshold ?? 50;
+      return `${perStudent} (${threshold}% min attendance)`;
+    }
+    return teacher.monthlySalary || "N/A";
+  };
+
+  const renderTeacherDetailRow = (label, value) => (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: "12px",
+        marginBottom: "14px",
+      }}
+    >
+      <span
+        style={{
+          fontSize: "13px",
+          color: "#666",
+          fontWeight: "800",
+          minWidth: "130px",
+          fontFamily: "Inter, sans-serif",
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontSize: "13px",
+          color: "#333",
+          fontWeight: "400",
+          flex: 1,
+          lineHeight: "1.5",
+        }}
+      >
+        {value ?? "N/A"}
+      </span>
+    </div>
+  );
+
+  const renderPersonalInfoTab = () => {
+    if (!selectedTeacher) return null;
+
+    return (
+      <div
+        style={{
+          display: "flex",
+          minHeight: "400px",
+          background: "linear-gradient(135deg, #E8F0FE 0%, #F0F4FF 100%)",
+          borderRadius: "16px",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            flex: 1,
+            background: "white",
+            padding: "24px",
+            overflowY: "auto",
+          }}
+        >
+          {renderTeacherDetailRow("Employee ID:", selectedTeacher.teacherId)}
+          {renderTeacherDetailRow("Father Name:", selectedTeacher.fatherName)}
+          {renderTeacherDetailRow("Gender:", selectedTeacher.gender)}
+          {renderTeacherDetailRow("Contact Number:", selectedTeacher.contactNo)}
+          {renderTeacherDetailRow("CNIC:", selectedTeacher.cnicNo)}
+          {renderTeacherDetailRow("Designation:", selectedTeacher.designation)}
+          {renderTeacherDetailRow(
+            "Appointment Date:",
+            selectedTeacher.appointmentDate
+              ? dayjs(selectedTeacher.appointmentDate).format("DD-MMM-YYYY")
+              : "N/A",
+          )}
+          {renderTeacherDetailRow("Contract Period:", selectedTeacher.contractPeriod)}
+          {renderTeacherDetailRow(
+            "Qualification:",
+            selectedTeacher.highestQualification,
+          )}
+          {selectedTeacher.degreeTitle &&
+            renderTeacherDetailRow("Degree Title:", selectedTeacher.degreeTitle)}
+          {renderTeacherDetailRow("Major Subject:", selectedTeacher.majorSubject)}
+          {renderTeacherDetailRow(
+            "Experience:",
+            formatExperience(selectedTeacher.teachingExperience),
+          )}
+          {selectedTeacher.computerSkills?.length > 0 &&
+            renderTeacherDetailRow(
+              "Skills:",
+              selectedTeacher.computerSkills.join(", "),
+            )}
+          {renderTeacherDetailRow(
+            "Salary Setup:",
+            getTeacherSalaryText(selectedTeacher),
+          )}
+          {renderTeacherDetailRow("Address:", selectedTeacher.address)}
+          {selectedTeacher.courseId?.length > 0 &&
+            renderTeacherDetailRow(
+              "Assigned Courses:",
+              selectedTeacher.courseId.map((course) => course.courseName).join(", "),
+            )}
+        </div>
+
+        <div
+          style={{
+            width: "260px",
+            background: "#fff",
+            padding: "24px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "16px",
+            borderLeft: "1px solid #edf2fb",
+          }}
+        >
+          <div
+            style={{
+              width: "200px",
+              height: "200px",
+              overflow: "hidden",
+              border: "4px solid rgba(255,255,255,0.5)",
+              borderRadius: "16px",
+              background: "#fff",
+            }}
+          >
+            {selectedTeacher.profilePicture ? (
+              <img
+                src={selectedTeacher.profilePicture}
+                alt={selectedTeacher.fullName}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  background: "#01134C",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "60px",
+                  color: "white",
+                  fontWeight: "bold",
+                }}
+              >
+                {getInitials(selectedTeacher.fullName)}
+              </div>
+            )}
+          </div>
+
+          <div style={{ textAlign: "center" }}>
+            <h4
+              style={{
+                margin: 0,
+                fontSize: "20px",
+                fontWeight: "bold",
+                color: "#01134C",
+              }}
+            >
+              {selectedTeacher.fullName}
+            </h4>
+            <p
+              style={{
+                margin: "8px 0 0 0",
+                fontSize: "14px",
+                color: "#5b6780",
+              }}
+            >
+              {selectedTeacher.designation ||
+                selectedTeacher.majorSubject ||
+                "Employee"}
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCourseAndStudentTab = () => {
+    if (loadingTeacherCompensation) {
+      return (
+        <div className="flex min-h-[320px] items-center justify-center">
+          <Spin size="large" />
+        </div>
+      );
+    }
+
+    if (!teacherCompensation) {
+      return (
+        <Empty description="Course and attendance details are not available yet" />
+      );
+    }
+
+    const { salaryConfig, summary, courses: teacherCourses, studentsForSalary, month } =
+      teacherCompensation;
+    const effectiveRate =
+      salaryConfigDraft.salaryPerStudent ?? salaryConfig.salaryPerStudent ?? 0;
+    const effectiveThreshold =
+      salaryConfigDraft.attendanceThreshold ?? salaryConfig.attendanceThreshold ?? 50;
+    const projectedEligibleStudents = studentsForSalary.filter(
+      (student) => student.monthlyAttendancePercentage >= effectiveThreshold,
+    ).length;
+    const projectedMonthlySalary = projectedEligibleStudents * effectiveRate;
+
+    return (
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <Card size="small">
+            <div className="text-xs text-slate-500">Assigned Courses</div>
+            <div className="mt-1 text-xl font-bold text-[#01134C]">
+              {summary.totalAssignedCourses}
+            </div>
+          </Card>
+          <Card size="small">
+            <div className="text-xs text-slate-500">Active Students</div>
+            <div className="mt-1 text-xl font-bold text-[#01134C]">
+              {summary.totalActiveStudents}
+            </div>
+          </Card>
+          <Card size="small">
+            <div className="text-xs text-slate-500">
+              Salary Eligible Students
+            </div>
+            <div className="mt-1 text-xl font-bold text-[#01134C]">
+              {summary.eligibleStudents}
+            </div>
+          </Card>
+          <Card size="small">
+            <div className="text-xs text-slate-500">
+              {salaryConfig.salaryType === "per_student"
+                ? `Calculated Salary (${month.label})`
+                : "Projected Salary"}
+            </div>
+            <div className="mt-1 text-xl font-bold text-[#01134C]">
+              {formatCurrency(
+                salaryConfig.salaryType === "per_student"
+                  ? summary.calculatedMonthlySalary
+                  : projectedMonthlySalary,
+              )}
+            </div>
+          </Card>
+        </div>
+
+        <Card size="small" title="Salary Rule">
+          <div className="grid grid-cols-1 gap-3 text-sm text-slate-600 md:grid-cols-3">
+            <div>
+              <span className="font-semibold text-[#01134C]">Mode:</span>{" "}
+              Per student attendance based
+            </div>
+            <div>
+              <span className="font-semibold text-[#01134C]">Rate:</span>{" "}
+              {formatCurrency(effectiveRate)}
+            </div>
+            <div>
+              <span className="font-semibold text-[#01134C]">
+                Minimum Attendance:
+              </span>{" "}
+              {effectiveThreshold}%
+            </div>
+          </div>
+        </Card>
+
+        <Card size="small" title="Admin Salary Setup">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                Amount Per Student
+              </div>
+              <InputNumber
+                size="large"
+                min={0}
+                className="!w-full"
+                placeholder="Enter amount per student"
+                value={salaryConfigDraft.salaryPerStudent}
+                onChange={(value) =>
+                  setSalaryConfigDraft((prev) => ({
+                    ...prev,
+                    salaryPerStudent: value,
+                  }))
+                }
+              />
+            </div>
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                Minimum Attendance %
+              </div>
+              <InputNumber
+                size="large"
+                min={0}
+                max={100}
+                className="!w-full"
+                value={salaryConfigDraft.attendanceThreshold}
+                onChange={(value) =>
+                  setSalaryConfigDraft((prev) => ({
+                    ...prev,
+                    attendanceThreshold: value ?? 50,
+                  }))
+                }
+              />
+            </div>
+            <Button
+              type="primary"
+              loading={savingSalaryConfig}
+              onClick={handleSaveSalaryConfig}
+              disabled={!permissions.update}
+              style={{
+                background: "#01134C",
+                borderColor: "#01134C",
+                height: "40px",
+                fontWeight: 600,
+              }}
+            >
+              Save Salary Rule
+            </Button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs text-slate-500">Total Students</div>
+              <div className="mt-1 text-lg font-bold text-[#01134C]">
+                {summary.totalActiveStudents}
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs text-slate-500">Eligible Students</div>
+              <div className="mt-1 text-lg font-bold text-[#01134C]">
+                {projectedEligibleStudents}
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs text-slate-500">Projected Monthly Salary</div>
+              <div className="mt-1 text-lg font-bold text-[#01134C]">
+                {formatCurrency(projectedMonthlySalary)}
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        <Card size="small" title={`Monthly Student Salary Check (${month.label})`}>
+          {studentsForSalary.length === 0 ? (
+            <Empty description="No active students linked to this teacher" />
+          ) : (
+            <div className="space-y-3">
+              {studentsForSalary.map((student) => (
+                <div
+                  key={student.studentId}
+                  className="rounded-xl border border-slate-200 bg-slate-50 p-3"
+                >
+                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-[#01134C]">
+                        {student.studentName}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        Reg #: {student.registrationNo} | Working Days:{" "}
+                        {student.totalWorkingDays}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Tag
+                        color={
+                          student.monthlyAttendancePercentage >= effectiveThreshold
+                            ? "green"
+                            : "red"
+                        }
+                      >
+                        {student.monthlyAttendancePercentage}%
+                      </Tag>
+                      <Tag
+                        color={
+                          student.monthlyAttendancePercentage >= effectiveThreshold
+                            ? "blue"
+                            : "default"
+                        }
+                      >
+                        {student.monthlyAttendancePercentage >= effectiveThreshold
+                          ? formatCurrency(effectiveRate)
+                          : "Not counted"}
+                      </Tag>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <div className="space-y-4">
+          {teacherCourses.map((course) => (
+            <Card
+              key={course._id}
+              size="small"
+              title={`${course.courseName} (${course.courseId})`}
+            >
+              {course.activeStudents.length === 0 ? (
+                <Empty description="No active students in this course" />
+              ) : (
+                <div className="space-y-3">
+                  {course.activeStudents.map((student) => (
+                    <div
+                      key={student.enrollmentId}
+                      className="rounded-xl border border-slate-200 p-3"
+                    >
+                      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <div className="text-sm font-semibold text-[#01134C]">
+                            {student.studentName}
+                          </div>
+                          <div className="text-xs text-slate-500">
+                            Reg #: {student.registrationNo} | Batch:{" "}
+                            {student.batchName} ({student.batchCode})
+                          </div>
+                        </div>
+                        <Tag color={student.attendancePercentage >= 50 ? "green" : "orange"}>
+                          {student.attendancePercentage}% Attendance
+                        </Tag>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600 md:grid-cols-6">
+                        <div className="rounded-lg bg-slate-50 p-2">
+                          Working Days: {student.totalWorkingDays}
+                        </div>
+                        <div className="rounded-lg bg-slate-50 p-2">
+                          Present: {student.presentDays}
+                        </div>
+                        <div className="rounded-lg bg-slate-50 p-2">
+                          Half Day: {student.halfDays}
+                        </div>
+                        <div className="rounded-lg bg-slate-50 p-2">
+                          Absent: {student.absentDays}
+                        </div>
+                        <div className="rounded-lg bg-slate-50 p-2">
+                          Leave: {student.leaveDays}
+                        </div>
+                        <div className="rounded-lg bg-slate-50 p-2">
+                          Holiday: {student.holidayDays}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          ))}
+        </div>
+      </div>
+    );
   };
 
   const filteredTeachers = teachers.filter((teacher) => {
@@ -417,6 +984,7 @@ const Teachers = () => {
             onSubmit={editMode ? handleEditTeacher : handleCreateTeacher}
             courses={courses}
             initialImage={editingTeacher?.profilePicture || null}
+            initialTeacher={editingTeacher}
           />
         </div>
       </Modal>
@@ -832,664 +1400,41 @@ const Teachers = () => {
         onCancel={() => {
           setShowIdCard(false);
           setSelectedTeacher(null);
+          setTeacherCompensation(null);
+          setSalaryConfigDraft({
+            salaryPerStudent: null,
+            attendanceThreshold: 50,
+          });
         }}
         footer={null}
-        width={700}
+        width={980}
         centered
-        styles={{ body: { padding: "0" } }}
+        style={{ maxWidth: "calc(100vw - 32px)" }}
+        styles={{
+          body: {
+            padding: "20px",
+            maxHeight: "calc(100vh - 120px)",
+            overflowY: "auto",
+            overflowX: "hidden",
+          },
+        }}
       >
         {selectedTeacher && (
-          <div
-            style={{
-              width: "100%",
-              borderRadius: "16px",
-              overflow: "hidden",
-              background: "linear-gradient(135deg, #E8F0FE 0%, #F0F4FF 100%)",
-              position: "relative",
-            }}
-          >
-            {/* Main Content Area */}
-            <div
-              style={{
-                display: "flex",
-                minHeight: "400px",
-              }}
-            >
-              {/* Left Section - Info */}
-              <div
-                style={{
-                  flex: 1,
-                  background: "white",
-                  padding: "24px",
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "space-between",
-                  backgroundColor: "#ffffff",
-                }}
-              >
-                {/* Teacher Information */}
-                <div style={{ flex: 1, overflowY: "auto" }}>
-                  {/* ID Row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: "12px",
-                      marginBottom: "14px",
-                      backgroundColor: "#ffffff",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#666",
-                        fontWeight: "800",
-                        minWidth: "130px",
-                        fontFamily: "Inter, sans-serif",
-                      }}
-                    >
-                      Employee ID:
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#333",
-                        fontWeight: "400",
-                        flex: 1,
-                      }}
-                    >
-                      {selectedTeacher.teacherId || "N/A"}
-                    </span>
-                  </div>
-
-                  {/* Father Name Row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
-                      marginBottom: "14px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#666",
-                        fontWeight: "800",
-                        minWidth: "130px",
-                        fontFamily: "Inter, sans-serif",
-                      }}
-                    >
-                      Father Name:
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#333",
-                        fontWeight: "400",
-                        flex: 1,
-                      }}
-                    >
-                      {selectedTeacher.fatherName || "N/A"}
-                    </span>
-                  </div>
-
-                  {/* Gender Row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
-                      marginBottom: "14px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#666",
-                        fontWeight: "800",
-                        minWidth: "130px",
-                        fontFamily: "Inter, sans-serif",
-                      }}
-                    >
-                      Gender:
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#333",
-                        fontWeight: "400",
-                        flex: 1,
-                      }}
-                    >
-                      {selectedTeacher.gender || "N/A"}
-                    </span>
-                  </div>
-
-                  {/* Phone Row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
-                      marginBottom: "14px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#666",
-                        fontWeight: "800",
-                        minWidth: "130px",
-                        fontFamily: "Inter, sans-serif",
-                      }}
-                    >
-                      Contact Number:
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#333",
-                        fontWeight: "400",
-                        flex: 1,
-                      }}
-                    >
-                      {selectedTeacher.contactNo || "N/A"}
-                    </span>
-                  </div>
-
-                  {/* CNIC Row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: "12px",
-                      marginBottom: "14px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#666",
-                        fontWeight: "800",
-                        minWidth: "130px",
-                        fontFamily: "Inter, sans-serif",
-                      }}
-                    >
-                      CNIC:
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#333",
-                        fontWeight: "400",
-                        flex: 1,
-                        lineHeight: "1.4",
-                      }}
-                    >
-                      {selectedTeacher.cnicNo || "N/A"}
-                    </span>
-                  </div>
-
-                  {/* Designation Row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
-                      marginBottom: "14px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#666",
-                        fontWeight: "800",
-                        minWidth: "130px",
-                        fontFamily: "Inter, sans-serif",
-                      }}
-                    >
-                      Designation:
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#333",
-                        fontWeight: "400",
-                        flex: 1,
-                      }}
-                    >
-                      {selectedTeacher.designation || "N/A"}
-                    </span>
-                  </div>
-
-                  {/* Appointment Date Row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
-                      marginBottom: "14px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#666",
-                        fontWeight: "800",
-                        minWidth: "130px",
-                        fontFamily: "Inter, sans-serif",
-                      }}
-                    >
-                      Appointment Date:
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#333",
-                        fontWeight: "400",
-                        flex: 1,
-                      }}
-                    >
-                      {selectedTeacher.appointmentDate
-                        ? dayjs(selectedTeacher.appointmentDate).format(
-                            "DD-MMM-YYYY",
-                          )
-                        : "N/A"}
-                    </span>
-                  </div>
-
-                  {/* Contract Period Row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
-                      marginBottom: "14px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#666",
-                        fontWeight: "800",
-                        minWidth: "130px",
-                        fontFamily: "Inter, sans-serif",
-                      }}
-                    >
-                      Contract Period:
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#333",
-                        fontWeight: "400",
-                        flex: 1,
-                      }}
-                    >
-                      {selectedTeacher.contractPeriod || "N/A"}
-                    </span>
-                  </div>
-
-                  {/* Highest Qualification Row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
-                      marginBottom: "14px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#666",
-                        fontWeight: "800",
-                        minWidth: "130px",
-                        fontFamily: "Inter, sans-serif",
-                      }}
-                    >
-                      Qualification:
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#333",
-                        fontWeight: "400",
-                        flex: 1,
-                      }}
-                    >
-                      {selectedTeacher.highestQualification || "N/A"}
-                    </span>
-                  </div>
-
-                  {/* Degree Title Row */}
-                  {selectedTeacher.degreeTitle && (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "12px",
-                        marginBottom: "14px",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: "13px",
-                          color: "#666",
-                          fontWeight: "800",
-                          minWidth: "130px",
-                          fontFamily: "Inter, sans-serif",
-                        }}
-                      >
-                        Degree Title:
-                      </span>
-                      <span
-                        style={{
-                          fontSize: "13px",
-                          color: "#333",
-                          fontWeight: "400",
-                          flex: 1,
-                        }}
-                      >
-                        {selectedTeacher.degreeTitle}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Major Subject Row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
-                      marginBottom: "14px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#666",
-                        fontWeight: "800",
-                        minWidth: "130px",
-                        fontFamily: "Inter, sans-serif",
-                      }}
-                    >
-                      Major Subject:
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#333",
-                        fontWeight: "400",
-                        flex: 1,
-                      }}
-                    >
-                      {selectedTeacher.majorSubject || "N/A"}
-                    </span>
-                  </div>
-
-                  {/* Teaching Experience Row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "12px",
-                      marginBottom: "14px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#666",
-                        fontWeight: "800",
-                        minWidth: "130px",
-                        fontFamily: "Inter, sans-serif",
-                      }}
-                    >
-                      Experience:
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#333",
-                        fontWeight: "400",
-                        flex: 1,
-                      }}
-                    >
-                      {selectedTeacher.teachingExperience
-                        ? `${selectedTeacher.teachingExperience}${selectedTeacher.teachingExperience === "Fresh" ? "" : selectedTeacher.teachingExperience === "1" ? " Year" : " Years"}`
-                        : "N/A"}
-                    </span>
-                  </div>
-
-                  {/* Computer Skills Row */}
-                  {selectedTeacher.computerSkills &&
-                    selectedTeacher.computerSkills.length > 0 && (
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "flex-start",
-                          gap: "12px",
-                          marginBottom: "14px",
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: "13px",
-                            color: "#666",
-                            fontWeight: "800",
-                            minWidth: "130px",
-                            fontFamily: "Inter, sans-serif",
-                          }}
-                        >
-                          Skills:
-                        </span>
-                        <span
-                          style={{
-                            fontSize: "13px",
-                            color: "#333",
-                            fontWeight: "400",
-                            flex: 1,
-                            lineHeight: "1.6",
-                          }}
-                        >
-                          {selectedTeacher.computerSkills.join(", ")}
-                        </span>
-                      </div>
-                    )}
-
-                  {/* Monthly Salary Row */}
-                  {selectedTeacher.monthlySalary && (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "12px",
-                        marginBottom: "14px",
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: "13px",
-                          color: "#666",
-                          fontWeight: "800",
-                          minWidth: "130px",
-                          fontFamily: "Inter, sans-serif",
-                        }}
-                      >
-                        Monthly Salary:
-                      </span>
-                      <span
-                        style={{
-                          fontSize: "13px",
-                          color: "#333",
-                          fontWeight: "400",
-                          flex: 1,
-                        }}
-                      >
-                        {selectedTeacher.monthlySalary || "N/A"}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Address Row */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: "12px",
-                      marginBottom: "14px",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#666",
-                        fontWeight: "800",
-                        minWidth: "130px",
-                        fontFamily: "Inter, sans-serif",
-                      }}
-                    >
-                      Address:
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "#333",
-                        fontWeight: "400",
-                        flex: 1,
-                        lineHeight: "1.4",
-                      }}
-                    >
-                      {selectedTeacher.address || "N/A"}
-                    </span>
-                  </div>
-
-                  {/* Assigned Courses Row */}
-                  {selectedTeacher.courseId &&
-                    selectedTeacher.courseId.length > 0 && (
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "flex-start",
-                          gap: "12px",
-                          marginBottom: "14px",
-                        }}
-                      >
-                        <span
-                          style={{
-                            fontSize: "13px",
-                            color: "#666",
-                            fontWeight: "800",
-                            minWidth: "130px",
-                            fontFamily: "Inter, sans-serif",
-                          }}
-                        >
-                          Assigned Courses:
-                        </span>
-                        <span
-                          style={{
-                            fontSize: "13px",
-                            color: "#333",
-                            fontWeight: "400",
-                            flex: 1,
-                            lineHeight: "1.6",
-                          }}
-                        >
-                          {selectedTeacher.courseId
-                            .map((c) => c.courseName)
-                            .join(", ")}
-                        </span>
-                      </div>
-                    )}
-                </div>
-              </div>
-
-              {/* Right Section - Photo */}
-              <div
-                style={{
-                  width: "250px",
-                  background: "#ffff",
-                  padding: "24px",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: "16px",
-                }}
-              >
-                {/* Photo Container */}
-                <div
-                  style={{
-                    width: "200px",
-                    height: "200px",
-                    overflow: "hidden",
-                    border: "4px solid rgba(255,255,255,0.5)",
-                    borderRadius: "16px",
-                    background: "#ffff",
-                    position: "relative",
-                  }}
-                >
-                  {selectedTeacher.profilePicture ? (
-                    <img
-                      src={selectedTeacher.profilePicture}
-                      alt={selectedTeacher.fullName}
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        objectFit: "cover",
-                      }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: "100%",
-                        height: "100%",
-                        background: "#01134C",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: "60px",
-                        color: "white",
-                        fontWeight: "bold",
-                      }}
-                    >
-                      {getInitials(selectedTeacher.fullName)}
-                    </div>
-                  )}
-                </div>
-
-                {/* Teacher Name */}
-                <div style={{ textAlign: "center" }}>
-                  <h4
-                    style={{
-                      margin: 0,
-                      fontSize: "20px",
-                      fontWeight: "bold",
-                      letterSpacing: "0.3px",
-                      color: "#01134C",
-                      lineHeight: "1.3",
-                    }}
-                  >
-                    {selectedTeacher.fullName}
-                  </h4>
-                  <p
-                    style={{
-                      margin: "8px 0 0 0",
-                      fontSize: "14px",
-                      color: "#666",
-                      fontWeight: "500",
-                    }}
-                  >
-                    {selectedTeacher.designation ||
-                      selectedTeacher.majorSubject ||
-                      "Employee"}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
+          <Tabs
+            defaultActiveKey="personal"
+            items={[
+              {
+                key: "personal",
+                label: "Personal Information",
+                children: renderPersonalInfoTab(),
+              },
+              {
+                key: "courses",
+                label: "Course & Students",
+                children: renderCourseAndStudentTab(),
+              },
+            ]}
+          />
         )}
       </Modal>
 
