@@ -11,6 +11,7 @@ import {
   Upload,
   Avatar,
   message,
+  InputNumber,
 } from "antd";
 import { UploadOutlined, UserOutlined } from "@ant-design/icons";
 
@@ -20,12 +21,14 @@ const TeacherForm = ({
   onSubmit,
   courses = [],
   initialImage = null,
+  initialTeacher = null,
 }) => {
   const [localForm] = Form.useForm();
   const usedForm = form || localForm;
   const [imagePreview, setImagePreview] = useState(initialImage);
   const [uploadedFile, setUploadedFile] = useState(null);
   const [designation, setDesignation] = useState("");
+  const [salaryType, setSalaryType] = useState("fixed");
   const [salaryInputKey, setSalaryInputKey] = useState(0);
   
   // Update imagePreview when initialImage changes
@@ -33,6 +36,11 @@ const TeacherForm = ({
     setImagePreview(initialImage);
     setUploadedFile(null);
   }, [initialImage]);
+
+  useEffect(() => {
+    setDesignation(usedForm.getFieldValue("designation") || "");
+    setSalaryType(usedForm.getFieldValue("salaryType") || "fixed");
+  }, [initialImage, initialTeacher, usedForm]);
 
   // Reset salary input key when initialImage changes (i.e., when opening edit mode)
   useEffect(() => {
@@ -63,6 +71,11 @@ const TeacherForm = ({
       contractPeriod: values.contractPeriod,
       designation: values.designation || null,
       monthlySalary: processedSalary,
+      salaryType: values.salaryType || "fixed",
+      salaryPerStudent:
+        values.salaryType === "per_student" ? values.salaryPerStudent ?? null : null,
+      attendanceThreshold:
+        values.salaryType === "per_student" ? values.attendanceThreshold ?? 50 : 50,
 
       // Educational Qualifications
       highestQualification: values.highestQualification || null,
@@ -518,25 +531,115 @@ const TeacherForm = ({
         </Col>
 
         <Col span={12}>
+          <Form.Item
+            name="salaryType"
+            initialValue="fixed"
+            label={
+              <span className="text-md !text-[14px] opacity-40">
+                Salary Type
+              </span>
+            }
+          >
+            <Select
+              size="large"
+              className="form-input !font-ArialLight"
+              onChange={(value) => {
+                setSalaryType(value);
+                if (value !== "per_student") {
+                  usedForm.setFieldsValue({
+                    salaryPerStudent: null,
+                    attendanceThreshold: 50,
+                  });
+                }
+              }}
+            >
+              <Select.Option value="fixed">Fixed Monthly Salary</Select.Option>
+              <Select.Option value="per_student">
+                Per Student Attendance Based
+              </Select.Option>
+            </Select>
+          </Form.Item>
+        </Col>
+      </Row>
+
+      <Row gutter={16}>
+        <Col span={12}>
           {/* Monthly Salary */}
           <Form.Item
             name="monthlySalary"
             label={
               <span className="text-md !text-[14px] opacity-40">
-                Monthly Salary
+                {salaryType === "per_student"
+                  ? "Fixed Salary Override"
+                  : "Monthly Salary"}
               </span>
             }
           >
-          <Input
-      key={salaryInputKey}
-      size="large"
-      placeholder="e.g. 50000, 50000 PKR, or 50%"
-      className="form-input !font-ArialLight"
-      onChange={(e) => {
-        usedForm.setFieldValue("monthlySalary", e.target.value);
-      }}/>
+            <Input
+              key={salaryInputKey}
+              size="large"
+              placeholder="e.g. 50000, 50000 PKR, or 50%"
+              className="form-input !font-ArialLight"
+              onChange={(e) => {
+                usedForm.setFieldValue("monthlySalary", e.target.value);
+              }}
+            />
           </Form.Item>
         </Col>
+
+        {salaryType === "per_student" && (
+          <>
+            <Col span={6}>
+              <Form.Item
+                name="salaryPerStudent"
+                label={
+                  <span className="text-md !text-[14px] opacity-40">
+                    Salary Per Student
+                  </span>
+                }
+                rules={[
+                  {
+                    required: true,
+                    message: "Please enter salary per student",
+                  },
+                ]}
+              >
+                <InputNumber
+                  size="large"
+                  min={0}
+                  className="form-input !font-ArialLight !w-full"
+                  placeholder="1500"
+                />
+              </Form.Item>
+            </Col>
+
+            <Col span={6}>
+              <Form.Item
+                name="attendanceThreshold"
+                initialValue={50}
+                label={
+                  <span className="text-md !text-[14px] opacity-40">
+                    Minimum Attendance %
+                  </span>
+                }
+                rules={[
+                  {
+                    required: true,
+                    message: "Please enter minimum attendance percentage",
+                  },
+                ]}
+              >
+                <InputNumber
+                  size="large"
+                  min={0}
+                  max={100}
+                  className="form-input !font-ArialLight !w-full"
+                  placeholder="50"
+                />
+              </Form.Item>
+            </Col>
+          </>
+        )}
       </Row>
 
       {/* Address - Full Width */}

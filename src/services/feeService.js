@@ -238,6 +238,18 @@ export const getTeacherById = async (teacherId) => {
   }
 };
 
+export const getTeacherCompensationDetails = async (teacherId, params = {}) => {
+  try {
+    const response = await api.get(`/teacher/${teacherId}/compensation-details`, {
+      params,
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Get Teacher Compensation Details Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
 export const updateTeacher = async (teacherId, teacherData) => {
   try {
     // If teacherData contains profile picture, send as FormData
@@ -397,6 +409,7 @@ export default {
   createTeacher,
   getAllTeachers,
   getTeacherById,
+  getTeacherCompensationDetails,
   updateTeacher,
   deleteTeacher,
   bulkImportTeachers,

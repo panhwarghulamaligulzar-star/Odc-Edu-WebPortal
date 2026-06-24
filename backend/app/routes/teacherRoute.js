@@ -3,6 +3,7 @@ import multer from "multer";
 import createTeacher, {
   getAllTeachers,
   getTeacherById,
+  getTeacherCompensationDetails,
   updateTeacher,
   deleteTeacher,
   bulkImportTeachers,
@@ -27,6 +28,14 @@ teacherRouter.post(
 
 // Get all teachers
 teacherRouter.get("/", authMiddleware, authorize("employees", "view"), getAllTeachers);
+
+// Get teacher by ID
+teacherRouter.get(
+  "/:id/compensation-details",
+  authMiddleware,
+  authorize("employees", "view"),
+  getTeacherCompensationDetails,
+);
 
 // Get teacher by ID
 teacherRouter.get("/:id", authMiddleware, authorize("employees", "view"), getTeacherById);
