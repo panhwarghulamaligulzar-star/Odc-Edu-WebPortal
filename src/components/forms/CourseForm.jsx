@@ -7,6 +7,7 @@ import {
   Button,
   Row,
   Col,
+  Tag,
 } from "antd";
 import { getAllTeachers } from "../../services/feeService";
 import { getAllBatches } from "../../services/batchService";
@@ -24,6 +25,8 @@ const CourseForm = ({
   const [loadingTeachers, setLoadingTeachers] = useState(false);
   const [batches, setBatches] = useState([]);
   const [loadingBatches, setLoadingBatches] = useState(false);
+  const [showAllSelectedTeachers, setShowAllSelectedTeachers] = useState(false);
+  const [showAllSelectedBatches, setShowAllSelectedBatches] = useState(false);
 
   // Fetch teachers
   useEffect(() => {
@@ -153,19 +156,37 @@ const CourseForm = ({
           mode="multiple"
           size="large"
           placeholder="Select one or more teachers"
-          className="form-input !font-ArialLight"
+          className="form-input !font-ArialLight course-multi-select"
           loading={loadingTeachers}
           showSearch
-          filterOption={(input, option) =>
-            option.children.toLowerCase().includes(input.toLowerCase())
-          }
-        >
-          {teachers.map((teacher) => (
-            <Select.Option key={teacher._id} value={teacher._id}>
-              {teacher.fullName} ({teacher.teacherId})
-            </Select.Option>
-          ))}
-        </Select>
+          optionFilterProp="label"
+          tokenSeparators={[","]}
+          maxTagCount={showAllSelectedTeachers ? Infinity : 3}
+          maxTagPlaceholder={(omittedValues) => (
+            <span
+              className="max-tag-placeholder"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setShowAllSelectedTeachers((prev) => !prev);
+              }}
+            >
+              +{omittedValues.length} more
+            </span>
+          )}
+          tagRender={({ label, value, closable, onClose }) => (
+            <Tag
+              closable={closable}
+              onClose={onClose}
+              className="custom-select-tag"
+            >
+              {label}
+            </Tag>
+          )}
+          options={teachers.map((teacher) => ({
+            value: teacher._id,
+            label: `${teacher.fullName} (${teacher.teacherId})`,
+          }))}
+        />
       </Form.Item>
 
       <Form.Item
@@ -181,10 +202,32 @@ const CourseForm = ({
           mode="multiple"
           size="large"
           placeholder="Select one or more batches"
-          className="form-input !font-ArialLight"
+          className="form-input !font-ArialLight course-multi-select"
           loading={loadingBatches}
           showSearch
           optionFilterProp="label"
+          tokenSeparators={[","]}
+          maxTagCount={showAllSelectedBatches ? Infinity : 3}
+          maxTagPlaceholder={(omittedValues) => (
+            <span
+              className="max-tag-placeholder bg-green-500"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setShowAllSelectedBatches((prev) => !prev);
+              }}
+            >
+              +{omittedValues.length} more
+            </span>
+          )}
+          tagRender={({ label, value, closable, onClose }) => (
+            <Tag
+              closable={closable}
+              onClose={onClose}
+              className="custom-select-tag"
+            >
+              {label}
+            </Tag>
+          )}
           options={batches.map((batch) => ({
             value: batch._id,
             label: `${batch.batchName} (${batch.batchCode})`,

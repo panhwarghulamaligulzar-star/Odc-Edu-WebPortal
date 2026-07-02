@@ -727,10 +727,18 @@ export const updateEnrollmentStatus = async (req, res) => {
       );
     }
 
+    // Fetch the latest fee structure to include in response so client sees
+    // the definitive persisted installments/fees immediately.
+    const latestFeeStructure = await FeeStructureSchema.findOne({ enrollment: enrollmentId })
+      .lean();
+
     res.status(200).json({
       success: true,
       message: "Enrollment updated successfully",
-      data: updatedEnrollment,
+      data: {
+        enrollment: updatedEnrollment,
+        feeStructure: latestFeeStructure || null,
+      },
     });
   } catch (error) {
     console.error("Error updating enrollment:", error);

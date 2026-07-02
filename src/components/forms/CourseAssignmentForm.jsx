@@ -20,6 +20,7 @@ import { EditOutlined } from "@ant-design/icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import dayjs from "dayjs";
 import { getBatchesByCourse } from "../../services/batchService";
+import { getFeeStructure } from "../../services/feeService";
 
 const { Option } = Select;
 const { Text } = Typography;
@@ -293,8 +294,12 @@ const CourseAssignmentForm = ({
 
   // Ref to prevent courseId effect from resetting form values during edit initialization
   const isInitializingEditRef = useRef(false);
+  // Ref to prevent selectedCourse/enrollmentDate effect from overwriting saved installments on init
+  const skipInstallmentInitRef = useRef(false);
   // Ref to prevent paymentPlanType effect from overwriting saved discount/installments on init
   const isInitPaymentPlanRef = useRef(false);
+  // Ref to avoid automatic installment rebuilds after initial edit restore
+  const userChangedInstallmentInputsRef = useRef(false);
   // Ref to track previous enrollment date for installment date recalculation
   const prevEnrollmentDateRef = useRef(null);
 
@@ -371,6 +376,11 @@ const CourseAssignmentForm = ({
           (batch) => batch.status === "Active" || batch.status === "Upcoming",
         );
         setBatches(active);
+
+        const currentBatchId = form.getFieldValue("batchId");
+        if (!currentBatchId && active.length === 1) {
+          form.setFieldValue("batchId", active[0]._id);
+        }
       } else {
         setBatches([]);
       }
@@ -396,6 +406,8 @@ const CourseAssignmentForm = ({
       });
       setIsEditMode(false);
       isInitializingEditRef.current = false;
+      isInitPaymentPlanRef.current = false;
+      skipInstallmentInitRef.current = false;
       prevEnrollmentDateRef.current = null;
       return;
     }
@@ -408,19 +420,19 @@ const CourseAssignmentForm = ({
       const enrollment = editingEnrollment;
       const fs = enrollment.feeStructure;
 
+      form.resetFields();
       form.setFieldsValue({
         courseId: enrollment.course?._id,
         enrollmentDate: dayjs(enrollment.enrollmentDate),
         status: enrollment.status || "Active",
-        completionDate: enrollment.completionDate
-          ? dayjs(enrollment.completionDate)
-          : null,
+        completionDate: enrollment.completionDate ? dayjs(enrollment.completionDate) : null,
         batchId: enrollment.batch?._id || null,
         paymentPlanType: fs?.paymentPlanType || "custom",
         discountPercentage: fs?.discountPercentage || 0,
         numberOfInstallments: fs?.numberOfInstallments || 2,
       });
 
+      userChangedInstallmentInputsRef.current = false;
       prevEnrollmentDateRef.current = enrollment.enrollmentDate;
 
       // Load course details
@@ -446,7 +458,7 @@ const CourseAssignmentForm = ({
             title: fee.title,
             amount: fee.amount,
             paymentMode: fee.paymentMode || "one_time",
-          }))
+          })),
         );
       } else {
         setAdditionalFees([createAdditionalFeeRow()]);
@@ -454,7 +466,36 @@ const CourseAssignmentForm = ({
 
       // Set installments from feeStructure
       if (fs?.installments?.length > 0) {
-        setInstallments(fs.installments);
+        setInstallments(
+          fs.installments.map((inst) => ({
+            ...inst,
+            dueDate: inst.dueDate ? dayjs(inst.dueDate) : null,
+          })),
+        );
+        skipInstallmentInitRef.current = true;
+      } else {
+        setInstallments([]);
+        const loadFeeStructure = async () => {
+          try {
+            const feeResponse = await getFeeStructure(
+              editingEnrollment.student?._id || editingEnrollment.student,
+              editingEnrollment.course?._id || editingEnrollment.course,
+            );
+            if (feeResponse.success && feeResponse.data?.installments?.length > 0) {
+              setInstallments(
+                feeResponse.data.installments.map((inst) => ({
+                  ...inst,
+                  dueDate: inst.dueDate ? dayjs(inst.dueDate) : null,
+                })),
+              );
+              skipInstallmentInitRef.current = true;
+            }
+          } catch (error) {
+            console.error("Failed to load fee structure installments:", error);
+          }
+        };
+
+        loadFeeStructure();
       }
     } else {
       // Create mode
@@ -482,8 +523,9 @@ const CourseAssignmentForm = ({
   useEffect(() => {
     if (!courseId) {
       setSelectedCourse(null);
-      setInstallments([]);
-      isInitializingEditRef.current = false;
+      if (!editingEnrollment) {
+        setInstallments([]);
+      }
       return;
     }
 
@@ -491,10 +533,8 @@ const CourseAssignmentForm = ({
     setSelectedCourse(course);
     fetchBatches(courseId);
 
-    // Don't reset batch/installment count when opening an existing enrollment for editing
-    if (!isInitializingEditRef.current) {
+    if (!editingEnrollment && !isInitializingEditRef.current) {
       form.setFieldValue("batchId", null);
-      // Clear fee overrides so the newly selected course's default fees are shown
       setOverriddenFees({
         admissionFee: null,
         courseFee: null,
@@ -508,11 +548,16 @@ const CourseAssignmentForm = ({
         }
         form.setFieldValue("numberOfInstallments", defaultCount);
       }
+
+      setInstallments([]);
     }
 
-    // Clear the initialization flag after the first run so future course changes work normally
-    isInitializingEditRef.current = false;
-  }, [courseId, courses, form, paymentPlanType]);
+    // Clear the initialization lock after the edit form has loaded once.
+    if (editingEnrollment && isInitializingEditRef.current) {
+      isInitializingEditRef.current = false;
+      return;
+    }
+  }, [courseId, courses, editingEnrollment, form]);
 
   useEffect(() => {
     if (!paymentPlanType) return;
@@ -522,6 +567,8 @@ const CourseAssignmentForm = ({
       isInitPaymentPlanRef.current = false;
       return;
     }
+
+    userChangedInstallmentInputsRef.current = true;
 
     const plan = PLAN_OPTIONS.find((item) => item.value === paymentPlanType);
     if (plan) {
@@ -554,6 +601,19 @@ const CourseAssignmentForm = ({
       return;
     }
 
+    // Skip the first rebuild during edit initialization. We already restored
+    // saved installments from the existing fee structure and don't want that
+    // data overwritten before the user interacts with the form.
+    if (editingEnrollment && skipInstallmentInitRef.current) {
+      skipInstallmentInitRef.current = false;
+      return;
+    }
+
+    // Preserve restored installments until the user explicitly changes the plan/fees.
+    if (editingEnrollment && installments.length > 0 && !userChangedInstallmentInputsRef.current) {
+      return;
+    }
+
     // When the enrollment date changes, recalculate all due dates from the new date
     // rather than preserving the old dates from existing installments
     const prevDate = prevEnrollmentDateRef.current;
@@ -570,17 +630,20 @@ const CourseAssignmentForm = ({
         additionalFees,
       ),
     );
-  }, [selectedCourse, enrollmentDate, numberOfInstallments, baseFee, additionalFees]);
+  }, [selectedCourse, enrollmentDate, numberOfInstallments, baseFee, additionalFees, editingEnrollment, installments.length]);
 
   const addAdditionalFee = () => {
+    userChangedInstallmentInputsRef.current = true;
     setAdditionalFees((prev) => [...prev, createAdditionalFeeRow()]);
   };
 
   const removeAdditionalFee = (id) => {
+    userChangedInstallmentInputsRef.current = true;
     setAdditionalFees((prev) => prev.filter((item) => item.id !== id));
   };
 
   const updateAdditionalFee = (id, updates) => {
+    userChangedInstallmentInputsRef.current = true;
     setAdditionalFees((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
@@ -662,8 +725,13 @@ const CourseAssignmentForm = ({
   };
 
   const handleStepAction = async () => {
+    console.log("CourseAssignmentForm: handleStepAction clicked", { isEditMode });
     if (isEditMode) {
-      form.submit();
+      try {
+        form.submit();
+      } catch (err) {
+        console.error("CourseAssignmentForm: form.submit() threw", err);
+      }
       return;
     }
 
@@ -731,6 +799,7 @@ const CourseAssignmentForm = ({
   };
 
   const handleSubmit = async (values) => {
+    console.log("CourseAssignmentForm: handleSubmit invoked", { isEditMode });
     if (!isEditMode) {
       try {
         for (const step of COURSE_ASSIGNMENT_STEPS) {
@@ -885,7 +954,12 @@ const CourseAssignmentForm = ({
         },
       }}
     >
-      <Form form={form} layout="vertical" onFinish={handleSubmit}>
+      <Form
+        form={form}
+        layout="vertical"
+        onFinish={handleSubmit}
+        onFinishFailed={(errorInfo) => console.error("CourseAssignmentForm validation failed:", errorInfo)}
+      >
         <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
           <div style={{ marginBottom: 12 }}>
             <Space wrap size={[8, 8]}>
@@ -895,7 +969,14 @@ const CourseAssignmentForm = ({
               <Tag color="green">
                 Final Fee: PKR {baseFee.finalFee.toLocaleString()}
               </Tag>
-              <Tag color="purple">Installments: {installments.length}</Tag>
+              <Tag color="purple">
+                Installments: {numberOfInstallments}
+              </Tag>
+              {installments.length !== numberOfInstallments && (
+                <Tag color="geekblue">
+                  Total entries: {installments.length}
+                </Tag>
+              )}
               {!isEditMode && (
                 <Tag color="geekblue">
                   Step {currentStepIndex + 1} of {COURSE_ASSIGNMENT_STEPS.length}

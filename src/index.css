@@ -128,6 +128,51 @@ h3 {
 .form-input-disabled::placeholder {
   @apply font-Arial text-[16px] font-[400] text-[#000000B2] leading-[24px] opacity-[8px];
 }
+.course-multi-select .ant-select-selector {
+  min-height: 56px;
+  align-items: stretch;
+  white-space: normal;
+  padding: 6px 12px;
+}
+.course-multi-select .ant-select-selection-overflow {
+  display: flex;
+  flex-wrap: wrap !important;
+  align-items: center;
+  gap: 0.4rem;
+  max-height: 120px;
+  overflow: hidden;
+}
+.course-multi-select .ant-select-selection-item {
+  max-width: calc(100% - 88px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.course-multi-select .ant-select-selection-item-content {
+  white-space: nowrap;
+}
+.course-multi-select .custom-select-tag {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+}
+.course-multi-select .max-tag-placeholder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  padding: 0 10px;
+  height: 24px;
+  border-radius: 9999px;
+  background: #2563eb;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
   .password-input input::placeholder {
   @apply font-Arial text-[16px] font-[400] text-[#D7D7D7] leading-[24px] opacity-[8px];                       /* optional */
 }

@@ -1011,13 +1011,28 @@ const Students = () => {
     setCourseModalVisible(true);
   };
 
-  const openEditCourseModal = (student, enrollment) => {
+  const openEditCourseModal = async (student, enrollment) => {
     if (!permissions.update) {
       message.error("You do not have permission to update assigned courses");
       return;
     }
+
     setSelectedStudent(student);
-    setEditingEnrollment(enrollment);
+
+    // Try to fetch the freshest enrollment data from server before opening modal
+    try {
+      const resp = await api.get(`/enrollment/student/${student._id}`);
+      if (resp.data && resp.data.success && Array.isArray(resp.data.data)) {
+        const fresh = resp.data.data.find((e) => String(e._id) === String(enrollment._id));
+        setEditingEnrollment(fresh || enrollment);
+      } else {
+        setEditingEnrollment(enrollment);
+      }
+    } catch (err) {
+      console.error("Failed to fetch latest enrollments for student:", err);
+      setEditingEnrollment(enrollment);
+    }
+
     setCourseModalVisible(true);
   };
 
@@ -1031,6 +1046,7 @@ const Students = () => {
   };
 
   const handleAssignCourse = async (values) => {
+    console.log("Students: handleAssignCourse invoked", { editingEnrollment, valuesSample: { courseId: values.courseId, numberOfInstallments: values.numberOfInstallments } });
     if (!(editingEnrollment ? permissions.update : permissions.create)) {
       message.error("You do not have permission for this course assignment action");
       return;
@@ -1089,10 +1105,91 @@ const Students = () => {
       }
 
       if (response.data.success) {
+        // Prefer using returned data to update local state immediately
+        const payload = response.data.data;
+        let updatedEnrollment = null;
+        let updatedFeeStructure = null;
+
+        if (payload) {
+          if (payload.enrollment) {
+            updatedEnrollment = payload.enrollment;
+            updatedFeeStructure = payload.feeStructure || null;
+          } else {
+            // createEnrollment returns enrollment object (with feeStructure attached)
+            updatedEnrollment = payload;
+            updatedFeeStructure = payload.feeStructure || null;
+          }
+        }
+
+        if (updatedEnrollment) {
+          // ensure feeStructure is present on the enrollment object
+          updatedEnrollment.feeStructure = updatedFeeStructure || updatedEnrollment.feeStructure || null;
+
+          setStudents((prev) =>
+            prev.map((stu) => {
+              if (!stu || !stu._id) return stu;
+              const sid = stu._id.toString();
+              const enrStudentId = (updatedEnrollment.student && updatedEnrollment.student._id)
+                ? updatedEnrollment.student._id.toString()
+                : updatedEnrollment.student && updatedEnrollment.student.toString ? updatedEnrollment.student.toString() : null;
+
+              if (sid !== enrStudentId) return stu;
+
+              // Replace existing enrollment or append if new
+              const existing = Array.isArray(stu.enrollments) ? stu.enrollments : [];
+              let found = false;
+              const newEnrollments = existing.map((e) => {
+                if (!e || !e._id) return e;
+                if (e._id.toString() === updatedEnrollment._id.toString()) {
+                  found = true;
+                  return updatedEnrollment;
+                }
+                return e;
+              });
+              if (!found) {
+                newEnrollments.unshift(updatedEnrollment);
+              }
+
+              return {
+                ...stu,
+                enrollments: newEnrollments,
+              };
+            }),
+          );
+
+          // Also update selectedStudent if it's the same student so UI reflects change immediately
+          if (selectedStudent && updatedEnrollment.student) {
+            const selId = selectedStudent._id && selectedStudent._id.toString();
+            const updSid = updatedEnrollment.student._id && updatedEnrollment.student._id.toString();
+            if (selId && updSid && selId === updSid) {
+              // merge enrollment into selectedStudent.enrollments
+              setSelectedStudent((prev) => {
+                if (!prev) return prev;
+                const prevEnroll = Array.isArray(prev.enrollments) ? prev.enrollments : [];
+                let found = false;
+                const merged = prevEnroll.map((e) => {
+                  if (e._id && e._id.toString() === updatedEnrollment._id.toString()) {
+                    found = true;
+                    return updatedEnrollment;
+                  }
+                  return e;
+                });
+                if (!found) merged.unshift(updatedEnrollment);
+                return { ...prev, enrollments: merged };
+              });
+            }
+          }
+        }
+
+        // Close the modal after updating local state. Also refetch in background to fully sync if needed.
         courseForm.resetFields();
         setCourseModalVisible(false);
         setEditingEnrollment(null);
-        fetchStudents();
+
+        // background refresh to ensure any other derived data is up-to-date
+        fetchStudents().catch((e) =>
+          console.error("Background refresh failed after enrollment update:", e),
+        );
       }
     } catch (error) {
       message.error(error.response?.data?.message || "Failed to assign course");

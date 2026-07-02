@@ -888,14 +888,16 @@ const Courses = () => {
           setEditingCourse(null);
           form.resetFields();
         }}
-        maskClosable
+        mask={{ closable: true }}
+        styles={{ body: { padding: 0 } }}
+        destroyOnHidden
         footer={null}
         width={900}
         centered
+      >
+        <div
+          style={{ maxHeight: "800px", overflowY: "auto", paddingRight: "8px" }}
         >
-          <div
-            style={{ maxHeight: "800px", overflowY: "auto", paddingRight: "8px" }}
-          >
           <CourseForm
             form={form}
             loading={loading}
