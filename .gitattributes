@@ -1,0 +1,13 @@
+* text=auto
+
+# Generated frontend build output served by the backend.
+# Keep the current branch's rebuilt artifacts during merges instead of
+# trying to merge hashed bundles and service worker files line-by-line.
+backend/public/index.html merge=ours
+backend/public/sw.js merge=ours
+backend/public/workbox-*.js merge=ours
+backend/public/manifest.webmanifest merge=ours
+backend/public/assets/index-*.js merge=ours
+backend/public/assets/index-*.css merge=ours
+backend/public/assets/index.es-*.js merge=ours
+dev-dist/** merge=ours

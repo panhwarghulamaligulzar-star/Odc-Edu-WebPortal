@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && cd backend && npm install --legacy-peer-deps",
+    "build": "vite build",
+    "install:backend": "cd backend && npm install --legacy-peer-deps",
     "start": "cd backend && npm start",
     "dev:all": "npx npm-run-all --parallel dev start",
     "prod": "npm run build && npm start",

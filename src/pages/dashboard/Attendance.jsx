@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Select, DatePicker, Tabs, Table, Tag, Spin,
-  Button, message, Badge, Tooltip, Segmented, Modal, Input,
+  Button, message, Badge, Tooltip, Segmented, Modal, Input, Checkbox,
 } from "antd";
 import {
   MdCheckCircle, MdCancel, MdAccessTime, MdBeachAccess,
@@ -540,6 +540,46 @@ function MarkAttendancePanel({ batches }) {
     return found ? [found] : members.teachers;
   }, [members.teachers, selectedPersonId]);
 
+  const areAllVisibleStudentsPresent = useMemo(() => {
+    if (filteredStudents.length === 0) return false;
+    return filteredStudents.every(
+      (student) => (attendanceMap[student._id] || "Absent") === "Present",
+    );
+  }, [attendanceMap, filteredStudents]);
+
+  const areAllVisibleTeachersPresent = useMemo(() => {
+    if (filteredTeachers.length === 0) return false;
+    return filteredTeachers.every(
+      (teacher) => (attendanceMap[teacher._id] || "Absent") === "Present",
+    );
+  }, [attendanceMap, filteredTeachers]);
+
+  const handleMarkAllVisibleStudentsPresent = (event) => {
+    if (!event?.target?.checked) return;
+
+    setAttendanceMap((prev) => {
+      const next = { ...prev };
+      filteredStudents.forEach((student) => {
+        next[student._id] = "Present";
+      });
+      return next;
+    });
+    setDirty(true);
+  };
+
+  const handleMarkAllVisibleTeachersPresent = (event) => {
+    if (!event?.target?.checked) return;
+
+    setAttendanceMap((prev) => {
+      const next = { ...prev };
+      filteredTeachers.forEach((teacher) => {
+        next[teacher._id] = "Present";
+      });
+      return next;
+    });
+    setDirty(true);
+  };
+
   const currentList = useMemo(() => {
     if (personTypeFilter === "student") return filteredStudents;
     if (personTypeFilter === "teacher") return filteredTeachers;
@@ -776,6 +816,18 @@ function MarkAttendancePanel({ batches }) {
                 label: <span className="flex items-center gap-1">Students <Badge count={members.students.length} showZero color="#3b82f6" /></span>,
                 children: (
                   <Spin spinning={loading}>
+                    <div className="mb-3 flex items-center justify-between gap-3 px-1">
+                      <Checkbox
+                        checked={areAllVisibleStudentsPresent}
+                        disabled={isAcademyHoliday || filteredStudents.length === 0}
+                        onChange={handleMarkAllVisibleStudentsPresent}
+                      >
+                        Mark all visible students present for today
+                      </Checkbox>
+                      <span className="text-xs text-gray-500">
+                        If you change any student to absent, half day, or leave, this will turn off automatically.
+                      </span>
+                    </div>
                     <Table dataSource={filteredStudents} columns={studentCols} rowKey="_id"
                       pagination={false} size="middle" locale={{ emptyText: "No students enrolled in this batch" }} />
                   </Spin>
@@ -786,6 +838,18 @@ function MarkAttendancePanel({ batches }) {
                 label: <span className="flex items-center gap-1">Teachers <Badge count={members.teachers.length} showZero color="#8b5cf6" /></span>,
                 children: (
                   <Spin spinning={loading}>
+                    <div className="mb-3 flex items-center justify-between gap-3 px-1">
+                      <Checkbox
+                        checked={areAllVisibleTeachersPresent}
+                        disabled={isAcademyHoliday || filteredTeachers.length === 0}
+                        onChange={handleMarkAllVisibleTeachersPresent}
+                      >
+                        Mark all visible teachers present for today
+                      </Checkbox>
+                      <span className="text-xs text-gray-500">
+                        If you change any teacher to absent, half day, or leave, this will turn off automatically.
+                      </span>
+                    </div>
                     <Table dataSource={filteredTeachers} columns={teacherCols} rowKey="_id"
                       pagination={false} size="middle" locale={{ emptyText: "No teachers assigned to this batch's course" }} />
                   </Spin>
