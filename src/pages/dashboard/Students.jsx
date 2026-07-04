@@ -2619,6 +2619,9 @@ const Students = () => {
                   fixed="right"
                   render={(record) => {
                     const showManagementActions = activeStudentCategory === "all";
+                    const showAssignCourseAction =
+                      permissions.create &&
+                      ["all", "active"].includes(activeStudentCategory);
                     const showStatusAction =
                       permissions.update &&
                       ["active", "dropout", "passout"].includes(
@@ -2627,7 +2630,7 @@ const Students = () => {
 
                     return (
                       <Space size="small" wrap>
-                        {showManagementActions && permissions.create && (
+                        {showAssignCourseAction && (
                           <Tooltip title="Assign Course">
                             <Button
                               onClick={() => openCourseAssignModal(record)}

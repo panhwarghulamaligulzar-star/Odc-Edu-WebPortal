@@ -15,6 +15,7 @@ import {
   Tabs,
   Spin,
   InputNumber,
+  DatePicker,
 } from "antd";
 import LoaderSpnar from "../../components/loader/loaderSpnar";
 import React, { useState, useEffect } from "react";
@@ -56,6 +57,28 @@ import { useModulePermissions } from "../../hooks/usePermissions";
 
 const TEACHERS_PER_PAGE = 10;
 
+const getSalaryMonthBounds = (teacher) => {
+  const now = dayjs();
+  const currentMonthStart = now.startOf("month");
+  const appointmentMonth = teacher?.appointmentDate
+    ? dayjs(teacher.appointmentDate).startOf("month")
+    : currentMonthStart;
+
+  if (!appointmentMonth.isValid() || !appointmentMonth.isBefore(currentMonthStart)) {
+    return {
+      hasCompletedMonth: false,
+      firstMonth: null,
+      lastMonth: null,
+    };
+  }
+
+  return {
+    hasCompletedMonth: true,
+    firstMonth: appointmentMonth,
+    lastMonth: currentMonthStart.subtract(1, "month"),
+  };
+};
+
 const Teachers = () => {
   const permissions = useModulePermissions("employees");
   const [openModal, setOpenModal] = useState(false);
@@ -82,6 +105,7 @@ const Teachers = () => {
     salaryPerStudent: null,
     attendanceThreshold: 50,
   });
+  const [selectedCompensationMonth, setSelectedCompensationMonth] = useState(null);
 
   // Fetch teachers and courses on mount
   useEffect(() => {
@@ -115,14 +139,18 @@ const Teachers = () => {
     }
   };
 
-  const fetchTeacherCompensation = async (teacherId) => {
+  const fetchTeacherCompensation = async (teacherId, monthValue) => {
     setLoadingTeacherCompensation(true);
     try {
+      const resolvedMonthValue =
+        monthValue || selectedCompensationMonth || dayjs().subtract(1, "month").format("YYYY-MM");
+      const selectedMonth = dayjs(`${resolvedMonthValue}-01`);
       const response = await getTeacherCompensationDetails(teacherId, {
-        year: dayjs().year(),
-        month: dayjs().month() + 1,
+        year: selectedMonth.year(),
+        month: selectedMonth.month() + 1,
       });
       if (response.success) {
+        setSelectedCompensationMonth(resolvedMonthValue);
         setTeacherCompensation(response.data);
         setSalaryConfigDraft({
           salaryPerStudent: response.data?.salaryConfig?.salaryPerStudent ?? null,
@@ -433,8 +461,13 @@ const Teachers = () => {
       salaryPerStudent: teacher.salaryPerStudent ?? null,
       attendanceThreshold: teacher.attendanceThreshold ?? 50,
     });
+    const { hasCompletedMonth, lastMonth } = getSalaryMonthBounds(teacher);
+    const defaultMonth = hasCompletedMonth ? lastMonth.format("YYYY-MM") : null;
+    setSelectedCompensationMonth(defaultMonth);
     setShowIdCard(true);
-    fetchTeacherCompensation(teacher._id);
+    if (defaultMonth) {
+      fetchTeacherCompensation(teacher._id, defaultMonth);
+    }
   };
 
   // Get teacher initials for avatar fallback
@@ -663,13 +696,22 @@ const Teachers = () => {
     }
 
     if (!teacherCompensation) {
+      const { hasCompletedMonth } = getSalaryMonthBounds(selectedTeacher);
       return (
-        <Empty description="Course and attendance details are not available yet" />
+        <Empty
+          description={
+            !hasCompletedMonth
+              ? "Completed months will appear here after the teacher finishes their first full month."
+              : "Course and attendance details are not available yet"
+          }
+        />
       );
     }
 
     const { salaryConfig, summary, courses: teacherCourses, studentsForSalary, month } =
       teacherCompensation;
+    const { firstMonth, lastMonth } = getSalaryMonthBounds(selectedTeacher);
+    const selectedMonthLabel = month.displayLabel || month.label;
     const effectiveRate =
       salaryConfigDraft.salaryPerStudent ?? salaryConfig.salaryPerStudent ?? 0;
     const effectiveThreshold =
@@ -705,7 +747,7 @@ const Teachers = () => {
           <Card size="small">
             <div className="text-xs text-slate-500">
               {salaryConfig.salaryType === "per_student"
-                ? `Calculated Salary (${month.label})`
+                ? `Calculated Salary (${selectedMonthLabel})`
                 : "Projected Salary"}
             </div>
             <div className="mt-1 text-xl font-bold text-[#01134C]">
@@ -738,7 +780,40 @@ const Teachers = () => {
         </Card>
 
         <Card size="small" title="Admin Salary Setup">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
+          <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-[minmax(220px,260px)_1fr_1fr_auto] md:items-end">
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                Salary Month
+              </div>
+              <DatePicker
+                size="large"
+                className="w-full"
+                picker="month"
+                format="MMMM YYYY"
+                allowClear={false}
+                placeholder="Select salary month"
+                value={
+                  selectedCompensationMonth
+                    ? dayjs(`${selectedCompensationMonth}-01`)
+                    : null
+                }
+                disabledDate={(current) => {
+                  if (!current) return false;
+                  if (!firstMonth || !lastMonth) return true;
+                  return (
+                    current.isBefore(firstMonth, "month") ||
+                    current.isAfter(lastMonth, "month")
+                  );
+                }}
+                onChange={(value) => {
+                  const monthValue = value ? value.format("YYYY-MM") : null;
+                  setSelectedCompensationMonth(monthValue);
+                  if (selectedTeacher?._id && monthValue) {
+                    fetchTeacherCompensation(selectedTeacher._id, monthValue);
+                  }
+                }}
+              />
+            </div>
             <div>
               <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                 Amount Per Student
@@ -811,9 +886,14 @@ const Teachers = () => {
               </div>
             </div>
           </div>
+
+          <div className="mt-3 text-xs font-medium text-slate-500">
+            Attendance and salary calculations below are showing only for{" "}
+            <span className="font-semibold text-[#01134C]">{selectedMonthLabel}</span>.
+          </div>
         </Card>
 
-        <Card size="small" title={`Monthly Student Salary Check (${month.label})`}>
+        <Card size="small" title={`Monthly Student Salary Check (${selectedMonthLabel})`}>
           {studentsForSalary.length === 0 ? (
             <Empty description="No active students linked to this teacher" />
           ) : (
@@ -868,6 +948,11 @@ const Teachers = () => {
               key={course._id}
               size="small"
               title={`${course.courseName} (${course.courseId})`}
+              extra={
+                <span className="text-xs font-medium text-slate-500">
+                  Attendance for {selectedMonthLabel}
+                </span>
+              }
             >
               {course.activeStudents.length === 0 ? (
                 <Empty description="No active students in this course" />
@@ -1395,15 +1480,16 @@ const Teachers = () => {
       </div>
 
       {/* ID Card Modal - Detailed View */}
-      <Modal
-        open={showIdCard}
-        onCancel={() => {
-          setShowIdCard(false);
-          setSelectedTeacher(null);
-          setTeacherCompensation(null);
-          setSalaryConfigDraft({
-            salaryPerStudent: null,
-            attendanceThreshold: 50,
+        <Modal
+          open={showIdCard}
+          onCancel={() => {
+            setShowIdCard(false);
+            setSelectedTeacher(null);
+            setTeacherCompensation(null);
+            setSelectedCompensationMonth(null);
+            setSalaryConfigDraft({
+              salaryPerStudent: null,
+              attendanceThreshold: 50,
           });
         }}
         footer={null}

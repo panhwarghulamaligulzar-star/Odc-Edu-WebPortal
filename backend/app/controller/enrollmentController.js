@@ -276,6 +276,18 @@ export const createEnrollment = async (req, res) => {
       });
     }
 
+    const existingEnrollment = await EnrollmentSchema.findOne({
+      student: studentId,
+      course: courseId,
+    }).lean();
+
+    if (existingEnrollment) {
+      return res.status(400).json({
+        success: false,
+        message: "This course is already assigned to the selected student",
+      });
+    }
+
     // Check if batch exists and belongs to the course
     if (batchId) {
       const batch = await BatchSchema.findById(batchId);
@@ -649,6 +661,21 @@ export const updateEnrollmentStatus = async (req, res) => {
         success: false,
         message: "Enrollment not found",
       });
+    }
+
+    if (courseId && String(existingEnrollment.course) !== String(courseId)) {
+      const duplicateEnrollment = await EnrollmentSchema.findOne({
+        student: existingEnrollment.student,
+        course: courseId,
+        _id: { $ne: enrollmentId },
+      }).lean();
+
+      if (duplicateEnrollment) {
+        return res.status(400).json({
+          success: false,
+          message: "This course is already assigned to the selected student",
+        });
+      }
     }
 
     const enrollmentUpdateData = {};

@@ -309,6 +309,26 @@ const CourseAssignmentForm = ({
   const paymentPlanType = Form.useWatch("paymentPlanType", form);
   const discountPercentage = Form.useWatch("discountPercentage", form) || 0;
   const numberOfInstallments = Form.useWatch("numberOfInstallments", form) || 1;
+  const assignedCourseIds = useMemo(() => {
+    const activeEditingCourseId = editingEnrollment?.course?._id
+      ? String(editingEnrollment.course._id)
+      : null;
+
+    return new Set(
+      (selectedStudent?.enrollments || [])
+        .map((enrollment) => enrollment?.course?._id || enrollment?.course)
+        .filter(Boolean)
+        .map((value) => String(value))
+        .filter((value) => value !== activeEditingCourseId),
+    );
+  }, [editingEnrollment, selectedStudent]);
+  const availableCourses = useMemo(
+    () =>
+      (courses || []).filter(
+        (course) => !assignedCourseIds.has(String(course._id)),
+      ),
+    [assignedCourseIds, courses],
+  );
 
   const baseFee = useMemo(() => {
     if (!selectedCourse) {
@@ -1037,13 +1057,21 @@ const CourseAssignmentForm = ({
                               optionFilterProp="children"
                               size="large"
                             >
-                              {courses.map((course) => (
+                              {availableCourses.map((course) => (
                                 <Option key={course._id} value={course._id}>
                                   {course.courseName} ({course.courseId})
                                 </Option>
                               ))}
                             </Select>
                           </Form.Item>
+                        {availableCourses.length === 0 && !isEditMode && (
+                          <Alert
+                            type="info"
+                            showIcon
+                            message="All available courses are already assigned to this student."
+                            style={{ width: "100%", marginBottom: 16 }}
+                          />
+                        )}
 
                           <Form.Item
                             label="Enrollment Date"

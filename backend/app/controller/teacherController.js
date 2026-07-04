@@ -51,6 +51,12 @@ const getMonthWindow = (year, month) => {
   return { from, to };
 };
 
+const getMonthDisplayLabel = (year, month) =>
+  new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date(year, month - 1, 1));
+
 const getDateKey = (dateValue) => {
   const date = new Date(dateValue);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -480,6 +486,7 @@ export const getTeacherCompensationDetails = async (req, res) => {
           year,
           month,
           label: `${year}-${String(month).padStart(2, "0")}`,
+          displayLabel: getMonthDisplayLabel(year, month),
         },
         salaryConfig: {
           salaryType: teacher.salaryType || "fixed",
