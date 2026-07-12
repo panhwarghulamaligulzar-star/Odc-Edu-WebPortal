@@ -224,6 +224,28 @@ export const getMonthlySummary = async (months = 12) => {
   }
 };
 
+export const getTeacherPayroll = async (filters = {}) => {
+  try {
+    const response = await api.get("/accounting/payroll", {
+      params: filters,
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Get Teacher Payroll Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
+export const payTeacherPayroll = async (teacherId, data) => {
+  try {
+    const response = await api.post(`/accounting/payroll/${teacherId}/pay`, data);
+    return response.data;
+  } catch (error) {
+    console.error("Pay Teacher Payroll Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
 export const getSuperAdminFinanceMonitor = async (params = {}) => {
   try {
     const response = await api.get("/accounting/super-admin/monitor", {

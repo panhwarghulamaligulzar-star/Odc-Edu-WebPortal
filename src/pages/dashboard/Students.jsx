@@ -47,6 +47,8 @@ import {
   FaSearch,
   FaFilter,
   FaEye,
+  FaChevronDown,
+  FaChevronUp,
   FaChalkboardTeacher,
   FaFileImport,
   FaFileExcel,
@@ -422,6 +424,7 @@ const Students = () => {
   const [tablePageSize, setTablePageSize] = useState(3);
   const [tablePage, setTablePage] = useState(1);
   const [activeStudentCategory, setActiveStudentCategory] = useState("all");
+  const [expandedEnrollmentRows, setExpandedEnrollmentRows] = useState({});
   const currentStudentStepIndex = Math.max(
     0,
     STUDENT_FORM_STEPS.findIndex((step) => step.key === studentFormTab),
@@ -1043,6 +1046,13 @@ const Students = () => {
     }
     setSelectedStudent(student);
     setFeeProfileModalVisible(true);
+  };
+
+  const toggleEnrollmentRow = (studentId) => {
+    setExpandedEnrollmentRows((prev) => ({
+      ...prev,
+      [studentId]: !prev[studentId],
+    }));
   };
 
   const handleAssignCourse = async (values) => {
@@ -2394,6 +2404,11 @@ const Students = () => {
                       );
                     }
 
+                    const isExpanded = Boolean(expandedEnrollmentRows[record._id]);
+                    const visibleEnrollments = isExpanded
+                      ? activeEnrollments
+                      : activeEnrollments.slice(0, 1);
+
                     return (
                     <div>
                       {activeEnrollments.length > 0 ? (
@@ -2404,7 +2419,7 @@ const Students = () => {
                             gap: "6px",
                           }}
                         >
-                          {activeEnrollments.slice(0, 1).map((enrollment) => (
+                          {visibleEnrollments.map((enrollment) => (
                             <Tooltip
                               key={enrollment._id}
                               title={
@@ -2584,17 +2599,35 @@ const Students = () => {
                             </Tooltip>
                           ))}
                           {activeEnrollments.length > 1 && (
-                            <Tag
-                              color="blue"
+                            <button
+                              type="button"
+                              onClick={() => toggleEnrollmentRow(record._id)}
                               style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "6px",
                                 fontSize: "11px",
                                 fontWeight: "600",
-                                textAlign: "center",
                                 width: "fit-content",
+                                color: "#1D4ED8",
+                                background: "#EFF6FF",
+                                border: "1px solid #BFDBFE",
+                                borderRadius: "6px",
+                                padding: "3px 8px",
+                                cursor: "pointer",
                               }}
                             >
-                              {activeEnrollments.length} active courses
-                            </Tag>
+                              <span>
+                                {isExpanded
+                                  ? "Hide extra courses"
+                                  : `${activeEnrollments.length} active courses`}
+                              </span>
+                              {isExpanded ? (
+                                <FaChevronUp style={{ fontSize: "10px" }} />
+                              ) : (
+                                <FaChevronDown style={{ fontSize: "10px" }} />
+                              )}
+                            </button>
                           )}
                         </div>
                       ) : (

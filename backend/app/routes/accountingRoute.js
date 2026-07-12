@@ -29,6 +29,8 @@ import {
   getReceiptDuesOverview,
   exportReceiptDues,
   getSuperAdminFinanceMonitor,
+  getTeacherPayrollSummary,
+  payTeacherPayroll,
 } from "../controller/accountingController.js";
 
 const accountingRoute = express.Router();
@@ -47,6 +49,10 @@ accountingRoute.get("/payment-methods", authMiddleware, authorize("accounting", 
 accountingRoute.post("/payment-methods", authMiddleware, authorize("accounting", "create"), createPaymentMethod);
 accountingRoute.put("/payment-methods/:id", authMiddleware, authorize("accounting", "update"), updatePaymentMethod);
 accountingRoute.delete("/payment-methods/:id", authMiddleware, authorize("accounting", "delete"), deletePaymentMethod);
+
+// Payroll
+accountingRoute.get("/payroll", authMiddleware, authorize("accounting", "view"), getTeacherPayrollSummary);
+accountingRoute.post("/payroll/:id/pay", authMiddleware, authorize("accounting", "create"), payTeacherPayroll);
 
 // Transactions — summary MUST be before /:id to avoid route conflict
 accountingRoute.get("/transactions/summary", authMiddleware, authorize("accounting", "view"), getTransactionSummary);

@@ -98,6 +98,11 @@ const SideBarManu = () => {
       path: "/dashboard/accounting/receipt",
     },
     {
+      icon: MdAccountBalance,
+      title: "Payroll",
+      path: "/dashboard/accounting/payroll",
+    },
+    {
       icon: MdReceipt,
       title: "Transactions",
       path: "/dashboard/accounting/transactions",

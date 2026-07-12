@@ -44,6 +44,7 @@ import BatchManagement from "../../components/forms/BatchManagement";
 import {
   createCourse as createCourseAPI,
   getCourses,
+  getAllEnrollments,
   updateCourse,
   deleteCourse,
   bulkImportCoursesWorkbook,
@@ -55,6 +56,36 @@ import * as XLSX from "xlsx";
 import dayjs from "dayjs";
 
 const COURSES_PER_PAGE = 10;
+const ACTIVE_ENROLLMENT_STATUS_SET = new Set(["active", "enrolled"]);
+
+const normalizeEnrollmentStatus = (status) =>
+  String(status || "")
+    .trim()
+    .toLowerCase();
+
+const mergeCoursesWithLiveEnrollmentStats = (courses, enrollments) => {
+  const courseEnrollmentCounts = new Map();
+
+  (Array.isArray(enrollments) ? enrollments : []).forEach((enrollment) => {
+    const status = normalizeEnrollmentStatus(enrollment?.status);
+    if (!ACTIVE_ENROLLMENT_STATUS_SET.has(status)) {
+      return;
+    }
+
+    const courseId = enrollment?.course?._id || enrollment?.course;
+    if (!courseId) {
+      return;
+    }
+
+    const key = String(courseId);
+    courseEnrollmentCounts.set(key, (courseEnrollmentCounts.get(key) || 0) + 1);
+  });
+
+  return (Array.isArray(courses) ? courses : []).map((course) => ({
+    ...course,
+    enrolledStudentsCount: courseEnrollmentCounts.get(String(course._id)) || 0,
+  }));
+};
 
 const Courses = () => {
   const permissions = useModulePermissions("courses");
@@ -84,9 +115,17 @@ const Courses = () => {
   const fetchCourses = async () => {
     setFetchingCourses(true);
     try {
-      const response = await getCourses();
-      if (response.success) {
-        setCourses(response.data);
+      const [coursesResponse, enrollmentsResponse] = await Promise.all([
+        getCourses(),
+        getAllEnrollments({ limit: 10000 }),
+      ]);
+
+      if (coursesResponse.success) {
+        const liveCourses = mergeCoursesWithLiveEnrollmentStats(
+          coursesResponse.data,
+          enrollmentsResponse?.success ? enrollmentsResponse.data : [],
+        );
+        setCourses(liveCourses);
         setCoursePage(1);
       }
     } catch (error) {

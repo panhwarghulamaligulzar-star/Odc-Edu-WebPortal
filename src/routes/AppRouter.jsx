@@ -39,6 +39,7 @@ import FundTransfer from "../pages/dashboard/accounting/FundTransfer";
 import Ledger from "../pages/dashboard/accounting/Ledger";
 import ProfitLoss from "../pages/dashboard/accounting/ProfitLoss";
 import Receipt from "../pages/dashboard/accounting/Receipt";
+import Payroll from "../pages/dashboard/accounting/Payroll";
 import Attendance from "../pages/dashboard/Attendance";
 import HolidayManagement from "../pages/dashboard/HolidayManagement";
 import SuperAdmin from "../pages/dashboard/SuperAdmin";
@@ -115,6 +116,7 @@ function AppRouter() {
           <Route path="accounting/banks" element={<ProtectedRoute moduleKey="accounting"><Banks /></ProtectedRoute>} />
           <Route path="accounting/transactions" element={<ProtectedRoute moduleKey="accounting"><Transactions /></ProtectedRoute>} />
           <Route path="accounting/receipt" element={<ProtectedRoute moduleKey="accounting"><Receipt /></ProtectedRoute>} />
+          <Route path="accounting/payroll" element={<ProtectedRoute moduleKey="accounting"><Payroll /></ProtectedRoute>} />
           <Route path="accounting/fund-transfer" element={<ProtectedRoute moduleKey="accounting"><FundTransfer /></ProtectedRoute>} />
           <Route path="accounting/ledger" element={<ProtectedRoute moduleKey="accounting"><Ledger /></ProtectedRoute>} />
           <Route path="accounting/profit-loss" element={<ProtectedRoute moduleKey="accounting"><ProfitLoss /></ProtectedRoute>} />
