@@ -250,6 +250,19 @@ export const getTeacherCompensationDetails = async (teacherId, params = {}) => {
   }
 };
 
+export const updateTeacherStudentCompensation = async (teacherId, payload) => {
+  try {
+    const response = await api.put(
+      `/teacher/${teacherId}/compensation-student-amount`,
+      payload,
+    );
+    return response.data;
+  } catch (error) {
+    console.error("Update Teacher Student Compensation Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
 export const updateTeacher = async (teacherId, teacherData) => {
   try {
     // If teacherData contains profile picture, send as FormData

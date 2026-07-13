@@ -48,6 +48,7 @@ import {
   getCourses,
   bulkImportTeachers,
   getTeacherCompensationDetails,
+  updateTeacherStudentCompensation,
 } from "../../services/feeService";
 import dayjs from "dayjs";
 import * as XLSX from "xlsx";
@@ -79,6 +80,69 @@ const getSalaryMonthBounds = (teacher) => {
   };
 };
 
+const STUDENT_COMPENSATION_OVERRIDE_STORAGE_KEY = "teacher_student_comp_overrides_v1";
+
+const getCompensationOverrideKey = (teacherId, monthValue) =>
+  `${teacherId || "unknown"}:${monthValue || "unknown"}`;
+
+const readStudentCompensationOverrides = () => {
+  try {
+    const raw = localStorage.getItem(STUDENT_COMPENSATION_OVERRIDE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+};
+
+const writeStudentCompensationOverrides = (value) => {
+  localStorage.setItem(
+    STUDENT_COMPENSATION_OVERRIDE_STORAGE_KEY,
+    JSON.stringify(value || {}),
+  );
+};
+
+const applyStudentCompensationOverrides = (compensationData, overrides = {}) => {
+  if (!compensationData || !Array.isArray(compensationData.studentsForSalary)) {
+    return compensationData;
+  }
+
+  const cloned = {
+    ...compensationData,
+    summary: { ...(compensationData.summary || {}) },
+    studentsForSalary: compensationData.studentsForSalary.map((student) => {
+      const override = overrides[String(student.studentId)];
+      if (!override) return student;
+
+      const amount = Number(override.amount || 0);
+      const isSalaryEligible = amount > 0;
+
+      return {
+        ...student,
+        hasManualAdjustment: true,
+        manualAdjustedAmount: amount,
+        manualAdjustmentNote: override.note || "",
+        calculatedSalaryAmount: amount,
+        isSalaryEligible,
+      };
+    }),
+  };
+
+  const eligibleStudents = cloned.studentsForSalary.filter((student) => student.isSalaryEligible);
+  const calculatedMonthlySalary =
+    cloned.salaryConfig?.salaryType === "per_student"
+      ? cloned.studentsForSalary.reduce(
+          (sum, student) => sum + Number(student.calculatedSalaryAmount || 0),
+          0,
+        )
+      : Number(cloned.summary?.calculatedMonthlySalary || 0);
+
+  cloned.summary.eligibleStudents = eligibleStudents.length;
+  cloned.summary.calculatedMonthlySalary = calculatedMonthlySalary;
+
+  return cloned;
+};
+
 const Teachers = () => {
   const permissions = useModulePermissions("employees");
   const [openModal, setOpenModal] = useState(false);
@@ -106,6 +170,10 @@ const Teachers = () => {
     attendanceThreshold: 50,
   });
   const [selectedCompensationMonth, setSelectedCompensationMonth] = useState(null);
+  const [studentCompensationModalOpen, setStudentCompensationModalOpen] = useState(false);
+  const [selectedStudentCompensation, setSelectedStudentCompensation] = useState(null);
+  const [savingStudentCompensation, setSavingStudentCompensation] = useState(false);
+  const [studentCompensationForm] = Form.useForm();
 
   // Fetch teachers and courses on mount
   useEffect(() => {
@@ -150,23 +218,43 @@ const Teachers = () => {
         month: selectedMonth.month() + 1,
       });
       if (response.success) {
+        const overrideKey = getCompensationOverrideKey(teacherId, resolvedMonthValue);
+        const overrideMap = readStudentCompensationOverrides();
+        const mergedCompensation = applyStudentCompensationOverrides(
+          response.data,
+          overrideMap[overrideKey] || {},
+        );
         setSelectedCompensationMonth(resolvedMonthValue);
-        setTeacherCompensation(response.data);
+        setTeacherCompensation(mergedCompensation);
         setSalaryConfigDraft({
-          salaryPerStudent: response.data?.salaryConfig?.salaryPerStudent ?? null,
+          salaryPerStudent: mergedCompensation?.salaryConfig?.salaryPerStudent ?? null,
           attendanceThreshold:
-            response.data?.salaryConfig?.attendanceThreshold ?? 50,
+            mergedCompensation?.salaryConfig?.attendanceThreshold ?? 50,
         });
+        return mergedCompensation;
       }
+      return null;
     } catch (error) {
       setTeacherCompensation(null);
       message.error(
         error.message || "Failed to load course and student attendance details",
       );
+      return null;
     } finally {
       setLoadingTeacherCompensation(false);
     }
   };
+
+  const isCompensationResponseShape = (payload) =>
+    Boolean(
+      payload &&
+        payload.month &&
+        (payload.month.displayLabel || payload.month.label) &&
+        payload.salaryConfig &&
+        payload.summary &&
+        Array.isArray(payload.studentsForSalary) &&
+        Array.isArray(payload.courses),
+    );
 
   const handleSaveSalaryConfig = async () => {
     if (!selectedTeacher?._id) return;
@@ -212,6 +300,222 @@ const Teachers = () => {
       message.error(error.message || "Failed to update teacher salary rule");
     } finally {
       setSavingSalaryConfig(false);
+    }
+  };
+
+  const openStudentCompensationModal = (student) => {
+    setSelectedStudentCompensation(student);
+    studentCompensationForm.setFieldsValue({
+      amount:
+        student.manualAdjustedAmount ?? student.calculatedSalaryAmount ?? student.defaultCalculatedSalaryAmount ?? 0,
+      note: student.manualAdjustmentNote || "",
+    });
+    setStudentCompensationModalOpen(true);
+  };
+
+  const closeStudentCompensationModal = () => {
+    setStudentCompensationModalOpen(false);
+    setSelectedStudentCompensation(null);
+    studentCompensationForm.resetFields();
+  };
+
+  const saveStudentCompensationOverrideLocally = (studentId, amount, note = "") => {
+    const overrideKey = getCompensationOverrideKey(
+      selectedTeacher?._id,
+      selectedCompensationMonth,
+    );
+    const allOverrides = readStudentCompensationOverrides();
+    const monthOverrides = { ...(allOverrides[overrideKey] || {}) };
+
+    if (amount === null) {
+      delete monthOverrides[String(studentId)];
+    } else {
+      monthOverrides[String(studentId)] = {
+        amount: Number(amount || 0),
+        note: String(note || ""),
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    allOverrides[overrideKey] = monthOverrides;
+    writeStudentCompensationOverrides(allOverrides);
+
+    setTeacherCompensation((prev) =>
+      applyStudentCompensationOverrides(prev, monthOverrides),
+    );
+  };
+
+  const didStudentCompensationUpdatePersist = (compensationData, studentId, expectedAmount) => {
+    const student = (compensationData?.studentsForSalary || []).find(
+      (item) => String(item.studentId) === String(studentId),
+    );
+
+    if (!student) return false;
+
+    if (expectedAmount === null) {
+      return !student.hasManualAdjustment;
+    }
+
+    return (
+      Number(student.calculatedSalaryAmount || 0) === Number(expectedAmount) &&
+      student.hasManualAdjustment
+    );
+  };
+
+  const handleSaveStudentCompensation = async () => {
+    if (!selectedTeacher?._id || !selectedStudentCompensation || !selectedCompensationMonth) {
+      return;
+    }
+
+    setSavingStudentCompensation(true);
+    try {
+      const values = await studentCompensationForm.validateFields();
+      const selectedMonth = dayjs(`${selectedCompensationMonth}-01`);
+      const payload = {
+        year: selectedMonth.year(),
+        month: selectedMonth.month() + 1,
+        studentId: selectedStudentCompensation.studentId,
+        amount: Number(values.amount || 0),
+        note: values.note || "",
+      };
+      let response;
+      let usedLegacyFallback = false;
+      try {
+        response = await updateTeacherStudentCompensation(selectedTeacher._id, payload);
+      } catch (error) {
+        if (error?.message === "Route not found") {
+          usedLegacyFallback = true;
+          response = await updateTeacher(selectedTeacher._id, payload);
+        } else {
+          throw error;
+        }
+      }
+
+      if (response.success) {
+        if (isCompensationResponseShape(response.data)) {
+          const normalizedCompensation = applyStudentCompensationOverrides(
+            response.data,
+            {},
+          );
+          setTeacherCompensation(normalizedCompensation);
+          saveStudentCompensationOverrideLocally(
+            selectedStudentCompensation.studentId,
+            payload.amount,
+            payload.note,
+          );
+          message.success("Student salary amount updated successfully");
+          closeStudentCompensationModal();
+          return;
+        }
+
+        const refreshedCompensation = await fetchTeacherCompensation(
+          selectedTeacher._id,
+          selectedCompensationMonth,
+        );
+
+        if (
+          usedLegacyFallback &&
+          !didStudentCompensationUpdatePersist(
+            refreshedCompensation,
+            selectedStudentCompensation.studentId,
+            payload.amount,
+          )
+        ) {
+          saveStudentCompensationOverrideLocally(
+            selectedStudentCompensation.studentId,
+            payload.amount,
+            payload.note,
+          );
+          message.success("Student amount saved locally on this device");
+          closeStudentCompensationModal();
+          return;
+        }
+
+        message.success("Student salary amount updated successfully");
+        closeStudentCompensationModal();
+      }
+    } catch (error) {
+      message.error(error.message || "Failed to update student salary amount");
+    } finally {
+      setSavingStudentCompensation(false);
+    }
+  };
+
+  const handleResetStudentCompensation = async () => {
+    if (!selectedTeacher?._id || !selectedStudentCompensation || !selectedCompensationMonth) {
+      return;
+    }
+
+    setSavingStudentCompensation(true);
+    try {
+      const selectedMonth = dayjs(`${selectedCompensationMonth}-01`);
+      const payload = {
+        year: selectedMonth.year(),
+        month: selectedMonth.month() + 1,
+        studentId: selectedStudentCompensation.studentId,
+        amount: null,
+        note: "",
+      };
+      let response;
+      let usedLegacyFallback = false;
+      try {
+        response = await updateTeacherStudentCompensation(selectedTeacher._id, payload);
+      } catch (error) {
+        if (error?.message === "Route not found") {
+          usedLegacyFallback = true;
+          response = await updateTeacher(selectedTeacher._id, payload);
+        } else {
+          throw error;
+        }
+      }
+
+      if (response.success) {
+        if (isCompensationResponseShape(response.data)) {
+          const normalizedCompensation = applyStudentCompensationOverrides(
+            response.data,
+            {},
+          );
+          setTeacherCompensation(normalizedCompensation);
+          saveStudentCompensationOverrideLocally(
+            selectedStudentCompensation.studentId,
+            null,
+            "",
+          );
+          message.success("Student salary amount reset to default calculation");
+          closeStudentCompensationModal();
+          return;
+        }
+
+        const refreshedCompensation = await fetchTeacherCompensation(
+          selectedTeacher._id,
+          selectedCompensationMonth,
+        );
+
+        if (
+          usedLegacyFallback &&
+          !didStudentCompensationUpdatePersist(
+            refreshedCompensation,
+            selectedStudentCompensation.studentId,
+            null,
+          )
+        ) {
+          saveStudentCompensationOverrideLocally(
+            selectedStudentCompensation.studentId,
+            null,
+            "",
+          );
+          message.success("Student amount reset locally on this device");
+          closeStudentCompensationModal();
+          return;
+        }
+
+        message.success("Student salary amount reset to default calculation");
+        closeStudentCompensationModal();
+      }
+    } catch (error) {
+      message.error(error.message || "Failed to reset student salary amount");
+    } finally {
+      setSavingStudentCompensation(false);
     }
   };
 
@@ -695,7 +999,7 @@ const Teachers = () => {
       );
     }
 
-    if (!teacherCompensation) {
+    if (!isCompensationResponseShape(teacherCompensation)) {
       const { hasCompletedMonth } = getSalaryMonthBounds(selectedTeacher);
       return (
         <Empty
@@ -720,6 +1024,18 @@ const Teachers = () => {
       (student) => student.monthlyAttendancePercentage >= effectiveThreshold,
     ).length;
     const projectedMonthlySalary = projectedEligibleStudents * effectiveRate;
+    const hasManualAdjustedStudents = studentsForSalary.some(
+      (student) => student.hasManualAdjustment,
+    );
+    const displayedEligibleStudents = hasManualAdjustedStudents
+      ? studentsForSalary.filter((student) => Number(student.calculatedSalaryAmount || 0) > 0).length
+      : projectedEligibleStudents;
+    const displayedProjectedMonthlySalary = hasManualAdjustedStudents
+      ? studentsForSalary.reduce(
+          (sum, student) => sum + Number(student.calculatedSalaryAmount || 0),
+          0,
+        )
+      : projectedMonthlySalary;
 
     return (
       <div className="space-y-4">
@@ -876,13 +1192,13 @@ const Teachers = () => {
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <div className="text-xs text-slate-500">Eligible Students</div>
               <div className="mt-1 text-lg font-bold text-[#01134C]">
-                {projectedEligibleStudents}
+                {displayedEligibleStudents}
               </div>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <div className="text-xs text-slate-500">Projected Monthly Salary</div>
               <div className="mt-1 text-lg font-bold text-[#01134C]">
-                {formatCurrency(projectedMonthlySalary)}
+                {formatCurrency(displayedProjectedMonthlySalary)}
               </div>
             </div>
           </div>
@@ -916,7 +1232,7 @@ const Teachers = () => {
                     <div className="flex items-center gap-2">
                       <Tag
                         color={
-                          student.monthlyAttendancePercentage >= effectiveThreshold
+                          student.isSalaryEligible
                             ? "green"
                             : "red"
                         }
@@ -925,17 +1241,36 @@ const Teachers = () => {
                       </Tag>
                       <Tag
                         color={
-                          student.monthlyAttendancePercentage >= effectiveThreshold
+                          student.isSalaryEligible
                             ? "blue"
                             : "default"
                         }
                       >
-                        {student.monthlyAttendancePercentage >= effectiveThreshold
-                          ? formatCurrency(effectiveRate)
+                        {Number(student.calculatedSalaryAmount || 0) > 0
+                          ? formatCurrency(student.calculatedSalaryAmount)
                           : "Not counted"}
                       </Tag>
+                      {student.hasManualAdjustment ? (
+                        <Tag color="purple">Manual</Tag>
+                      ) : null}
+                      <Button
+                        size="small"
+                        icon={<FaEdit />}
+                        onClick={() => openStudentCompensationModal(student)}
+                        disabled={!permissions.update}
+                      >
+                        Edit
+                      </Button>
                     </div>
                   </div>
+                  {student.hasManualAdjustment ? (
+                    <div className="mt-2 text-xs text-slate-500">
+                      Manual override active
+                      {student.manualAdjustmentNote
+                        ? ` - ${student.manualAdjustmentNote}`
+                        : ""}
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -973,7 +1308,13 @@ const Teachers = () => {
                             {student.batchName} ({student.batchCode})
                           </div>
                         </div>
-                        <Tag color={student.attendancePercentage >= 50 ? "green" : "orange"}>
+                        <Tag
+                          color={
+                            student.attendancePercentage >= effectiveThreshold
+                              ? "green"
+                              : "orange"
+                          }
+                        >
                           {student.attendancePercentage}% Attendance
                         </Tag>
                       </div>
@@ -1072,6 +1413,86 @@ const Teachers = () => {
             initialTeacher={editingTeacher}
           />
         </div>
+      </Modal>
+
+      <Modal
+        title={
+          selectedStudentCompensation
+            ? `Edit Student Salary - ${selectedStudentCompensation.studentName}`
+            : "Edit Student Salary"
+        }
+        open={studentCompensationModalOpen}
+        onCancel={() => {
+          setStudentCompensationModalOpen(false);
+          setSelectedStudentCompensation(null);
+          studentCompensationForm.resetFields();
+        }}
+        onOk={handleSaveStudentCompensation}
+        okText="Save Amount"
+        confirmLoading={savingStudentCompensation}
+        footer={[
+          <Button
+            key="reset"
+            onClick={handleResetStudentCompensation}
+            disabled={!selectedStudentCompensation?.hasManualAdjustment || savingStudentCompensation}
+          >
+            Reset Auto
+          </Button>,
+          <Button
+            key="cancel"
+            onClick={() => {
+              setStudentCompensationModalOpen(false);
+              setSelectedStudentCompensation(null);
+              studentCompensationForm.resetFields();
+            }}
+          >
+            Cancel
+          </Button>,
+          <Button
+            key="save"
+            type="primary"
+            loading={savingStudentCompensation}
+            onClick={handleSaveStudentCompensation}
+          >
+            Save Amount
+          </Button>,
+        ]}
+      >
+        <Form form={studentCompensationForm} layout="vertical">
+          <Form.Item label="Student">
+            <Input
+              value={
+                selectedStudentCompensation
+                  ? `${selectedStudentCompensation.studentName} (${selectedStudentCompensation.registrationNo})`
+                  : ""
+              }
+              disabled
+            />
+          </Form.Item>
+          <Form.Item label="Default Calculated Amount">
+            <Input
+              value={
+                selectedStudentCompensation
+                  ? formatCurrency(selectedStudentCompensation.defaultCalculatedSalaryAmount || 0)
+                  : ""
+              }
+              disabled
+            />
+          </Form.Item>
+          <Form.Item
+            label="Edit Amount"
+            name="amount"
+            rules={[{ required: true, message: "Please enter student salary amount" }]}
+          >
+            <InputNumber min={0} className="!w-full" />
+          </Form.Item>
+          <Form.Item label="Note" name="note">
+            <Input.TextArea
+              rows={3}
+              placeholder="Optional note for this student's salary adjustment"
+            />
+          </Form.Item>
+        </Form>
       </Modal>
 
       <Modal

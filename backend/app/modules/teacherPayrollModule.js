@@ -101,6 +101,29 @@ const TeacherPayrollSchema = new mongoose.Schema(
         },
       },
     ],
+    studentAdjustments: [
+      {
+        studentId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Student",
+          required: true,
+        },
+        amount: {
+          type: Number,
+          required: true,
+          min: 0,
+        },
+        note: {
+          type: String,
+          trim: true,
+          default: "",
+        },
+        updatedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
   },
   { timestamps: true },
 );

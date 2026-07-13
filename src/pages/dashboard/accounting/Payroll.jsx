@@ -9,9 +9,7 @@ import {
   DatePicker,
   Input,
   InputNumber,
-  Select,
   message,
-  Space,
   Statistic,
 } from "antd";
 import dayjs from "dayjs";
@@ -20,7 +18,92 @@ import {
   getPaymentMethods,
   payTeacherPayroll,
 } from "../../../services/accountingService";
-import { canViewAccountingBalances } from "../../../utils/accountingAccess";
+
+const getDefaultPayrollMonth = () => dayjs().subtract(1, "month").startOf("month");
+const formatCurrency = (value) => `Rs ${Number(value || 0).toLocaleString()}`;
+const STUDENT_COMPENSATION_OVERRIDE_STORAGE_KEY = "teacher_student_comp_overrides_v1";
+
+const getCompensationOverrideKey = (teacherId, monthValue) =>
+  `${teacherId || "unknown"}:${monthValue || "unknown"}`;
+
+const readStudentCompensationOverrides = () => {
+  try {
+    const raw = localStorage.getItem(STUDENT_COMPENSATION_OVERRIDE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (error) {
+    return {};
+  }
+};
+
+const applyStudentCompensationOverridesToPayroll = (items = [], monthValue) => {
+  const monthKey = monthValue.format("YYYY-MM");
+  const allOverrides = readStudentCompensationOverrides();
+
+  return items.map((item) => {
+    const overrideKey = getCompensationOverrideKey(item.teacher?._id, monthKey);
+    const teacherOverrides = allOverrides[overrideKey] || {};
+    const hasOverrides = Object.keys(teacherOverrides).length > 0;
+
+    if (
+      !hasOverrides ||
+      item.salaryConfig?.salaryType !== "per_student" ||
+      !Array.isArray(item.studentsForSalary)
+    ) {
+      return item;
+    }
+
+    const studentsForSalary = item.studentsForSalary.map((student) => {
+      const override = teacherOverrides[String(student.studentId)];
+      if (!override) return student;
+
+      const amount = Number(override.amount || 0);
+      const isSalaryEligible = amount > 0;
+
+      return {
+        ...student,
+        hasManualAdjustment: true,
+        manualAdjustedAmount: amount,
+        manualAdjustmentNote: override.note || "",
+        calculatedSalaryAmount: amount,
+        isSalaryEligible,
+      };
+    });
+
+    const eligibleStudents = studentsForSalary.filter((student) => student.isSalaryEligible).length;
+    const dueAmount = studentsForSalary.reduce(
+      (sum, student) => sum + Number(student.calculatedSalaryAmount || 0),
+      0,
+    );
+    const paidAmount = Number(item.payroll?.paidAmount || 0);
+    const remainingAmount = Math.max(0, dueAmount - paidAmount);
+    const status =
+      dueAmount <= 0
+        ? "paid"
+        : paidAmount >= dueAmount
+        ? "paid"
+        : paidAmount > 0
+        ? "partial"
+        : "unpaid";
+
+    return {
+      ...item,
+      studentsForSalary,
+      summary: {
+        ...(item.summary || {}),
+        eligibleStudents,
+        calculatedMonthlySalary: dueAmount,
+      },
+      payroll: {
+        ...(item.payroll || {}),
+        dueAmount,
+        paidAmount,
+        remainingAmount,
+        status,
+      },
+    };
+  });
+};
 
 const Payroll = () => {
   const [payrollData, setPayrollData] = useState([]);
@@ -28,14 +111,25 @@ const Payroll = () => {
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [paymentMethods, setPaymentMethods] = useState([]);
+  const [selectedMonth, setSelectedMonth] = useState(getDefaultPayrollMonth());
   const [form] = Form.useForm();
 
-  const fetchPayroll = async () => {
+  const getPreferredPaymentMethodId = (methods = paymentMethods) =>
+    methods.find((m) => m.isDefault)?._id || methods[0]?._id || null;
+
+  const fetchPayroll = async (monthValue = selectedMonth) => {
     setLoading(true);
     try {
-      const res = await getTeacherPayroll({ page: 1, limit: 50 });
+      const res = await getTeacherPayroll({
+        page: 1,
+        limit: 50,
+        year: monthValue.year(),
+        month: monthValue.month() + 1,
+      });
       if (res?.success) {
-        setPayrollData(res.data || []);
+        setPayrollData(
+          applyStudentCompensationOverridesToPayroll(res.data || [], monthValue),
+        );
       }
     } catch (error) {
       message.error(error.message || "Failed to load payroll data");
@@ -47,7 +141,9 @@ const Payroll = () => {
   useEffect(() => {
     fetchPayroll();
     getPaymentMethods().then((res) => {
-      if (res?.success) setPaymentMethods(res.data || []);
+      if (res?.success) {
+        setPaymentMethods(res.data || []);
+      }
     });
   }, []);
 
@@ -56,7 +152,7 @@ const Payroll = () => {
     form.setFieldsValue({
       paymentDate: dayjs(),
       amount: record.payroll.remainingAmount || 0,
-      paymentMethodId: paymentMethods.find((m) => m.isDefault)?._id,
+      paymentMethodId: getPreferredPaymentMethodId(),
       details: "Salary payout",
       year: record.month.year,
       month: record.month.month,
@@ -67,15 +163,31 @@ const Payroll = () => {
   const handlePayment = async () => {
     try {
       const values = await form.validateFields();
+      const paymentAmount = Number(values.amount || 0);
+      if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+        message.error("Please enter a valid salary payment amount.");
+        return;
+      }
+
+      const selectedPaymentMethodId =
+        values.paymentMethodId || getPreferredPaymentMethodId();
+      if (!selectedPaymentMethodId) {
+        message.error(
+          "No academy account is available for salary payment. Please create Cash or Bank account first.",
+        );
+        return;
+      }
+
       const payload = {
         ...values,
+        paymentMethodId: selectedPaymentMethodId,
         paymentDate: values.paymentDate.toISOString(),
       };
       const res = await payTeacherPayroll(selectedRecord.teacher._id, payload);
       if (res?.success) {
         message.success(res.message || "Payment successful");
         setPaymentModalVisible(false);
-        fetchPayroll();
+        fetchPayroll(selectedMonth);
       }
     } catch (error) {
       message.error(error.message || "Failed to process salary payment");
@@ -118,19 +230,19 @@ const Payroll = () => {
       title: "Due",
       dataIndex: ["payroll", "dueAmount"],
       key: "dueAmount",
-      render: (value) => `Rs ${Number(value || 0).toLocaleString()}`,
+      render: (value) => formatCurrency(value),
     },
     {
       title: "Paid",
       dataIndex: ["payroll", "paidAmount"],
       key: "paidAmount",
-      render: (value) => `Rs ${Number(value || 0).toLocaleString()}`,
+      render: (value) => formatCurrency(value),
     },
     {
       title: "Remaining",
       dataIndex: ["payroll", "remainingAmount"],
       key: "remainingAmount",
-      render: (value) => `Rs ${Number(value || 0).toLocaleString()}`,
+      render: (value) => formatCurrency(value),
     },
     {
       title: "Status",
@@ -184,7 +296,22 @@ const Payroll = () => {
         </Card>
       </div>
 
-      <Card title="Teacher Payroll">
+      <Card
+        title={`Teacher Payroll (${selectedMonth.format("MMMM YYYY")})`}
+        extra={
+          <DatePicker
+            picker="month"
+            allowClear={false}
+            value={selectedMonth}
+            format="MMMM YYYY"
+            onChange={(value) => {
+              const nextMonth = value || getDefaultPayrollMonth();
+              setSelectedMonth(nextMonth);
+              fetchPayroll(nextMonth);
+            }}
+          />
+        }
+      >
         <Table
           columns={columns}
           dataSource={payrollData}
@@ -218,20 +345,13 @@ const Payroll = () => {
             <InputNumber className="w-full" min={0} />
           </Form.Item>
           <Form.Item
-            label="Payment Method"
-            name="paymentMethodId"
-            rules={[{ required: true, message: "Select payment method" }]}
+            label="Details"
+            name="details"
           >
-            <Select>
-              {paymentMethods.map((method) => (
-                <Select.Option key={method._id} value={method._id}>
-                  {method.name} ({method.type})
-                </Select.Option>
-              ))}
-            </Select>
-          </Form.Item>
-          <Form.Item label="Details" name="details">
             <Input.TextArea rows={3} placeholder="Payment details" />
+          </Form.Item>
+          <Form.Item name="paymentMethodId" hidden>
+            <Input />
           </Form.Item>
           <Form.Item name="year" hidden>
             <InputNumber />

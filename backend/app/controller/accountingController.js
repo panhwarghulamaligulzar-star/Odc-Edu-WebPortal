@@ -66,6 +66,16 @@ const getMonthRange = (monthValue) => {
   };
 };
 
+const getDefaultPayrollPeriod = () => {
+  const now = new Date();
+  const lastCompletedMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+  return {
+    year: lastCompletedMonth.getFullYear(),
+    month: lastCompletedMonth.getMonth() + 1,
+  };
+};
+
 // ============================================================
 // ACCOUNTING TYPES
 // ============================================================
@@ -385,12 +395,66 @@ const adjustBalance = async (paymentMethodId, amount, direction) => {
   });
 };
 
+const selectTeacherPayrollFundingMethod = async (requestedPaymentMethodId, amount) => {
+  const normalizedAmount = Number(amount || 0);
+  const activeMethods = await PaymentMethod.find({ isActive: true }).sort({
+    isDefault: -1,
+    currentBalance: -1,
+    name: 1,
+  });
+
+  const totalAcademyBalance = activeMethods.reduce(
+    (sum, method) => sum + Number(method.currentBalance || 0),
+    0,
+  );
+
+  if (totalAcademyBalance < normalizedAmount) {
+    return {
+      success: false,
+      statusCode: 400,
+      message: `Insufficient academy balance. Total available balance is PKR ${totalAcademyBalance.toLocaleString("en-PK")}, but PKR ${normalizedAmount.toLocaleString("en-PK")} is required for this salary payment.`,
+    };
+  }
+
+  let selectedMethod = null;
+  if (requestedPaymentMethodId) {
+    selectedMethod =
+      activeMethods.find(
+        (method) =>
+          String(method._id) === String(requestedPaymentMethodId) &&
+          Number(method.currentBalance || 0) >= normalizedAmount,
+      ) || null;
+  }
+
+  if (!selectedMethod) {
+    selectedMethod =
+      activeMethods.find((method) => Number(method.currentBalance || 0) >= normalizedAmount) ||
+      null;
+  }
+
+  if (!selectedMethod) {
+    return {
+      success: false,
+      statusCode: 400,
+      message:
+        "Academy balance exists, but no single Cash or Bank account has enough amount for this salary payment. Please move balance between accounts first.",
+    };
+  }
+
+  return {
+    success: true,
+    method: selectedMethod,
+    totalAcademyBalance,
+  };
+};
+
 // GET /accounting/monthly-summary — income & expense grouped by month (last N months)
 export const getTeacherPayrollSummary = async (req, res) => {
   try {
     const { year, month, status, search = "", page = 1, limit = 20 } = req.query;
-    const selectedYear = Number(year) || new Date().getFullYear();
-    const selectedMonth = Number(month) || new Date().getMonth() + 1;
+    const defaultPayrollPeriod = getDefaultPayrollPeriod();
+    const selectedYear = Number(year) || defaultPayrollPeriod.year;
+    const selectedMonth = Number(month) || defaultPayrollPeriod.month;
 
     const teacherFilter = {};
     if (search.trim()) {
@@ -421,25 +485,27 @@ export const getTeacherPayrollSummary = async (req, res) => {
 
     const payrollItems = await Promise.all(
       teachers.map(async (teacher) => {
+        const existingPayroll = payrollMap.get(String(teacher._id));
         const compensation = await calculateTeacherCompensationData(
           teacher,
           selectedYear,
           selectedMonth,
+          {
+            studentAdjustments: existingPayroll?.studentAdjustments || [],
+          },
         );
 
-        const existingPayroll = payrollMap.get(String(teacher._id));
-        const dueAmount = existingPayroll
-          ? existingPayroll.dueAmount
-          : compensation.summary.calculatedMonthlySalary || 0;
-        const paidAmount = existingPayroll ? existingPayroll.paidAmount : 0;
-        const remainingAmount = existingPayroll
-          ? existingPayroll.remainingAmount
-          : Math.max(0, dueAmount - paidAmount);
-        const statusValue = existingPayroll
-          ? existingPayroll.status
-          : dueAmount <= 0
-          ? "paid"
-          : "unpaid";
+        const dueAmount = Number(compensation.summary.calculatedMonthlySalary || 0);
+        const paidAmount = Number(existingPayroll?.paidAmount || 0);
+        const remainingAmount = Math.max(0, dueAmount - paidAmount);
+        const statusValue =
+          dueAmount <= 0
+            ? "paid"
+            : paidAmount >= dueAmount
+            ? "paid"
+            : paidAmount > 0
+            ? "partial"
+            : "unpaid";
 
         return {
           _id: existingPayroll ? existingPayroll._id : null,
@@ -463,7 +529,7 @@ export const getTeacherPayrollSummary = async (req, res) => {
             paidAmount,
             remainingAmount,
             status: statusValue,
-            paymentEntries: existingPayroll ? existingPayroll.paymentEntries : [],
+            paymentEntries: existingPayroll?.paymentEntries || [],
           },
         };
       }),
@@ -505,21 +571,32 @@ export const payTeacherPayroll = async (req, res) => {
       month,
     } = req.body;
 
-    if (!paymentMethodId || amount === undefined || !paymentDate) {
+    if (amount === undefined || !paymentDate) {
       return res.status(400).json({
         success: false,
-        message:
-          "paymentMethodId, amount, paymentDate, year and month are required",
+        message: "amount, paymentDate, year and month are required",
       });
     }
 
-    const method = await PaymentMethod.findById(paymentMethodId);
-    if (!method) {
-      return res.status(404).json({
+    const normalizedPaymentAmount = Number(amount);
+    if (!Number.isFinite(normalizedPaymentAmount) || normalizedPaymentAmount <= 0) {
+      return res.status(400).json({
         success: false,
-        message: "Payment method not found",
+        message: "Payment amount must be greater than zero",
       });
     }
+
+    const fundingSelection = await selectTeacherPayrollFundingMethod(
+      paymentMethodId,
+      normalizedPaymentAmount,
+    );
+    if (!fundingSelection.success) {
+      return res.status(fundingSelection.statusCode || 400).json({
+        success: false,
+        message: fundingSelection.message,
+      });
+    }
+    const method = fundingSelection.method;
 
     const teacher = await TeacherSchema.findById(id).populate(
       "courseId",
@@ -534,12 +611,23 @@ export const payTeacherPayroll = async (req, res) => {
 
     const selectedYear = Number(year) || new Date().getFullYear();
     const selectedMonth = Number(month) || new Date().getMonth() + 1;
-    const compensation = await calculateTeacherCompensationData(
-      teacher,
-      selectedYear,
-      selectedMonth,
-    );
-    const dueAmount = compensation.summary.calculatedMonthlySalary || 0;
+    const payrollRecord = await TeacherPayroll.findOne({
+      teacher: teacher._id,
+      year: selectedYear,
+      month: selectedMonth,
+    });
+    const compensation = await calculateTeacherCompensationData(teacher, selectedYear, selectedMonth, {
+      studentAdjustments: payrollRecord?.studentAdjustments || [],
+    });
+    const dueAmount = Number(compensation.summary.calculatedMonthlySalary || 0);
+    const availableBalance = Number(method.currentBalance || 0);
+
+    if (availableBalance < normalizedPaymentAmount) {
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient balance in ${method.name}. Available balance is PKR ${availableBalance.toLocaleString("en-PK")}, but PKR ${normalizedPaymentAmount.toLocaleString("en-PK")} is required to pay ${teacher.fullName}.`,
+      });
+    }
 
     const txnType = await AccountingType.findOne({ name: "Expense" });
     const salaryHead = await HeadOfAccount.findOne({
@@ -561,20 +649,14 @@ export const payTeacherPayroll = async (req, res) => {
       head: salaryHead._id,
       paymentMethod: method._id,
       paymentDate: new Date(paymentDate),
-      amount: Number(amount),
+      amount: normalizedPaymentAmount,
       billReference: details?.trim() || `Salary payout for ${compensation.month.displayLabel}`,
       details: details?.trim() || "",
       createdBy: req.user?._id,
     });
 
     await txn.save();
-    await adjustBalance(method._id, Number(amount), -1);
-
-    const payrollRecord = await TeacherPayroll.findOne({
-      teacher: teacher._id,
-      year: selectedYear,
-      month: selectedMonth,
-    });
+    await adjustBalance(method._id, normalizedPaymentAmount, -1);
 
     let updatedPayroll;
     if (!payrollRecord) {
@@ -588,13 +670,13 @@ export const payTeacherPayroll = async (req, res) => {
         totalActiveStudents: compensation.summary.totalActiveStudents,
         eligibleStudents: compensation.summary.eligibleStudents,
         dueAmount,
-        paidAmount: Number(amount),
-        remainingAmount: Math.max(0, dueAmount - Number(amount)),
-        overpaidAmount: Math.max(0, Number(amount) - dueAmount),
+        paidAmount: normalizedPaymentAmount,
+        remainingAmount: Math.max(0, dueAmount - normalizedPaymentAmount),
+        overpaidAmount: Math.max(0, normalizedPaymentAmount - dueAmount),
         status:
-          Number(amount) >= dueAmount
+          normalizedPaymentAmount >= dueAmount
             ? "paid"
-            : Number(amount) > 0
+            : normalizedPaymentAmount > 0
             ? "partial"
             : "unpaid",
         paymentEntries: [
@@ -602,18 +684,31 @@ export const payTeacherPayroll = async (req, res) => {
             paymentDate: new Date(paymentDate),
             paymentMethod: method._id,
             paymentMethodName: method.name,
-            amount: Number(amount),
+            amount: normalizedPaymentAmount,
             transactionId: txn._id,
             details: details?.trim() || "",
           },
         ],
       });
     } else {
-      const paidAmount = Number(payrollRecord.paidAmount || 0) + Number(amount);
+      const paidAmount = Number(payrollRecord.paidAmount || 0) + normalizedPaymentAmount;
       const remainingAmount = Math.max(0, dueAmount - paidAmount);
       const overpaidAmount = Math.max(0, paidAmount - dueAmount);
-      const status = paidAmount >= dueAmount ? "paid" : "partial";
+      const status =
+        dueAmount <= 0
+          ? "paid"
+          : paidAmount >= dueAmount
+          ? "paid"
+          : paidAmount > 0
+          ? "partial"
+          : "unpaid";
 
+      payrollRecord.salaryType = teacher.salaryType;
+      payrollRecord.salaryPerStudent = teacher.salaryPerStudent;
+      payrollRecord.attendanceThreshold = teacher.attendanceThreshold;
+      payrollRecord.totalActiveStudents = compensation.summary.totalActiveStudents;
+      payrollRecord.eligibleStudents = compensation.summary.eligibleStudents;
+      payrollRecord.dueAmount = dueAmount;
       payrollRecord.paidAmount = paidAmount;
       payrollRecord.remainingAmount = remainingAmount;
       payrollRecord.overpaidAmount = overpaidAmount;
@@ -622,7 +717,7 @@ export const payTeacherPayroll = async (req, res) => {
         paymentDate: new Date(paymentDate),
         paymentMethod: method._id,
         paymentMethodName: method.name,
-        amount: Number(amount),
+        amount: normalizedPaymentAmount,
         transactionId: txn._id,
         details: details?.trim() || "",
       });
@@ -634,7 +729,7 @@ export const payTeacherPayroll = async (req, res) => {
       success: true,
       data: updatedPayroll,
       transaction: txn,
-      message: "Teacher salary payment recorded successfully",
+      message: `Teacher salary paid successfully from ${method.name}.`,
     });
   } catch (error) {
     console.error("Error processing teacher payroll payment:", error);
