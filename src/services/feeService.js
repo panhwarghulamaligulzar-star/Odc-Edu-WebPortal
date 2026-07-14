@@ -263,6 +263,16 @@ export const updateTeacherStudentCompensation = async (teacherId, payload) => {
   }
 };
 
+export const updateTeacherMonthlySalaryConfig = async (teacherId, payload) => {
+  try {
+    const response = await api.put(`/teacher/${teacherId}`, payload);
+    return response.data;
+  } catch (error) {
+    console.error("Update Teacher Monthly Salary Config Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
 export const updateTeacher = async (teacherId, teacherData) => {
   try {
     // If teacherData contains profile picture, send as FormData

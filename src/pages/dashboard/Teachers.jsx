@@ -49,6 +49,7 @@ import {
   bulkImportTeachers,
   getTeacherCompensationDetails,
   updateTeacherStudentCompensation,
+  updateTeacherMonthlySalaryConfig,
 } from "../../services/feeService";
 import dayjs from "dayjs";
 import * as XLSX from "xlsx";
@@ -78,69 +79,6 @@ const getSalaryMonthBounds = (teacher) => {
     firstMonth: appointmentMonth,
     lastMonth: currentMonthStart.subtract(1, "month"),
   };
-};
-
-const STUDENT_COMPENSATION_OVERRIDE_STORAGE_KEY = "teacher_student_comp_overrides_v1";
-
-const getCompensationOverrideKey = (teacherId, monthValue) =>
-  `${teacherId || "unknown"}:${monthValue || "unknown"}`;
-
-const readStudentCompensationOverrides = () => {
-  try {
-    const raw = localStorage.getItem(STUDENT_COMPENSATION_OVERRIDE_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch (error) {
-    return {};
-  }
-};
-
-const writeStudentCompensationOverrides = (value) => {
-  localStorage.setItem(
-    STUDENT_COMPENSATION_OVERRIDE_STORAGE_KEY,
-    JSON.stringify(value || {}),
-  );
-};
-
-const applyStudentCompensationOverrides = (compensationData, overrides = {}) => {
-  if (!compensationData || !Array.isArray(compensationData.studentsForSalary)) {
-    return compensationData;
-  }
-
-  const cloned = {
-    ...compensationData,
-    summary: { ...(compensationData.summary || {}) },
-    studentsForSalary: compensationData.studentsForSalary.map((student) => {
-      const override = overrides[String(student.studentId)];
-      if (!override) return student;
-
-      const amount = Number(override.amount || 0);
-      const isSalaryEligible = amount > 0;
-
-      return {
-        ...student,
-        hasManualAdjustment: true,
-        manualAdjustedAmount: amount,
-        manualAdjustmentNote: override.note || "",
-        calculatedSalaryAmount: amount,
-        isSalaryEligible,
-      };
-    }),
-  };
-
-  const eligibleStudents = cloned.studentsForSalary.filter((student) => student.isSalaryEligible);
-  const calculatedMonthlySalary =
-    cloned.salaryConfig?.salaryType === "per_student"
-      ? cloned.studentsForSalary.reduce(
-          (sum, student) => sum + Number(student.calculatedSalaryAmount || 0),
-          0,
-        )
-      : Number(cloned.summary?.calculatedMonthlySalary || 0);
-
-  cloned.summary.eligibleStudents = eligibleStudents.length;
-  cloned.summary.calculatedMonthlySalary = calculatedMonthlySalary;
-
-  return cloned;
 };
 
 const Teachers = () => {
@@ -181,6 +119,19 @@ const Teachers = () => {
     fetchCourses();
   }, []);
 
+  useEffect(() => {
+    if (!showIdCard || !selectedTeacher?._id || !selectedCompensationMonth) {
+      return;
+    }
+
+    setTeacherCompensation(null);
+    setSalaryConfigDraft({
+      salaryPerStudent: null,
+      attendanceThreshold: 50,
+    });
+    fetchTeacherCompensation(selectedTeacher._id, selectedCompensationMonth);
+  }, [showIdCard, selectedTeacher?._id, selectedCompensationMonth]);
+
   const fetchTeachers = async () => {
     setFetchingTeachers(true);
     try {
@@ -218,20 +169,14 @@ const Teachers = () => {
         month: selectedMonth.month() + 1,
       });
       if (response.success) {
-        const overrideKey = getCompensationOverrideKey(teacherId, resolvedMonthValue);
-        const overrideMap = readStudentCompensationOverrides();
-        const mergedCompensation = applyStudentCompensationOverrides(
-          response.data,
-          overrideMap[overrideKey] || {},
-        );
         setSelectedCompensationMonth(resolvedMonthValue);
-        setTeacherCompensation(mergedCompensation);
+        setTeacherCompensation(response.data);
         setSalaryConfigDraft({
-          salaryPerStudent: mergedCompensation?.salaryConfig?.salaryPerStudent ?? null,
+          salaryPerStudent: response.data?.salaryConfig?.salaryPerStudent ?? null,
           attendanceThreshold:
-            mergedCompensation?.salaryConfig?.attendanceThreshold ?? 50,
+            response.data?.salaryConfig?.attendanceThreshold ?? 50,
         });
-        return mergedCompensation;
+        return response.data;
       }
       return null;
     } catch (error) {
@@ -275,15 +220,23 @@ const Teachers = () => {
       salaryConfigDraft.attendanceThreshold === undefined
         ? 50
         : Number(salaryConfigDraft.attendanceThreshold);
+    const resolvedMonthValue =
+      selectedCompensationMonth || dayjs().subtract(1, "month").format("YYYY-MM");
+    const selectedMonth = dayjs(`${resolvedMonthValue}-01`);
 
     setSavingSalaryConfig(true);
     try {
       const payload = {
+        year: selectedMonth.year(),
+        month: selectedMonth.month() + 1,
         salaryType: "per_student",
         salaryPerStudent: salaryConfigDraft.salaryPerStudent,
         attendanceThreshold: normalizedAttendanceThreshold,
       };
-      const response = await updateTeacher(selectedTeacher._id, payload);
+      const response = await updateTeacherMonthlySalaryConfig(
+        selectedTeacher._id,
+        payload,
+      );
       if (response.success) {
         message.success("Teacher salary rule updated successfully!");
         await fetchTeachers();
@@ -294,7 +247,7 @@ const Teachers = () => {
           attendanceThreshold: normalizedAttendanceThreshold,
         };
         setSelectedTeacher(updatedTeacher);
-        await fetchTeacherCompensation(selectedTeacher._id);
+        await fetchTeacherCompensation(selectedTeacher._id, resolvedMonthValue);
       }
     } catch (error) {
       message.error(error.message || "Failed to update teacher salary rule");
@@ -317,32 +270,6 @@ const Teachers = () => {
     setStudentCompensationModalOpen(false);
     setSelectedStudentCompensation(null);
     studentCompensationForm.resetFields();
-  };
-
-  const saveStudentCompensationOverrideLocally = (studentId, amount, note = "") => {
-    const overrideKey = getCompensationOverrideKey(
-      selectedTeacher?._id,
-      selectedCompensationMonth,
-    );
-    const allOverrides = readStudentCompensationOverrides();
-    const monthOverrides = { ...(allOverrides[overrideKey] || {}) };
-
-    if (amount === null) {
-      delete monthOverrides[String(studentId)];
-    } else {
-      monthOverrides[String(studentId)] = {
-        amount: Number(amount || 0),
-        note: String(note || ""),
-        updatedAt: new Date().toISOString(),
-      };
-    }
-
-    allOverrides[overrideKey] = monthOverrides;
-    writeStudentCompensationOverrides(allOverrides);
-
-    setTeacherCompensation((prev) =>
-      applyStudentCompensationOverrides(prev, monthOverrides),
-    );
   };
 
   const didStudentCompensationUpdatePersist = (compensationData, studentId, expectedAmount) => {
@@ -393,16 +320,7 @@ const Teachers = () => {
 
       if (response.success) {
         if (isCompensationResponseShape(response.data)) {
-          const normalizedCompensation = applyStudentCompensationOverrides(
-            response.data,
-            {},
-          );
-          setTeacherCompensation(normalizedCompensation);
-          saveStudentCompensationOverrideLocally(
-            selectedStudentCompensation.studentId,
-            payload.amount,
-            payload.note,
-          );
+          setTeacherCompensation(response.data);
           message.success("Student salary amount updated successfully");
           closeStudentCompensationModal();
           return;
@@ -421,14 +339,7 @@ const Teachers = () => {
             payload.amount,
           )
         ) {
-          saveStudentCompensationOverrideLocally(
-            selectedStudentCompensation.studentId,
-            payload.amount,
-            payload.note,
-          );
-          message.success("Student amount saved locally on this device");
-          closeStudentCompensationModal();
-          return;
+          throw new Error("Student salary update route is unavailable on the server");
         }
 
         message.success("Student salary amount updated successfully");
@@ -471,16 +382,7 @@ const Teachers = () => {
 
       if (response.success) {
         if (isCompensationResponseShape(response.data)) {
-          const normalizedCompensation = applyStudentCompensationOverrides(
-            response.data,
-            {},
-          );
-          setTeacherCompensation(normalizedCompensation);
-          saveStudentCompensationOverrideLocally(
-            selectedStudentCompensation.studentId,
-            null,
-            "",
-          );
+          setTeacherCompensation(response.data);
           message.success("Student salary amount reset to default calculation");
           closeStudentCompensationModal();
           return;
@@ -499,14 +401,7 @@ const Teachers = () => {
             null,
           )
         ) {
-          saveStudentCompensationOverrideLocally(
-            selectedStudentCompensation.studentId,
-            null,
-            "",
-          );
-          message.success("Student amount reset locally on this device");
-          closeStudentCompensationModal();
-          return;
+          throw new Error("Student salary reset route is unavailable on the server");
         }
 
         message.success("Student salary amount reset to default calculation");
@@ -769,9 +664,6 @@ const Teachers = () => {
     const defaultMonth = hasCompletedMonth ? lastMonth.format("YYYY-MM") : null;
     setSelectedCompensationMonth(defaultMonth);
     setShowIdCard(true);
-    if (defaultMonth) {
-      fetchTeacherCompensation(teacher._id, defaultMonth);
-    }
   };
 
   // Get teacher initials for avatar fallback
@@ -1020,10 +912,16 @@ const Teachers = () => {
       salaryConfigDraft.salaryPerStudent ?? salaryConfig.salaryPerStudent ?? 0;
     const effectiveThreshold =
       salaryConfigDraft.attendanceThreshold ?? salaryConfig.attendanceThreshold ?? 50;
-    const projectedEligibleStudents = studentsForSalary.filter(
-      (student) => student.monthlyAttendancePercentage >= effectiveThreshold,
-    ).length;
-    const projectedMonthlySalary = projectedEligibleStudents * effectiveRate;
+    const isMonthConfigured =
+      salaryConfig.isConfigured !== false && Number(effectiveRate || 0) > 0;
+    const projectedEligibleStudents = isMonthConfigured
+      ? studentsForSalary.filter(
+          (student) => student.monthlyAttendancePercentage >= effectiveThreshold,
+        ).length
+      : 0;
+    const projectedMonthlySalary = isMonthConfigured
+      ? projectedEligibleStudents * effectiveRate
+      : 0;
     const hasManualAdjustedStudents = studentsForSalary.some(
       (student) => student.hasManualAdjustment,
     );
@@ -1124,9 +1022,6 @@ const Teachers = () => {
                 onChange={(value) => {
                   const monthValue = value ? value.format("YYYY-MM") : null;
                   setSelectedCompensationMonth(monthValue);
-                  if (selectedTeacher?._id && monthValue) {
-                    fetchTeacherCompensation(selectedTeacher._id, monthValue);
-                  }
                 }}
               />
             </div>

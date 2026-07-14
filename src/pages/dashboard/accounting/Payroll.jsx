@@ -11,99 +11,18 @@ import {
   InputNumber,
   message,
   Statistic,
+  Select,
 } from "antd";
 import dayjs from "dayjs";
 import {
   getTeacherPayroll,
+  getAccountingTypes,
   getPaymentMethods,
   payTeacherPayroll,
 } from "../../../services/accountingService";
 
 const getDefaultPayrollMonth = () => dayjs().subtract(1, "month").startOf("month");
 const formatCurrency = (value) => `Rs ${Number(value || 0).toLocaleString()}`;
-const STUDENT_COMPENSATION_OVERRIDE_STORAGE_KEY = "teacher_student_comp_overrides_v1";
-
-const getCompensationOverrideKey = (teacherId, monthValue) =>
-  `${teacherId || "unknown"}:${monthValue || "unknown"}`;
-
-const readStudentCompensationOverrides = () => {
-  try {
-    const raw = localStorage.getItem(STUDENT_COMPENSATION_OVERRIDE_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch (error) {
-    return {};
-  }
-};
-
-const applyStudentCompensationOverridesToPayroll = (items = [], monthValue) => {
-  const monthKey = monthValue.format("YYYY-MM");
-  const allOverrides = readStudentCompensationOverrides();
-
-  return items.map((item) => {
-    const overrideKey = getCompensationOverrideKey(item.teacher?._id, monthKey);
-    const teacherOverrides = allOverrides[overrideKey] || {};
-    const hasOverrides = Object.keys(teacherOverrides).length > 0;
-
-    if (
-      !hasOverrides ||
-      item.salaryConfig?.salaryType !== "per_student" ||
-      !Array.isArray(item.studentsForSalary)
-    ) {
-      return item;
-    }
-
-    const studentsForSalary = item.studentsForSalary.map((student) => {
-      const override = teacherOverrides[String(student.studentId)];
-      if (!override) return student;
-
-      const amount = Number(override.amount || 0);
-      const isSalaryEligible = amount > 0;
-
-      return {
-        ...student,
-        hasManualAdjustment: true,
-        manualAdjustedAmount: amount,
-        manualAdjustmentNote: override.note || "",
-        calculatedSalaryAmount: amount,
-        isSalaryEligible,
-      };
-    });
-
-    const eligibleStudents = studentsForSalary.filter((student) => student.isSalaryEligible).length;
-    const dueAmount = studentsForSalary.reduce(
-      (sum, student) => sum + Number(student.calculatedSalaryAmount || 0),
-      0,
-    );
-    const paidAmount = Number(item.payroll?.paidAmount || 0);
-    const remainingAmount = Math.max(0, dueAmount - paidAmount);
-    const status =
-      dueAmount <= 0
-        ? "paid"
-        : paidAmount >= dueAmount
-        ? "paid"
-        : paidAmount > 0
-        ? "partial"
-        : "unpaid";
-
-    return {
-      ...item,
-      studentsForSalary,
-      summary: {
-        ...(item.summary || {}),
-        eligibleStudents,
-        calculatedMonthlySalary: dueAmount,
-      },
-      payroll: {
-        ...(item.payroll || {}),
-        dueAmount,
-        paidAmount,
-        remainingAmount,
-        status,
-      },
-    };
-  });
-};
 
 const Payroll = () => {
   const [payrollData, setPayrollData] = useState([]);
@@ -111,11 +30,18 @@ const Payroll = () => {
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [paymentMethods, setPaymentMethods] = useState([]);
+  const [accountingTypes, setAccountingTypes] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState(getDefaultPayrollMonth());
+  const [selectedTeacherId, setSelectedTeacherId] = useState(null);
   const [form] = Form.useForm();
 
   const getPreferredPaymentMethodId = (methods = paymentMethods) =>
     methods.find((m) => m.isDefault)?._id || methods[0]?._id || null;
+
+  const getPreferredAccountingTypeId = (types = accountingTypes) =>
+    types.find((type) => String(type.name || "").toLowerCase() === "expense")?._id ||
+    types[0]?._id ||
+    null;
 
   const fetchPayroll = async (monthValue = selectedMonth) => {
     setLoading(true);
@@ -127,9 +53,7 @@ const Payroll = () => {
         month: monthValue.month() + 1,
       });
       if (res?.success) {
-        setPayrollData(
-          applyStudentCompensationOverridesToPayroll(res.data || [], monthValue),
-        );
+        setPayrollData(res.data || []);
       }
     } catch (error) {
       message.error(error.message || "Failed to load payroll data");
@@ -140,11 +64,18 @@ const Payroll = () => {
 
   useEffect(() => {
     fetchPayroll();
-    getPaymentMethods().then((res) => {
-      if (res?.success) {
-        setPaymentMethods(res.data || []);
-      }
-    });
+    Promise.all([getPaymentMethods(), getAccountingTypes()])
+      .then(([paymentMethodsRes, accountingTypesRes]) => {
+        if (paymentMethodsRes?.success) {
+          setPaymentMethods(paymentMethodsRes.data || []);
+        }
+        if (accountingTypesRes?.success) {
+          setAccountingTypes(accountingTypesRes.data || []);
+        }
+      })
+      .catch((error) => {
+        message.error(error.message || "Failed to load payroll payment options");
+      });
   }, []);
 
   const openPaymentModal = (record) => {
@@ -153,6 +84,7 @@ const Payroll = () => {
       paymentDate: dayjs(),
       amount: record.payroll.remainingAmount || 0,
       paymentMethodId: getPreferredPaymentMethodId(),
+      accountingTypeId: getPreferredAccountingTypeId(),
       details: "Salary payout",
       year: record.month.year,
       month: record.month.month,
@@ -178,9 +110,19 @@ const Payroll = () => {
         return;
       }
 
+      const selectedAccountingTypeId =
+        values.accountingTypeId || getPreferredAccountingTypeId();
+      if (!selectedAccountingTypeId) {
+        message.error(
+          "No accounting type is available. Please create Income or Expense type first.",
+        );
+        return;
+      }
+
       const payload = {
         ...values,
         paymentMethodId: selectedPaymentMethodId,
+        accountingTypeId: selectedAccountingTypeId,
         paymentDate: values.paymentDate.toISOString(),
       };
       const res = await payTeacherPayroll(selectedRecord.teacher._id, payload);
@@ -268,16 +210,25 @@ const Payroll = () => {
     },
   ];
 
+  const teacherOptions = payrollData.map((item) => ({
+    label: item.teacher?.fullName || "Unknown Teacher",
+    value: item.teacher?._id,
+  }));
+
+  const filteredPayrollData = selectedTeacherId
+    ? payrollData.filter((item) => String(item.teacher?._id) === String(selectedTeacherId))
+    : payrollData;
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <Card>
-          <Statistic title="Total Teachers" value={payrollData.length} />
+          <Statistic title="Total Teachers" value={filteredPayrollData.length} />
         </Card>
         <Card>
           <Statistic
             title="Total Unpaid"
-            value={payrollData.reduce(
+            value={filteredPayrollData.reduce(
               (sum, item) => sum + Number(item.payroll.remainingAmount || 0),
               0,
             )}
@@ -287,7 +238,7 @@ const Payroll = () => {
         <Card>
           <Statistic
             title="Total Paid"
-            value={payrollData.reduce(
+            value={filteredPayrollData.reduce(
               (sum, item) => sum + Number(item.payroll.paidAmount || 0),
               0,
             )}
@@ -299,22 +250,34 @@ const Payroll = () => {
       <Card
         title={`Teacher Payroll (${selectedMonth.format("MMMM YYYY")})`}
         extra={
-          <DatePicker
-            picker="month"
-            allowClear={false}
-            value={selectedMonth}
-            format="MMMM YYYY"
-            onChange={(value) => {
-              const nextMonth = value || getDefaultPayrollMonth();
-              setSelectedMonth(nextMonth);
-              fetchPayroll(nextMonth);
-            }}
-          />
+          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+            <Select
+              allowClear
+              placeholder="All teachers"
+              value={selectedTeacherId}
+              onChange={(value) => setSelectedTeacherId(value || null)}
+              options={teacherOptions}
+              className="min-w-[220px]"
+              showSearch
+              optionFilterProp="label"
+            />
+            <DatePicker
+              picker="month"
+              allowClear={false}
+              value={selectedMonth}
+              format="MMMM YYYY"
+              onChange={(value) => {
+                const nextMonth = value || getDefaultPayrollMonth();
+                setSelectedMonth(nextMonth);
+                fetchPayroll(nextMonth);
+              }}
+            />
+          </div>
         }
       >
         <Table
           columns={columns}
-          dataSource={payrollData}
+          dataSource={filteredPayrollData}
           rowKey={(record) => record.teacher._id}
           loading={loading}
           pagination={false}
@@ -345,13 +308,40 @@ const Payroll = () => {
             <InputNumber className="w-full" min={0} />
           </Form.Item>
           <Form.Item
+            label="Pay From Account"
+            name="paymentMethodId"
+            rules={[{ required: true, message: "Select account" }]}
+          >
+            <Select
+              placeholder="Select account"
+              options={paymentMethods.map((method) => ({
+                label: method.name,
+                value: method._id,
+              }))}
+              showSearch
+              optionFilterProp="label"
+            />
+          </Form.Item>
+          <Form.Item
+            label="Income / Expense Type"
+            name="accountingTypeId"
+            rules={[{ required: true, message: "Select type" }]}
+          >
+            <Select
+              placeholder="Select accounting type"
+              options={accountingTypes.map((type) => ({
+                label: type.name,
+                value: type._id,
+              }))}
+              showSearch
+              optionFilterProp="label"
+            />
+          </Form.Item>
+          <Form.Item
             label="Details"
             name="details"
           >
             <Input.TextArea rows={3} placeholder="Payment details" />
-          </Form.Item>
-          <Form.Item name="paymentMethodId" hidden>
-            <Input />
           </Form.Item>
           <Form.Item name="year" hidden>
             <InputNumber />

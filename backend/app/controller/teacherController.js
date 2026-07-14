@@ -73,6 +73,55 @@ const getMonthDisplayLabel = (year, month) =>
     year: "numeric",
   }).format(new Date(year, month - 1, 1));
 
+const getPerStudentMonthConfig = (teacher, payrollRecord = null) => {
+  if (payrollRecord) {
+    const salaryType = payrollRecord.salaryType || "per_student";
+    const salaryPerStudent =
+      payrollRecord.salaryPerStudent !== undefined &&
+      payrollRecord.salaryPerStudent !== null
+        ? Number(payrollRecord.salaryPerStudent)
+        : 0;
+    const attendanceThreshold =
+      payrollRecord.attendanceThreshold !== undefined &&
+      payrollRecord.attendanceThreshold !== null
+        ? Number(payrollRecord.attendanceThreshold)
+        : 50;
+    const monthlySalary =
+      payrollRecord.monthlySalary !== undefined && payrollRecord.monthlySalary !== null
+        ? payrollRecord.monthlySalary
+        : null;
+
+    return {
+      salaryType,
+      monthlySalary,
+      salaryPerStudent,
+      attendanceThreshold,
+      isConfigured:
+        salaryType === "per_student"
+          ? salaryPerStudent !== null && salaryPerStudent !== undefined && Number(salaryPerStudent) > 0
+          : Boolean(monthlySalary),
+    };
+  }
+
+  if ((teacher.salaryType || "fixed") === "per_student") {
+    return {
+      salaryType: "per_student",
+      monthlySalary: null,
+      salaryPerStudent: 0,
+      attendanceThreshold: Number(teacher.attendanceThreshold ?? 50),
+      isConfigured: false,
+    };
+  }
+
+  return {
+    salaryType: teacher.salaryType || "fixed",
+    monthlySalary: teacher.monthlySalary ?? null,
+    salaryPerStudent: teacher.salaryPerStudent ?? null,
+    attendanceThreshold: Number(teacher.attendanceThreshold ?? 50),
+    isConfigured: true,
+  };
+};
+
 const getDateKey = (dateValue) => {
   const date = new Date(dateValue);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -322,6 +371,7 @@ export const calculateTeacherCompensationData = async (
   const studentAdjustments = Array.isArray(options.studentAdjustments)
     ? options.studentAdjustments
     : [];
+  const salaryConfigOverride = options.salaryConfigOverride || {};
   const { from, to } = getMonthWindow(year, month);
 
   const assignedCourseIds = (teacher.courseId || [])
@@ -465,8 +515,23 @@ export const calculateTeacherCompensationData = async (
     aggregated.attendedUnits += attendedUnits;
   });
 
-  const attendanceThreshold = Number(teacher.attendanceThreshold ?? 50);
-  const salaryPerStudent = Number(teacher.salaryPerStudent ?? 0);
+  const salaryType = salaryConfigOverride.salaryType || teacher.salaryType || "fixed";
+  const monthlySalary =
+    salaryConfigOverride.monthlySalary !== undefined
+      ? salaryConfigOverride.monthlySalary
+      : teacher.monthlySalary ?? null;
+  const attendanceThreshold = Number(
+    salaryConfigOverride.attendanceThreshold ?? teacher.attendanceThreshold ?? 50,
+  );
+  const salaryPerStudent = Number(
+    salaryConfigOverride.salaryPerStudent ?? teacher.salaryPerStudent ?? 0,
+  );
+  const isPerStudentMonthConfigured =
+    salaryType === "per_student"
+      ? salaryConfigOverride.isConfigured !== undefined
+        ? salaryConfigOverride.isConfigured === true
+        : salaryPerStudent > 0
+      : true;
   const studentAdjustmentMap = new Map(
     studentAdjustments.map((item) => [
       String(item.studentId?._id || item.studentId),
@@ -484,7 +549,10 @@ export const calculateTeacherCompensationData = async (
         ? round2((student.attendedUnits / student.totalWorkingDays) * 100)
         : 0;
     const defaultCalculatedSalaryAmount =
-      teacher.salaryType === "per_student" && monthlyAttendancePercentage >= attendanceThreshold
+      salaryType === "per_student" &&
+      isPerStudentMonthConfigured &&
+      salaryPerStudent > 0 &&
+      monthlyAttendancePercentage >= attendanceThreshold
         ? salaryPerStudent
         : 0;
     const adjustment = studentAdjustmentMap.get(String(student.studentId)) || null;
@@ -493,7 +561,10 @@ export const calculateTeacherCompensationData = async (
       : defaultCalculatedSalaryAmount;
     const isSalaryEligible = adjustment
       ? calculatedSalaryAmount > 0
-      : monthlyAttendancePercentage >= attendanceThreshold;
+      : salaryType === "per_student" &&
+        isPerStudentMonthConfigured &&
+        salaryPerStudent > 0 &&
+        monthlyAttendancePercentage >= attendanceThreshold;
 
     return {
       studentId: student.studentId,
@@ -512,14 +583,14 @@ export const calculateTeacherCompensationData = async (
 
   const eligibleStudents = uniqueStudentSummaries.filter((student) => student.isSalaryEligible);
   const calculatedMonthlySalary =
-    teacher.salaryType === "per_student"
+    salaryType === "per_student"
       ? round2(
           uniqueStudentSummaries.reduce(
             (sum, student) => sum + Number(student.calculatedSalaryAmount || 0),
             0,
           ),
         )
-      : round2(parseSalaryAmount(teacher.monthlySalary));
+      : round2(parseSalaryAmount(monthlySalary));
 
   return {
     teacher,
@@ -530,10 +601,11 @@ export const calculateTeacherCompensationData = async (
       displayLabel: getMonthDisplayLabel(year, month),
     },
     salaryConfig: {
-      salaryType: teacher.salaryType || "fixed",
-      monthlySalary: teacher.monthlySalary || null,
-      salaryPerStudent: teacher.salaryPerStudent ?? null,
+      salaryType,
+      monthlySalary: monthlySalary ?? null,
+      salaryPerStudent: salaryType === "per_student" ? salaryPerStudent : null,
       attendanceThreshold,
+      isConfigured: salaryType === "per_student" ? isPerStudentMonthConfigured : true,
     },
     summary: {
       totalAssignedCourses: assignedCourseIds.length,
@@ -570,8 +642,10 @@ export const getTeacherCompensationDetails = async (req, res) => {
       year,
       month,
     }).lean();
+    const salaryConfigOverride = getPerStudentMonthConfig(teacher, payrollRecord);
     const compensation = await calculateTeacherCompensationData(teacher, year, month, {
       studentAdjustments: payrollRecord?.studentAdjustments || [],
+      salaryConfigOverride,
     });
 
     res.status(200).json({
@@ -627,15 +701,17 @@ const applyTeacherStudentCompensationUpdate = async (teacherId, payload = {}) =>
     year: selectedYear,
     month: selectedMonth,
   });
+  const salaryConfigOverride = getPerStudentMonthConfig(teacher, payrollRecord);
 
   if (!payrollRecord) {
     payrollRecord = await TeacherPayroll.create({
       teacher: teacher._id,
       year: selectedYear,
       month: selectedMonth,
-      salaryType: teacher.salaryType,
-      salaryPerStudent: teacher.salaryPerStudent,
-      attendanceThreshold: teacher.attendanceThreshold,
+      salaryType: salaryConfigOverride.salaryType,
+      monthlySalary: salaryConfigOverride.monthlySalary,
+      salaryPerStudent: salaryConfigOverride.salaryPerStudent,
+      attendanceThreshold: salaryConfigOverride.attendanceThreshold,
       dueAmount: 0,
       remainingAmount: 0,
       paidAmount: 0,
@@ -667,13 +743,24 @@ const applyTeacherStudentCompensationUpdate = async (teacherId, payload = {}) =>
 
   const compensation = await calculateTeacherCompensationData(teacher, selectedYear, selectedMonth, {
     studentAdjustments: payrollRecord.studentAdjustments,
+    salaryConfigOverride: {
+      salaryType: payrollRecord.salaryType,
+      monthlySalary: payrollRecord.monthlySalary,
+      salaryPerStudent: payrollRecord.salaryPerStudent,
+      attendanceThreshold: payrollRecord.attendanceThreshold,
+      isConfigured:
+        payrollRecord.salaryType === "per_student"
+          ? Number(payrollRecord.salaryPerStudent || 0) > 0
+          : true,
+    },
   });
 
   const dueAmount = Number(compensation.summary.calculatedMonthlySalary || 0);
   const paidAmount = Number(payrollRecord.paidAmount || 0);
-  payrollRecord.salaryType = teacher.salaryType;
-  payrollRecord.salaryPerStudent = teacher.salaryPerStudent;
-  payrollRecord.attendanceThreshold = teacher.attendanceThreshold;
+  payrollRecord.salaryType = salaryConfigOverride.salaryType;
+  payrollRecord.monthlySalary = salaryConfigOverride.monthlySalary;
+  payrollRecord.salaryPerStudent = salaryConfigOverride.salaryPerStudent;
+  payrollRecord.attendanceThreshold = salaryConfigOverride.attendanceThreshold;
   payrollRecord.totalActiveStudents = compensation.summary.totalActiveStudents;
   payrollRecord.eligibleStudents = compensation.summary.eligibleStudents;
   payrollRecord.dueAmount = dueAmount;
@@ -697,12 +784,137 @@ const applyTeacherStudentCompensationUpdate = async (teacherId, payload = {}) =>
   };
 };
 
+const applyTeacherMonthlySalaryConfigUpdate = async (teacherId, payload = {}) => {
+  const selectedYear = Number(payload.year);
+  const selectedMonth = Number(payload.month);
+
+  if (!selectedYear || !selectedMonth) {
+    const error = new Error("Year and month are required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const normalizedSalaryType = payload.salaryType === "per_student" ? "per_student" : "fixed";
+  const normalizedAttendanceThreshold =
+    payload.attendanceThreshold !== undefined &&
+    payload.attendanceThreshold !== null &&
+    payload.attendanceThreshold !== ""
+      ? Number(payload.attendanceThreshold)
+      : 50;
+  const normalizedSalaryPerStudent =
+    payload.salaryPerStudent !== undefined &&
+    payload.salaryPerStudent !== null &&
+    payload.salaryPerStudent !== ""
+      ? round2(Number(payload.salaryPerStudent))
+      : 0;
+  const normalizedMonthlySalary =
+    payload.monthlySalary !== undefined && payload.monthlySalary !== null
+      ? String(payload.monthlySalary).trim() || null
+      : null;
+
+  if (normalizedSalaryType === "per_student" && normalizedSalaryPerStudent < 0) {
+    const error = new Error("Salary amount per student must be a valid non-negative number");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const teacher = await TeacherSchema.findById(teacherId).populate("courseId", "courseName courseId");
+  if (!teacher) {
+    const error = new Error("Teacher not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  let payrollRecord = await TeacherPayroll.findOne({
+    teacher: teacher._id,
+    year: selectedYear,
+    month: selectedMonth,
+  });
+
+  if (!payrollRecord) {
+    payrollRecord = await TeacherPayroll.create({
+      teacher: teacher._id,
+      year: selectedYear,
+      month: selectedMonth,
+      salaryType: normalizedSalaryType,
+      monthlySalary: normalizedSalaryType === "fixed" ? normalizedMonthlySalary : null,
+      salaryPerStudent:
+        normalizedSalaryType === "per_student" ? normalizedSalaryPerStudent : null,
+      attendanceThreshold: normalizedAttendanceThreshold,
+      dueAmount: 0,
+      remainingAmount: 0,
+      paidAmount: 0,
+      status: "unpaid",
+      studentAdjustments: [],
+    });
+  } else {
+    payrollRecord.salaryType = normalizedSalaryType;
+    payrollRecord.monthlySalary = normalizedSalaryType === "fixed" ? normalizedMonthlySalary : null;
+    payrollRecord.salaryPerStudent =
+      normalizedSalaryType === "per_student" ? normalizedSalaryPerStudent : null;
+    payrollRecord.attendanceThreshold = normalizedAttendanceThreshold;
+  }
+
+  const compensation = await calculateTeacherCompensationData(teacher, selectedYear, selectedMonth, {
+    studentAdjustments: payrollRecord.studentAdjustments || [],
+    salaryConfigOverride: {
+      salaryType: payrollRecord.salaryType,
+      monthlySalary: payrollRecord.monthlySalary,
+      salaryPerStudent: payrollRecord.salaryPerStudent,
+      attendanceThreshold: payrollRecord.attendanceThreshold,
+      isConfigured:
+        payrollRecord.salaryType === "per_student"
+          ? Number(payrollRecord.salaryPerStudent || 0) > 0
+          : true,
+    },
+  });
+
+  const dueAmount = Number(compensation.summary.calculatedMonthlySalary || 0);
+  const paidAmount = Number(payrollRecord.paidAmount || 0);
+  payrollRecord.totalActiveStudents = compensation.summary.totalActiveStudents;
+  payrollRecord.eligibleStudents = compensation.summary.eligibleStudents;
+  payrollRecord.dueAmount = dueAmount;
+  payrollRecord.remainingAmount = Math.max(0, dueAmount - paidAmount);
+  payrollRecord.overpaidAmount = Math.max(0, paidAmount - dueAmount);
+  payrollRecord.status =
+    dueAmount <= 0
+      ? "paid"
+      : paidAmount >= dueAmount
+      ? "paid"
+      : paidAmount > 0
+      ? "partial"
+      : "unpaid";
+
+  await payrollRecord.save();
+  await teacher.populate("courseId", "courseName courseId");
+
+  return {
+    success: true,
+    message: "Teacher salary rule updated successfully",
+    data: compensation,
+    teacher,
+  };
+};
+
 export const updateTeacherStudentCompensation = async (req, res) => {
   try {
     const result = await applyTeacherStudentCompensationUpdate(req.params.id, req.body);
     res.status(200).json(result);
   } catch (error) {
     console.error("Update teacher student compensation error:", error);
+    res.status(500).json({
+      success: false,
+      message: error.message || "Internal server error",
+    });
+  }
+};
+
+export const updateTeacherMonthlySalaryConfig = async (req, res) => {
+  try {
+    const result = await applyTeacherMonthlySalaryConfigUpdate(req.params.id, req.body);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Update teacher monthly salary config error:", error);
     res.status(500).json({
       success: false,
       message: error.message || "Internal server error",
@@ -724,7 +936,19 @@ export const updateTeacher = async (req, res) => {
       const result = await applyTeacherStudentCompensationUpdate(id, updateData);
       return res.status(200).json(result);
     }
-    
+
+    if (
+      Object.prototype.hasOwnProperty.call(updateData, "year") &&
+      Object.prototype.hasOwnProperty.call(updateData, "month") &&
+      (Object.prototype.hasOwnProperty.call(updateData, "salaryType") ||
+        Object.prototype.hasOwnProperty.call(updateData, "salaryPerStudent") ||
+        Object.prototype.hasOwnProperty.call(updateData, "attendanceThreshold") ||
+        Object.prototype.hasOwnProperty.call(updateData, "monthlySalary"))
+    ) {
+      const result = await applyTeacherMonthlySalaryConfigUpdate(id, updateData);
+      return res.status(200).json(result);
+    }
+
     // Parse courseId if it's a JSON string (from FormData)
     if (updateData.courseId && typeof updateData.courseId === "string") {
       try {

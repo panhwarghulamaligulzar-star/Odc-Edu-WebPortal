@@ -23,6 +23,11 @@ const TeacherPayrollSchema = new mongoose.Schema(
       enum: ["fixed", "per_student"],
       default: "fixed",
     },
+    monthlySalary: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     salaryPerStudent: {
       type: Number,
       default: null,

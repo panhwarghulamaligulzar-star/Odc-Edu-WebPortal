@@ -76,6 +76,55 @@ const getDefaultPayrollPeriod = () => {
   };
 };
 
+const getTeacherPayrollSalaryConfig = (teacher, payrollRecord = null) => {
+  if (payrollRecord) {
+    const salaryType = payrollRecord.salaryType || "per_student";
+    const salaryPerStudent =
+      payrollRecord.salaryPerStudent !== undefined &&
+      payrollRecord.salaryPerStudent !== null
+        ? Number(payrollRecord.salaryPerStudent)
+        : 0;
+    const attendanceThreshold =
+      payrollRecord.attendanceThreshold !== undefined &&
+      payrollRecord.attendanceThreshold !== null
+        ? Number(payrollRecord.attendanceThreshold)
+        : 50;
+    const monthlySalary =
+      payrollRecord.monthlySalary !== undefined && payrollRecord.monthlySalary !== null
+        ? payrollRecord.monthlySalary
+        : null;
+
+    return {
+      salaryType,
+      monthlySalary,
+      salaryPerStudent,
+      attendanceThreshold,
+      isConfigured:
+        salaryType === "per_student"
+          ? salaryPerStudent !== null && salaryPerStudent !== undefined && Number(salaryPerStudent) > 0
+          : Boolean(monthlySalary),
+    };
+  }
+
+  if ((teacher.salaryType || "fixed") === "per_student") {
+    return {
+      salaryType: "per_student",
+      monthlySalary: null,
+      salaryPerStudent: 0,
+      attendanceThreshold: Number(teacher.attendanceThreshold ?? 50),
+      isConfigured: false,
+    };
+  }
+
+  return {
+    salaryType: teacher.salaryType || "fixed",
+    monthlySalary: teacher.monthlySalary ?? null,
+    salaryPerStudent: teacher.salaryPerStudent ?? null,
+    attendanceThreshold: Number(teacher.attendanceThreshold ?? 50),
+    isConfigured: true,
+  };
+};
+
 // ============================================================
 // ACCOUNTING TYPES
 // ============================================================
@@ -486,12 +535,14 @@ export const getTeacherPayrollSummary = async (req, res) => {
     const payrollItems = await Promise.all(
       teachers.map(async (teacher) => {
         const existingPayroll = payrollMap.get(String(teacher._id));
+        const salaryConfigOverride = getTeacherPayrollSalaryConfig(teacher, existingPayroll);
         const compensation = await calculateTeacherCompensationData(
           teacher,
           selectedYear,
           selectedMonth,
           {
             studentAdjustments: existingPayroll?.studentAdjustments || [],
+            salaryConfigOverride,
           },
         );
 
@@ -563,6 +614,7 @@ export const payTeacherPayroll = async (req, res) => {
   try {
     const { id } = req.params;
     const {
+      accountingTypeId,
       paymentMethodId,
       amount,
       paymentDate,
@@ -586,17 +638,50 @@ export const payTeacherPayroll = async (req, res) => {
       });
     }
 
-    const fundingSelection = await selectTeacherPayrollFundingMethod(
-      paymentMethodId,
-      normalizedPaymentAmount,
-    );
-    if (!fundingSelection.success) {
-      return res.status(fundingSelection.statusCode || 400).json({
+    const txnType = accountingTypeId
+      ? await AccountingType.findById(accountingTypeId)
+      : await AccountingType.findOne({ name: "Expense" });
+    if (!txnType) {
+      return res.status(400).json({
         success: false,
-        message: fundingSelection.message,
+        message: "Selected accounting type was not found",
       });
     }
-    const method = fundingSelection.method;
+
+    let method = null;
+    if (txnType.name === "Income") {
+      const activeMethods = await PaymentMethod.find({ isActive: true }).sort({
+        isDefault: -1,
+        name: 1,
+      });
+      method =
+        activeMethods.find(
+          (item) => String(item._id) === String(paymentMethodId || ""),
+        ) ||
+        activeMethods.find((item) => item.isDefault) ||
+        activeMethods[0] ||
+        null;
+
+      if (!method) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "No academy account is available for this payroll transaction. Please create Cash or Bank account first.",
+        });
+      }
+    } else {
+      const fundingSelection = await selectTeacherPayrollFundingMethod(
+        paymentMethodId,
+        normalizedPaymentAmount,
+      );
+      if (!fundingSelection.success) {
+        return res.status(fundingSelection.statusCode || 400).json({
+          success: false,
+          message: fundingSelection.message,
+        });
+      }
+      method = fundingSelection.method;
+    }
 
     const teacher = await TeacherSchema.findById(id).populate(
       "courseId",
@@ -616,20 +701,21 @@ export const payTeacherPayroll = async (req, res) => {
       year: selectedYear,
       month: selectedMonth,
     });
+    const salaryConfigOverride = getTeacherPayrollSalaryConfig(teacher, payrollRecord);
     const compensation = await calculateTeacherCompensationData(teacher, selectedYear, selectedMonth, {
       studentAdjustments: payrollRecord?.studentAdjustments || [],
+      salaryConfigOverride,
     });
     const dueAmount = Number(compensation.summary.calculatedMonthlySalary || 0);
     const availableBalance = Number(method.currentBalance || 0);
 
-    if (availableBalance < normalizedPaymentAmount) {
+    if (txnType.name !== "Income" && availableBalance < normalizedPaymentAmount) {
       return res.status(400).json({
         success: false,
         message: `Insufficient balance in ${method.name}. Available balance is PKR ${availableBalance.toLocaleString("en-PK")}, but PKR ${normalizedPaymentAmount.toLocaleString("en-PK")} is required to pay ${teacher.fullName}.`,
       });
     }
 
-    const txnType = await AccountingType.findOne({ name: "Expense" });
     const salaryHead = await HeadOfAccount.findOne({
       name: "Salary",
       type: txnType?._id,
@@ -637,7 +723,7 @@ export const payTeacherPayroll = async (req, res) => {
     if (!salaryHead) {
       return res.status(400).json({
         success: false,
-        message: "Salary head of account is not configured",
+        message: `Salary head of account is not configured for ${txnType.name}`,
       });
     }
 
@@ -656,7 +742,8 @@ export const payTeacherPayroll = async (req, res) => {
     });
 
     await txn.save();
-    await adjustBalance(method._id, normalizedPaymentAmount, -1);
+    const balanceDirection = txnType.name === "Income" ? 1 : -1;
+    await adjustBalance(method._id, normalizedPaymentAmount, balanceDirection);
 
     let updatedPayroll;
     if (!payrollRecord) {
@@ -664,9 +751,10 @@ export const payTeacherPayroll = async (req, res) => {
         teacher: teacher._id,
         year: selectedYear,
         month: selectedMonth,
-        salaryType: teacher.salaryType,
-        salaryPerStudent: teacher.salaryPerStudent,
-        attendanceThreshold: teacher.attendanceThreshold,
+        salaryType: salaryConfigOverride.salaryType,
+        monthlySalary: salaryConfigOverride.monthlySalary,
+        salaryPerStudent: salaryConfigOverride.salaryPerStudent,
+        attendanceThreshold: salaryConfigOverride.attendanceThreshold,
         totalActiveStudents: compensation.summary.totalActiveStudents,
         eligibleStudents: compensation.summary.eligibleStudents,
         dueAmount,
@@ -703,9 +791,10 @@ export const payTeacherPayroll = async (req, res) => {
           ? "partial"
           : "unpaid";
 
-      payrollRecord.salaryType = teacher.salaryType;
-      payrollRecord.salaryPerStudent = teacher.salaryPerStudent;
-      payrollRecord.attendanceThreshold = teacher.attendanceThreshold;
+      payrollRecord.salaryType = salaryConfigOverride.salaryType;
+      payrollRecord.monthlySalary = salaryConfigOverride.monthlySalary;
+      payrollRecord.salaryPerStudent = salaryConfigOverride.salaryPerStudent;
+      payrollRecord.attendanceThreshold = salaryConfigOverride.attendanceThreshold;
       payrollRecord.totalActiveStudents = compensation.summary.totalActiveStudents;
       payrollRecord.eligibleStudents = compensation.summary.eligibleStudents;
       payrollRecord.dueAmount = dueAmount;
@@ -729,7 +818,7 @@ export const payTeacherPayroll = async (req, res) => {
       success: true,
       data: updatedPayroll,
       transaction: txn,
-      message: `Teacher salary paid successfully from ${method.name}.`,
+      message: `Teacher salary recorded successfully in ${txnType.name} using ${method.name}.`,
     });
   } catch (error) {
     console.error("Error processing teacher payroll payment:", error);
