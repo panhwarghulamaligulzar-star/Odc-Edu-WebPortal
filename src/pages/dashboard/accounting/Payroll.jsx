@@ -16,13 +16,18 @@ import {
 import dayjs from "dayjs";
 import {
   getTeacherPayroll,
-  getAccountingTypes,
   getPaymentMethods,
   payTeacherPayroll,
+  getAccountingTypes,
+  getHeadsOfAccount,
+  createHeadOfAccount,
 } from "../../../services/accountingService";
 
 const getDefaultPayrollMonth = () => dayjs().subtract(1, "month").startOf("month");
 const formatCurrency = (value) => `Rs ${Number(value || 0).toLocaleString()}`;
+const isSalaryHeadName = (name) => /^salary$/i.test(String(name || "").trim());
+const isSalaryLikeHeadName = (name) =>
+  /(salary|payroll|wages?)/i.test(String(name || "").trim());
 
 const Payroll = () => {
   const [payrollData, setPayrollData] = useState([]);
@@ -30,7 +35,8 @@ const Payroll = () => {
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [paymentMethods, setPaymentMethods] = useState([]);
-  const [accountingTypes, setAccountingTypes] = useState([]);
+  const [expenseTypeId, setExpenseTypeId] = useState(null);
+  const [expenseHeads, setExpenseHeads] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState(getDefaultPayrollMonth());
   const [selectedTeacherId, setSelectedTeacherId] = useState(null);
   const [form] = Form.useForm();
@@ -38,10 +44,78 @@ const Payroll = () => {
   const getPreferredPaymentMethodId = (methods = paymentMethods) =>
     methods.find((m) => m.isDefault)?._id || methods[0]?._id || null;
 
-  const getPreferredAccountingTypeId = (types = accountingTypes) =>
-    types.find((type) => String(type.name || "").toLowerCase() === "expense")?._id ||
-    types[0]?._id ||
+  const getPreferredSalaryHead = (heads = expenseHeads) =>
+    heads.find((head) => head.isActive !== false && isSalaryHeadName(head.name)) ||
+    heads.find((head) => head.isActive !== false && isSalaryLikeHeadName(head.name)) ||
+    heads.find((head) => head.isActive !== false) ||
     null;
+
+  const loadAccountingReferences = async () => {
+    const [paymentMethodsRes, typesRes, headsRes] = await Promise.all([
+      getPaymentMethods(),
+      getAccountingTypes(),
+      getHeadsOfAccount(null, false),
+    ]);
+
+    if (paymentMethodsRes?.success) {
+      setPaymentMethods(paymentMethodsRes.data || []);
+    }
+
+    const allTypes = typesRes?.success ? typesRes.data || [] : [];
+    const expenseType = allTypes.find(
+      (item) => String(item?.name || "").trim().toLowerCase() === "expense",
+    );
+    setExpenseTypeId(expenseType?._id || null);
+
+    const allHeads = headsRes?.success ? headsRes.data || [] : [];
+    const filteredExpenseHeads = allHeads.filter((head) => {
+      const typeId =
+        typeof head?.type === "object" && head?.type?._id ? head.type._id : head?.type;
+      return expenseType?._id ? String(typeId) === String(expenseType._id) : false;
+    });
+    setExpenseHeads(filteredExpenseHeads);
+  };
+
+  const ensureSalaryHeadConfigured = async () => {
+    const existingExactHead = expenseHeads.find(
+      (head) => head.isActive !== false && isSalaryHeadName(head.name),
+    );
+    if (existingExactHead) {
+      return existingExactHead;
+    }
+
+    if (!expenseTypeId) {
+      throw new Error(
+        "Expense accounting type is missing. Please configure accounting types first.",
+      );
+    }
+
+    const createRes = await createHeadOfAccount({
+      name: "Salary",
+      type: expenseTypeId,
+      description: "Staff and teacher salaries",
+    });
+
+    if (!createRes?.success) {
+      throw new Error(
+        createRes?.message || "Failed to create the Salary expense head automatically.",
+      );
+    }
+
+    const createdHead = createRes.data || {
+      _id: createRes.head?._id,
+      name: "Salary",
+      type: expenseTypeId,
+      isActive: true,
+    };
+
+    setExpenseHeads((prev) => {
+      const next = [...prev, createdHead].filter(Boolean);
+      return next;
+    });
+
+    return createdHead;
+  };
 
   const fetchPayroll = async (monthValue = selectedMonth) => {
     setLoading(true);
@@ -64,27 +138,20 @@ const Payroll = () => {
 
   useEffect(() => {
     fetchPayroll();
-    Promise.all([getPaymentMethods(), getAccountingTypes()])
-      .then(([paymentMethodsRes, accountingTypesRes]) => {
-        if (paymentMethodsRes?.success) {
-          setPaymentMethods(paymentMethodsRes.data || []);
-        }
-        if (accountingTypesRes?.success) {
-          setAccountingTypes(accountingTypesRes.data || []);
-        }
-      })
+    loadAccountingReferences()
       .catch((error) => {
         message.error(error.message || "Failed to load payroll payment options");
       });
   }, []);
 
   const openPaymentModal = (record) => {
+    const preferredSalaryHead = getPreferredSalaryHead();
     setSelectedRecord(record);
     form.setFieldsValue({
       paymentDate: dayjs(),
       amount: record.payroll.remainingAmount || 0,
       paymentMethodId: getPreferredPaymentMethodId(),
-      accountingTypeId: getPreferredAccountingTypeId(),
+      head: preferredSalaryHead?._id,
       details: "Salary payout",
       year: record.month.year,
       month: record.month.month,
@@ -110,19 +177,22 @@ const Payroll = () => {
         return;
       }
 
-      const selectedAccountingTypeId =
-        values.accountingTypeId || getPreferredAccountingTypeId();
-      if (!selectedAccountingTypeId) {
+      const salaryHead =
+        expenseHeads.find((head) => String(head._id) === String(values.head || "")) ||
+        (await ensureSalaryHeadConfigured());
+
+      if (!salaryHead?._id) {
         message.error(
-          "No accounting type is available. Please create Income or Expense type first.",
+          "Salary expense head is missing. Please create an Expense head named Salary in Heads of Account.",
         );
         return;
       }
 
       const payload = {
         ...values,
+        head: salaryHead._id,
+        headId: salaryHead._id,
         paymentMethodId: selectedPaymentMethodId,
-        accountingTypeId: selectedAccountingTypeId,
         paymentDate: values.paymentDate.toISOString(),
       };
       const res = await payTeacherPayroll(selectedRecord.teacher._id, payload);
@@ -323,19 +393,31 @@ const Payroll = () => {
             />
           </Form.Item>
           <Form.Item
-            label="Income / Expense Type"
-            name="accountingTypeId"
-            rules={[{ required: true, message: "Select type" }]}
+            label="Salary Head of Account"
+            name="head"
+            rules={
+              expenseHeads.length > 0
+                ? [{ required: true, message: "Select salary head" }]
+                : []
+            }
+            extra={
+              expenseHeads.length === 0
+                ? "No expense heads found. A Salary head will be created automatically when you pay if your account has permission."
+                : "Payroll is recorded under an Expense head. Salary is recommended."
+            }
           >
             <Select
-              placeholder="Select accounting type"
-              options={accountingTypes.map((type) => ({
-                label: type.name,
-                value: type._id,
+              placeholder="Select salary expense head"
+              options={expenseHeads.map((head) => ({
+                label: head.name,
+                value: head._id,
               }))}
               showSearch
               optionFilterProp="label"
             />
+          </Form.Item>
+          <Form.Item label="Income / Expense Type">
+            <Input value="Expense" disabled />
           </Form.Item>
           <Form.Item
             label="Details"

@@ -614,8 +614,9 @@ export const payTeacherPayroll = async (req, res) => {
   try {
     const { id } = req.params;
     const {
-      accountingTypeId,
       paymentMethodId,
+      head,
+      headId,
       amount,
       paymentDate,
       details,
@@ -638,13 +639,13 @@ export const payTeacherPayroll = async (req, res) => {
       });
     }
 
-    const txnType = accountingTypeId
-      ? await AccountingType.findById(accountingTypeId)
-      : await AccountingType.findOne({ name: "Expense" });
+    // Teacher salary payouts are always expense transactions.
+    const txnType = await AccountingType.findOne({ name: "Expense" });
     if (!txnType) {
       return res.status(400).json({
         success: false,
-        message: "Selected accounting type was not found",
+        message:
+          "Expense accounting type is not configured. Please seed or recreate the default accounting types.",
       });
     }
 
@@ -716,14 +717,39 @@ export const payTeacherPayroll = async (req, res) => {
       });
     }
 
-    const salaryHead = await HeadOfAccount.findOne({
-      name: "Salary",
-      type: txnType?._id,
-    });
+    let salaryHead = null;
+
+    const requestedHeadId = headId || head || null;
+    if (requestedHeadId) {
+      salaryHead = await HeadOfAccount.findOne({
+        _id: requestedHeadId,
+        type: txnType._id,
+        isActive: { $ne: false },
+      });
+    }
+
     if (!salaryHead) {
-      return res.status(400).json({
-        success: false,
-        message: `Salary head of account is not configured for ${txnType.name}`,
+      salaryHead = await HeadOfAccount.findOne({
+        name: { $regex: /^Salary$/i },
+        type: txnType._id,
+        isActive: { $ne: false },
+      });
+    }
+
+    if (!salaryHead) {
+      salaryHead = await HeadOfAccount.findOne({
+        name: { $regex: /(salary|payroll|wages?)/i },
+        type: txnType._id,
+        isActive: { $ne: false },
+      });
+    }
+
+    if (!salaryHead) {
+      salaryHead = await HeadOfAccount.create({
+        name: "Salary",
+        type: txnType._id,
+        description: "Auto-created default salary expense head",
+        isActive: true,
       });
     }
 
