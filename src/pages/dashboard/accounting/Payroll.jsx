@@ -37,6 +37,8 @@ const Payroll = () => {
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [expenseTypeId, setExpenseTypeId] = useState(null);
   const [expenseHeads, setExpenseHeads] = useState([]);
+  const [allHeads, setAllHeads] = useState([]);
+  const [accountingTypes, setAccountingTypes] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState(getDefaultPayrollMonth());
   const [selectedTeacherId, setSelectedTeacherId] = useState(null);
   const [form] = Form.useForm();
@@ -44,7 +46,7 @@ const Payroll = () => {
   const getPreferredPaymentMethodId = (methods = paymentMethods) =>
     methods.find((m) => m.isDefault)?._id || methods[0]?._id || null;
 
-  const getPreferredSalaryHead = (heads = expenseHeads) =>
+  const getPreferredSalaryHead = (heads = allHeads) =>
     heads.find((head) => head.isActive !== false && isSalaryHeadName(head.name)) ||
     heads.find((head) => head.isActive !== false && isSalaryLikeHeadName(head.name)) ||
     heads.find((head) => head.isActive !== false) ||
@@ -62,13 +64,17 @@ const Payroll = () => {
     }
 
     const allTypes = typesRes?.success ? typesRes.data || [] : [];
+    setAccountingTypes(allTypes || []);
+
     const expenseType = allTypes.find(
       (item) => String(item?.name || "").trim().toLowerCase() === "expense",
     );
     setExpenseTypeId(expenseType?._id || null);
 
-    const allHeads = headsRes?.success ? headsRes.data || [] : [];
-    const filteredExpenseHeads = allHeads.filter((head) => {
+    const headsList = headsRes?.success ? headsRes.data || [] : [];
+    setAllHeads(headsList || []);
+
+    const filteredExpenseHeads = headsList.filter((head) => {
       const typeId =
         typeof head?.type === "object" && head?.type?._id ? head.type._id : head?.type;
       return expenseType?._id ? String(typeId) === String(expenseType._id) : false;
@@ -77,7 +83,7 @@ const Payroll = () => {
   };
 
   const ensureSalaryHeadConfigured = async () => {
-    const existingExactHead = expenseHeads.find(
+    const existingExactHead = allHeads.find(
       (head) => head.isActive !== false && isSalaryHeadName(head.name),
     );
     if (existingExactHead) {
@@ -108,6 +114,11 @@ const Payroll = () => {
       type: expenseTypeId,
       isActive: true,
     };
+
+    setAllHeads((prev) => {
+      const next = [...prev, createdHead].filter(Boolean);
+      return next;
+    });
 
     setExpenseHeads((prev) => {
       const next = [...prev, createdHead].filter(Boolean);
@@ -152,6 +163,11 @@ const Payroll = () => {
       amount: record.payroll.remainingAmount || 0,
       paymentMethodId: getPreferredPaymentMethodId(),
       head: preferredSalaryHead?._id,
+      headTypeId:
+        (preferredSalaryHead &&
+          (typeof preferredSalaryHead.type === "object"
+            ? preferredSalaryHead.type?._id
+            : preferredSalaryHead.type)) || expenseTypeId,
       details: "Salary payout",
       year: record.month.year,
       month: record.month.month,
@@ -178,7 +194,7 @@ const Payroll = () => {
       }
 
       const salaryHead =
-        expenseHeads.find((head) => String(head._id) === String(values.head || "")) ||
+        allHeads.find((head) => String(head._id) === String(values.head || "")) ||
         (await ensureSalaryHeadConfigured());
 
       if (!salaryHead?._id) {
@@ -192,6 +208,7 @@ const Payroll = () => {
         ...values,
         head: salaryHead._id,
         headId: salaryHead._id,
+        type: values.headTypeId || (salaryHead.type && (salaryHead.type._id || salaryHead.type)),
         paymentMethodId: selectedPaymentMethodId,
         paymentDate: values.paymentDate.toISOString(),
       };
@@ -395,29 +412,38 @@ const Payroll = () => {
           <Form.Item
             label="Salary Head of Account"
             name="head"
-            rules={
-              expenseHeads.length > 0
-                ? [{ required: true, message: "Select salary head" }]
-                : []
-            }
+            rules={allHeads.length > 0 ? [{ required: true, message: "Select salary head" }] : []}
             extra={
-              expenseHeads.length === 0
-                ? "No expense heads found. A Salary head will be created automatically when you pay if your account has permission."
-                : "Payroll is recorded under an Expense head. Salary is recommended."
+              allHeads.length === 0
+                ? "No heads found. A Salary head will be created automatically when you pay if your account has permission."
+                : "Select head of account for this payment."
             }
           >
             <Select
-              placeholder="Select salary expense head"
-              options={expenseHeads.map((head) => ({
-                label: head.name,
-                value: head._id,
-              }))}
+              placeholder="Select salary head"
+              options={allHeads
+                .filter((h) => h.isActive !== false)
+                .map((head) => ({ label: head.name, value: head._id }))}
+              showSearch
+              allowClear
+              optionFilterProp="label"
+              onChange={(value) => {
+                const head = allHeads.find((h) => String(h._id) === String(value));
+                const typeId =
+                  head && (typeof head.type === "object" ? head.type?._id : head.type);
+                if (typeId) {
+                  form.setFieldsValue({ headTypeId: typeId });
+                }
+              }}
+            />
+          </Form.Item>
+          <Form.Item label="Income / Expense Type" name="headTypeId" rules={[{ required: true }]}>
+            <Select
+              placeholder="Select type"
+              options={accountingTypes.map((t) => ({ label: t.name, value: t._id }))}
               showSearch
               optionFilterProp="label"
             />
-          </Form.Item>
-          <Form.Item label="Income / Expense Type">
-            <Input value="Expense" disabled />
           </Form.Item>
           <Form.Item
             label="Details"

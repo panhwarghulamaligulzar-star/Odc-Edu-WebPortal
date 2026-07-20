@@ -238,20 +238,41 @@ function MarkAttendancePanel({ batches }) {
   // ── Load calendar data for a given month ───────────────────────────────────
   // MERGE into existing map so navigating months keeps previous months' dots
   const loadCalendar = useCallback(async (batchId, dayjsDate) => {
-    if (!batchId) return;
+    if (!batchId || !dayjsDate) return;
     try {
+      // If batch info is available, avoid loading months that are completely
+      // outside the batch start/end date range.
+      if (members.batch) {
+        const monthStart = dayjsDate.startOf("month");
+        const monthEnd = dayjsDate.endOf("month");
+        const batchStart = members.batch.startDate ? dayjs(members.batch.startDate).startOf("day") : null;
+        const batchEnd = members.batch.endDate ? dayjs(members.batch.endDate).endOf("day") : null;
+        if (batchStart && monthEnd.isBefore(batchStart, "day")) return;
+        if (batchEnd && monthStart.isAfter(batchEnd, "day")) return;
+      }
+
       const res = await getMonthCalendar(batchId, dayjsDate.year(), dayjsDate.month() + 1);
       setCalendarData((prev) => ({ ...prev, ...(res.data || {}) }));
     } catch { /* silent — calendar is decorative */ }
-  }, []);
+  }, [members.batch]);
 
   // ── Load holidays for a 2-year window when batch changes ────────────────
   const loadHolidays = useCallback(async (batchId) => {
     if (!batchId) return;
     try {
-      const year  = new Date().getFullYear();
-      const from  = `${year - 1}-01-01`;
-      const to    = `${year + 2}-12-31`;
+      let from, to;
+      if (members.batch && (members.batch.startDate || members.batch.endDate)) {
+        const bs = members.batch.startDate ? dayjs(members.batch.startDate).format("YYYY-MM-DD") : null;
+        const be = members.batch.endDate ? dayjs(members.batch.endDate).format("YYYY-MM-DD") : null;
+        // Expand a little to include multi-day holidays that start/end near boundaries
+        from = bs || `${new Date().getFullYear() - 1}-01-01`;
+        to = be || `${new Date().getFullYear() + 2}-12-31`;
+      } else {
+        const year  = new Date().getFullYear();
+        from = `${year - 1}-01-01`;
+        to   = `${year + 2}-12-31`;
+      }
+
       const res   = await getHolidayDates(from, to, batchId);
       const map   = new Map();
       (res.data || []).forEach((h) => {
@@ -262,7 +283,7 @@ function MarkAttendancePanel({ batches }) {
       });
       setHolidayMap(map);
     } catch { /* silent */ }
-  }, []);
+  }, [members.batch]);
 
   // Reload calendar when batch changes (clear old data first)
   useEffect(() => {
@@ -656,7 +677,21 @@ function MarkAttendancePanel({ batches }) {
             onChange={(d) => { if (d) { setSelectedDate(d); setDirty(false); } }}
             onPanelChange={(d) => { if (d && selectedBatch) loadCalendar(selectedBatch, d); }}
             onOpenChange={(open) => { if (open && selectedBatch) loadCalendar(selectedBatch, selectedDate); }}
-            disabledDate={(d) => isDisabledDate(d, batchInfo?.days, holidayMap)}
+            disabledDate={(d) => {
+              if (!d) return true;
+              // Disable dates outside the batch's start/end date range
+              if (batchInfo) {
+                if (batchInfo.startDate) {
+                  const bs = dayjs(batchInfo.startDate).startOf("day");
+                  if (d.isBefore(bs, "day")) return true;
+                }
+                if (batchInfo.endDate) {
+                  const be = dayjs(batchInfo.endDate).endOf("day");
+                  if (d.isAfter(be, "day")) return true;
+                }
+              }
+              return isDisabledDate(d, batchInfo?.days, holidayMap);
+            }}
             renderExtraFooter={() =>
               holidayMap.size > 0 ? (
                 <div className="text-xs text-gray-500 px-2 py-1">
