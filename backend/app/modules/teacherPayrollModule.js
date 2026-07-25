@@ -49,6 +49,21 @@ const TeacherPayrollSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    baseDueAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    carryForwardInAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    carryForwardEligibleAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     dueAmount: {
       type: Number,
       required: true,

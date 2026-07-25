@@ -165,24 +165,42 @@ const hasCompletedEnrollment = (student) =>
     (enrollment) => normalizeEnrollmentStatus(enrollment.status) === "completed",
   );
 
+const isEnrollmentInCategory = (enrollment, category) => {
+  const status = normalizeEnrollmentStatus(enrollment?.status);
+
+  if (category === "active") {
+    return ACTIVE_ENROLLMENT_STATUS_SET.has(status);
+  }
+
+  if (category === "dropout") {
+    return status === "dropped";
+  }
+
+  if (category === "passout") {
+    return status === "completed";
+  }
+
+  return true;
+};
+
+const getEnrollmentsForCategory = (student, category) => {
+  const enrollments = Array.isArray(student?.enrollments) ? student.enrollments : [];
+
+  if (category === "all") {
+    return enrollments;
+  }
+
+  return enrollments.filter((enrollment) =>
+    isEnrollmentInCategory(enrollment, category),
+  );
+};
+
 const matchesStudentCategory = (student, category) => {
   if (category === "all") {
     return true;
   }
 
-  if (category === "active") {
-    return hasActiveEnrollment(student);
-  }
-
-  if (category === "dropout") {
-    return !hasActiveEnrollment(student) && hasDroppedEnrollment(student);
-  }
-
-  if (category === "passout") {
-    return !hasActiveEnrollment(student) && hasCompletedEnrollment(student);
-  }
-
-  return true;
+  return getEnrollmentsForCategory(student, category).length > 0;
 };
 
 const getStudentLifecycleStatus = (student) => {
@@ -420,6 +438,9 @@ const Students = () => {
   const [studentStatusRecord, setStudentStatusRecord] = useState(null);
   const [selectedStudentStatus, setSelectedStudentStatus] =
     useState("Dropped");
+  const [selectedStatusEnrollmentIds, setSelectedStatusEnrollmentIds] = useState(
+    [],
+  );
   const fileInputRef = useRef(null);
   const [tablePageSize, setTablePageSize] = useState(3);
   const [tablePage, setTablePage] = useState(1);
@@ -610,32 +631,7 @@ const Students = () => {
   };
 
   const getTargetEnrollmentsForStatusChange = (student, sourceCategory) => {
-    const enrollments = Array.isArray(student?.enrollments)
-      ? student.enrollments
-      : [];
-
-    if (sourceCategory === "active") {
-      return enrollments.filter((enrollment) =>
-        ACTIVE_ENROLLMENT_STATUS_SET.has(
-          normalizeEnrollmentStatus(enrollment.status),
-        ),
-      );
-    }
-
-    if (sourceCategory === "dropout") {
-      return enrollments.filter(
-        (enrollment) => normalizeEnrollmentStatus(enrollment.status) === "dropped",
-      );
-    }
-
-    if (sourceCategory === "passout") {
-      return enrollments.filter(
-        (enrollment) =>
-          normalizeEnrollmentStatus(enrollment.status) === "completed",
-      );
-    }
-
-    return [];
+    return getEnrollmentsForCategory(student, sourceCategory);
   };
 
   const getAvailableStatusOptions = (sourceCategory) => {
@@ -663,8 +659,18 @@ const Students = () => {
     const options = getAvailableStatusOptions(activeStudentCategory);
     if (!options.length) return;
 
+    const targetEnrollments = getTargetEnrollmentsForStatusChange(
+      student,
+      activeStudentCategory,
+    );
+
     setStudentStatusRecord(student);
     setSelectedStudentStatus(options[0].value);
+    setSelectedStatusEnrollmentIds(
+      targetEnrollments
+        .map((enrollment) => enrollment?._id)
+        .filter(Boolean),
+    );
     setStatusModalVisible(true);
   };
 
@@ -673,6 +679,7 @@ const Students = () => {
     setStatusModalVisible(false);
     setStudentStatusRecord(null);
     setSelectedStudentStatus("Dropped");
+    setSelectedStatusEnrollmentIds([]);
   };
 
   const handleStudentStatusUpdate = async () => {
@@ -689,10 +696,19 @@ const Students = () => {
       return;
     }
 
+    const selectedEnrollments = targetEnrollments.filter((enrollment) =>
+      selectedStatusEnrollmentIds.includes(enrollment?._id),
+    );
+
+    if (!selectedEnrollments.length) {
+      message.warning("Please select at least one course to update.");
+      return;
+    }
+
     setStatusLoading(true);
     try {
       await Promise.all(
-        targetEnrollments.map((enrollment) =>
+        selectedEnrollments.map((enrollment) =>
           updateEnrollmentStatus(enrollment._id, {
             status: selectedStudentStatus,
             completionDate:
@@ -2374,44 +2390,42 @@ const Students = () => {
                   key="courses"
                   width={260}
                   render={(record) => {
-                    const lifecycleStatus = getStudentLifecycleStatus(record);
-                    const activeEnrollments = Array.isArray(record.enrollments)
-                      ? record.enrollments.filter(
-                          (enrollment) =>
-                            ACTIVE_ENROLLMENT_STATUS_SET.has(
-                              normalizeEnrollmentStatus(enrollment.status),
-                            ),
-                        )
-                      : [];
-
-                    if (activeStudentCategory !== "active") {
-                      return (
-                        <div>
-                          <Tag
-                            color={lifecycleStatus.color}
-                            style={{
-                              width: "fit-content",
-                              margin: 0,
-                              fontSize: "12px",
-                              fontWeight: 600,
-                              paddingInline: "10px",
-                              borderRadius: "999px",
-                            }}
-                          >
-                            {lifecycleStatus.label}
-                          </Tag>
-                        </div>
-                      );
-                    }
+                    const displayCategory =
+                      activeStudentCategory === "all"
+                        ? "active"
+                        : activeStudentCategory;
+                    const relevantEnrollments =
+                      getEnrollmentsForCategory(record, displayCategory);
+                    const statusMeta =
+                      displayCategory === "passout"
+                        ? {
+                            tagColor: "purple",
+                            tagLabel: "Passout",
+                            buttonLabel: "passout courses",
+                            emptyLabel: "No passout courses",
+                          }
+                        : displayCategory === "dropout"
+                          ? {
+                              tagColor: "red",
+                              tagLabel: "Dropout",
+                              buttonLabel: "dropout courses",
+                              emptyLabel: "No dropout courses",
+                            }
+                          : {
+                              tagColor: "green",
+                              tagLabel: "Active",
+                              buttonLabel: "active courses",
+                              emptyLabel: "No active enrollments",
+                            };
 
                     const isExpanded = Boolean(expandedEnrollmentRows[record._id]);
                     const visibleEnrollments = isExpanded
-                      ? activeEnrollments
-                      : activeEnrollments.slice(0, 1);
+                      ? relevantEnrollments
+                      : relevantEnrollments.slice(0, 1);
 
                     return (
                     <div>
-                      {activeEnrollments.length > 0 ? (
+                      {relevantEnrollments.length > 0 ? (
                         <div
                           style={{
                             display: "flex",
@@ -2512,8 +2526,11 @@ const Students = () => {
                                       </span>
                                     )}
                                   </div>
-                                  <Tag color="green" style={{ fontSize: "10px", margin: 0 }}>
-                                    Active
+                                  <Tag
+                                    color={statusMeta.tagColor}
+                                    style={{ fontSize: "10px", margin: 0 }}
+                                  >
+                                    {statusMeta.tagLabel}
                                   </Tag>
                                 </div>
                                 {enrollment.batch && (
@@ -2598,7 +2615,7 @@ const Students = () => {
                               </div>
                             </Tooltip>
                           ))}
-                          {activeEnrollments.length > 1 && (
+                          {relevantEnrollments.length > 1 && (
                             <button
                               type="button"
                               onClick={() => toggleEnrollmentRow(record._id)}
@@ -2620,7 +2637,7 @@ const Students = () => {
                               <span>
                                 {isExpanded
                                   ? "Hide extra courses"
-                                  : `${activeEnrollments.length} active courses`}
+                                  : `${relevantEnrollments.length} ${statusMeta.buttonLabel}`}
                               </span>
                               {isExpanded ? (
                                 <FaChevronUp style={{ fontSize: "10px" }} />
@@ -2632,7 +2649,7 @@ const Students = () => {
                         </div>
                       ) : (
                         <Tag color="default" style={{ fontSize: "12px" }}>
-                          No active enrollments
+                          {statusMeta.emptyLabel}
                         </Tag>
                       )}
                     </div>
@@ -2833,6 +2850,34 @@ const Students = () => {
           </div>
 
           <div>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: "#0F172A",
+                marginBottom: 8,
+              }}
+            >
+              Select course
+            </div>
+            <Select
+              mode="multiple"
+              value={selectedStatusEnrollmentIds}
+              onChange={setSelectedStatusEnrollmentIds}
+              style={{ width: "100%", marginBottom: 16 }}
+              size="large"
+              placeholder="Select one or more courses"
+              options={getTargetEnrollmentsForStatusChange(
+                studentStatusRecord,
+                activeStudentCategory,
+              ).map((enrollment) => ({
+                label: `${
+                  enrollment.course?.courseName || "Unnamed course"
+                }${enrollment.batch?.batchName ? ` - ${enrollment.batch.batchName}` : ""}`,
+                value: enrollment._id,
+              }))}
+            />
+
             <div
               style={{
                 fontSize: 14,

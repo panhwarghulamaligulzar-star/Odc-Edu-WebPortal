@@ -558,6 +558,25 @@ const StudentProfile = () => {
      TAB: Enrollments & Courses
      ══════════════════════════════════════════════════════════════════════ */
   const EnrollmentsTab = () => {
+    const statusSummary = enrollments.reduce(
+      (summary, enrollment) => {
+        const status = String(enrollment?.status || "").toLowerCase();
+
+        if (status === "completed") {
+          summary.passout += 1;
+        } else if (status === "dropped") {
+          summary.dropout += 1;
+        } else if (status === "active" || status === "enrolled") {
+          summary.active += 1;
+        } else {
+          summary.other += 1;
+        }
+
+        return summary;
+      },
+      { active: 0, passout: 0, dropout: 0, other: 0 },
+    );
+
     const installmentColumns = [
       {
         title: "#",
@@ -685,6 +704,54 @@ const StudentProfile = () => {
 
     return (
       <div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+          {[
+            {
+              label: "Active Courses",
+              value: statusSummary.active,
+              color: "#16A34A",
+              bg: "#F0FDF4",
+            },
+            {
+              label: "Passout Courses",
+              value: statusSummary.passout,
+              color: "#7C3AED",
+              bg: "#F5F3FF",
+            },
+            {
+              label: "Dropout Courses",
+              value: statusSummary.dropout,
+              color: "#DC2626",
+              bg: "#FEF2F2",
+            },
+            {
+              label: "Other Status",
+              value: statusSummary.other,
+              color: "#475569",
+              bg: "#F8FAFC",
+            },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className="rounded-xl border px-4 py-3"
+              style={{ background: item.bg, borderColor: `${item.color}22` }}
+            >
+              <div
+                className="text-xs font-semibold uppercase tracking-wide"
+                style={{ color: item.color }}
+              >
+                {item.label}
+              </div>
+              <div
+                className="text-2xl font-bold mt-1"
+                style={{ color: item.color }}
+              >
+                {item.value}
+              </div>
+            </div>
+          ))}
+        </div>
+
         {enrollments.length === 0 ? (
           <Empty description="No enrollments found" />
         ) : (

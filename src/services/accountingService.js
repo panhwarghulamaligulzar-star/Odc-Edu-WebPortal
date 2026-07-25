@@ -64,6 +64,48 @@ export const deleteHeadOfAccount = async (id) => {
   }
 };
 
+export const getExpenseHeadEntries = async (filters = {}) => {
+  try {
+    const response = await api.get("/accounting/expense-head-entries", {
+      params: filters,
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Get Expense Head Entries Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
+export const createExpenseHeadEntry = async (data) => {
+  try {
+    const response = await api.post("/accounting/expense-head-entries", data);
+    return response.data;
+  } catch (error) {
+    console.error("Create Expense Head Entry Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
+export const updateExpenseHeadEntry = async (id, data) => {
+  try {
+    const response = await api.put(`/accounting/expense-head-entries/${id}`, data);
+    return response.data;
+  } catch (error) {
+    console.error("Update Expense Head Entry Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
+export const deleteExpenseHeadEntry = async (id) => {
+  try {
+    const response = await api.delete(`/accounting/expense-head-entries/${id}`);
+    return response.data;
+  } catch (error) {
+    console.error("Delete Expense Head Entry Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
 // ============================================================
 // PAYMENT METHODS (Banks & Cash)
 // ============================================================

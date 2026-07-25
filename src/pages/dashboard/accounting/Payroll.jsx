@@ -1,19 +1,24 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  Card,
-  Table,
   Button,
-  Tag,
-  Modal,
-  Form,
+  Card,
   DatePicker,
+  Descriptions,
+  Form,
   Input,
   InputNumber,
-  message,
-  Statistic,
+  Modal,
   Select,
+  Space,
+  Statistic,
+  Table,
+  Tag,
+  Typography,
+  message,
 } from "antd";
 import dayjs from "dayjs";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import {
   getTeacherPayroll,
   getPaymentMethods,
@@ -23,20 +28,26 @@ import {
   createHeadOfAccount,
 } from "../../../services/accountingService";
 
-const getDefaultPayrollMonth = () => dayjs().subtract(1, "month").startOf("month");
-const formatCurrency = (value) => `Rs ${Number(value || 0).toLocaleString()}`;
+const { Text } = Typography;
+
+const getDefaultPayrollMonth = () =>
+  dayjs().subtract(1, "month").startOf("month");
+const formatCurrency = (value) =>
+  `Rs ${Number(value || 0).toLocaleString("en-PK")}`;
 const isSalaryHeadName = (name) => /^salary$/i.test(String(name || "").trim());
 const isSalaryLikeHeadName = (name) =>
   /(salary|payroll|wages?)/i.test(String(name || "").trim());
+const getMonthLabel = (year, month) =>
+  dayjs(`${year}-${String(month).padStart(2, "0")}-01`).format("MMMM YYYY");
 
 const Payroll = () => {
   const [payrollData, setPayrollData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
+  const [detailsModalVisible, setDetailsModalVisible] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [expenseTypeId, setExpenseTypeId] = useState(null);
-  const [expenseHeads, setExpenseHeads] = useState([]);
   const [allHeads, setAllHeads] = useState([]);
   const [accountingTypes, setAccountingTypes] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState(getDefaultPayrollMonth());
@@ -53,7 +64,9 @@ const Payroll = () => {
         head.isActive !== false &&
         isSalaryHeadName(head.name) &&
         String(
-          typeof head.type === "object" && head.type?._id ? head.type._id : head.type,
+          typeof head.type === "object" && head.type?._id
+            ? head.type._id
+            : head.type,
         ) === String(expenseTypeId),
     );
     if (exactSalaryHead) return exactSalaryHead;
@@ -63,21 +76,51 @@ const Payroll = () => {
         head.isActive !== false &&
         isSalaryLikeHeadName(head.name) &&
         String(
-          typeof head.type === "object" && head.type?._id ? head.type._id : head.type,
+          typeof head.type === "object" && head.type?._id
+            ? head.type._id
+            : head.type,
         ) === String(expenseTypeId),
     );
     if (salaryLikeHead) return salaryLikeHead;
 
-    const anyExpenseHead = heads.find(
-      (head) =>
-        head.isActive !== false &&
-        String(
-          typeof head.type === "object" && head.type?._id ? head.type._id : head.type,
-        ) === String(expenseTypeId),
+    return (
+      heads.find(
+        (head) =>
+          head.isActive !== false &&
+          String(
+            typeof head.type === "object" && head.type?._id
+              ? head.type._id
+              : head.type,
+          ) === String(expenseTypeId),
+      ) ||
+      heads.find((head) => head.isActive !== false) ||
+      null
     );
-    if (anyExpenseHead) return anyExpenseHead;
+  };
 
-    return heads.find((head) => head.isActive !== false) || null;
+  const getVisibleHeadOptions = () => {
+    const activeHeads = allHeads.filter((head) => head.isActive !== false);
+    const filteredHeads = selectedHeadTypeId
+      ? activeHeads.filter(
+          (head) =>
+            String(
+              typeof head.type === "object" && head.type?._id
+                ? head.type._id
+                : head.type,
+            ) === String(selectedHeadTypeId),
+        )
+      : activeHeads;
+
+    const headsToShow = filteredHeads.length > 0 ? filteredHeads : activeHeads;
+
+    return headsToShow.map((head) => {
+      const typeLabel =
+        typeof head.type === "object" ? head.type?.name : head.typeLabel || "";
+      return {
+        label: typeLabel ? `${head.name} (${typeLabel})` : head.name,
+        value: head._id,
+      };
+    });
   };
 
   const loadAccountingReferences = async () => {
@@ -92,22 +135,13 @@ const Payroll = () => {
     }
 
     const allTypes = typesRes?.success ? typesRes.data || [] : [];
-    setAccountingTypes(allTypes || []);
+    setAccountingTypes(allTypes);
 
     const expenseType = allTypes.find(
       (item) => String(item?.name || "").trim().toLowerCase() === "expense",
     );
     setExpenseTypeId(expenseType?._id || null);
-
-    const headsList = headsRes?.success ? headsRes.data || [] : [];
-    setAllHeads(headsList || []);
-
-    const filteredExpenseHeads = headsList.filter((head) => {
-      const typeId =
-        typeof head?.type === "object" && head?.type?._id ? head.type._id : head?.type;
-      return expenseType?._id ? String(typeId) === String(expenseType._id) : false;
-    });
-    setExpenseHeads(filteredExpenseHeads);
+    setAllHeads(headsRes?.success ? headsRes.data || [] : []);
   };
 
   const ensureSalaryHeadConfigured = async () => {
@@ -132,7 +166,8 @@ const Payroll = () => {
 
     if (!createRes?.success) {
       throw new Error(
-        createRes?.message || "Failed to create the Salary expense head automatically.",
+        createRes?.message ||
+          "Failed to create the Salary expense head automatically.",
       );
     }
 
@@ -143,16 +178,7 @@ const Payroll = () => {
       isActive: true,
     };
 
-    setAllHeads((prev) => {
-      const next = [...prev, createdHead].filter(Boolean);
-      return next;
-    });
-
-    setExpenseHeads((prev) => {
-      const next = [...prev, createdHead].filter(Boolean);
-      return next;
-    });
-
+    setAllHeads((prev) => [...prev, createdHead].filter(Boolean));
     return createdHead;
   };
 
@@ -177,21 +203,30 @@ const Payroll = () => {
 
   useEffect(() => {
     fetchPayroll();
-    loadAccountingReferences()
-      .catch((error) => {
-        message.error(error.message || "Failed to load payroll payment options");
-      });
+    loadAccountingReferences().catch((error) => {
+      message.error(error.message || "Failed to load payroll payment options");
+    });
   }, []);
 
-  const openPaymentModal = (record) => {
-    const preferredSalaryHead = getPreferredSalaryHead();
-    setSelectedRecord(record);
+  const openPaymentModal = async (record) => {
+    let preferredSalaryHead = getPreferredSalaryHead();
+    if (!preferredSalaryHead) {
+      try {
+        preferredSalaryHead = await ensureSalaryHeadConfigured();
+      } catch (error) {
+        console.error("Failed to auto-configure salary head:", error);
+      }
+    }
+
     const preferredHeadTypeId =
       (preferredSalaryHead &&
         (typeof preferredSalaryHead.type === "object"
           ? preferredSalaryHead.type?._id
-          : preferredSalaryHead.type)) || expenseTypeId;
+          : preferredSalaryHead.type)) ||
+      expenseTypeId ||
+      null;
 
+    setSelectedRecord(record);
     setSelectedHeadTypeId(preferredHeadTypeId);
     form.setFieldsValue({
       paymentDate: dayjs(),
@@ -199,11 +234,20 @@ const Payroll = () => {
       paymentMethodId: getPreferredPaymentMethodId(),
       head: preferredSalaryHead?._id,
       headTypeId: preferredHeadTypeId,
-      details: "Salary payout",
+      details: `Salary payout for ${record.month.displayLabel}`,
       year: record.month.year,
       month: record.month.month,
     });
     setPaymentModalVisible(true);
+  };
+
+  const openDetailsModal = (record) => {
+    setSelectedRecord(record);
+    setDetailsModalVisible(true);
+  };
+
+  const closeDetailsModal = () => {
+    setDetailsModalVisible(false);
   };
 
   const handlePayment = async () => {
@@ -212,6 +256,11 @@ const Payroll = () => {
       const paymentAmount = Number(values.amount || 0);
       if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
         message.error("Please enter a valid salary payment amount.");
+        return;
+      }
+
+      if (paymentAmount > Number(selectedRecord?.payroll?.remainingAmount || 0)) {
+        message.error("Payment amount cannot exceed the remaining amount.");
         return;
       }
 
@@ -228,29 +277,147 @@ const Payroll = () => {
         allHeads.find((head) => String(head._id) === String(values.head || "")) ||
         (await ensureSalaryHeadConfigured());
 
-      if (!salaryHead?._id) {
-        message.error(
-          "Salary expense head is missing. Please create an Expense head named Salary in Heads of Account.",
-        );
-        return;
-      }
-
       const payload = {
         ...values,
         head: salaryHead._id,
         headId: salaryHead._id,
-        type: values.headTypeId || (salaryHead.type && (salaryHead.type._id || salaryHead.type)),
+        type:
+          values.headTypeId ||
+          (salaryHead.type && (salaryHead.type._id || salaryHead.type)),
         paymentMethodId: selectedPaymentMethodId,
         paymentDate: values.paymentDate.toISOString(),
       };
+
       const res = await payTeacherPayroll(selectedRecord.teacher._id, payload);
       if (res?.success) {
         message.success(res.message || "Payment successful");
         setPaymentModalVisible(false);
-        fetchPayroll(selectedMonth);
+        await fetchPayroll(selectedMonth);
       }
     } catch (error) {
       message.error(error.message || "Failed to process salary payment");
+    }
+  };
+
+  const filteredPayrollData = useMemo(
+    () =>
+      selectedTeacherId
+        ? payrollData.filter(
+            (item) =>
+              String(item.teacher?._id) === String(selectedTeacherId),
+          )
+        : payrollData,
+    [payrollData, selectedTeacherId],
+  );
+
+  const teacherOptions = payrollData.map((item) => ({
+    label: item.teacher?.fullName || "Unknown Teacher",
+    value: item.teacher?._id,
+  }));
+
+  const exportPayrollDetailsPdf = (record) => {
+    try {
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      const title = `${record.teacher.fullName} Payroll Detail`;
+      const monthLabel = record.month?.displayLabel || "Payroll";
+
+      doc.setFillColor(20, 45, 120);
+      doc.rect(0, 0, 210, 32, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.text(title, 14, 16);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(monthLabel, 14, 24);
+
+      doc.setTextColor(17, 24, 39);
+      doc.setFontSize(10);
+      doc.text(
+        `Generated: ${dayjs().format("DD MMM YYYY hh:mm A")}`,
+        14,
+        40,
+      );
+
+      autoTable(doc, {
+        startY: 46,
+        theme: "grid",
+        head: [["Field", "Value"]],
+        body: [
+          ["Teacher", record.teacher.fullName || "N/A"],
+          ["Teacher ID", record.teacher.teacherId || "N/A"],
+          [
+            "Salary Type",
+            record.salaryConfig?.salaryType === "per_student"
+              ? "Per Student"
+              : "Fixed",
+          ],
+          [
+            "Current Month Salary",
+            formatCurrency(record.payroll.baseDueAmount || 0),
+          ],
+          [
+            "Carry From Previous Month",
+            formatCurrency(record.payroll.carryForwardInAmount || 0),
+          ],
+          ["Total Due", formatCurrency(record.payroll.dueAmount || 0)],
+          ["Paid", formatCurrency(record.payroll.paidAmount || 0)],
+          ["Remaining", formatCurrency(record.payroll.remainingAmount || 0)],
+          [
+            "Next Month Carry",
+            formatCurrency(record.payroll.carryForwardEligibleAmount || 0),
+          ],
+          [
+            "Carry Source",
+            record.payroll.carryForwardSourceMonth
+              ? getMonthLabel(
+                  record.payroll.carryForwardSourceMonth.year,
+                  record.payroll.carryForwardSourceMonth.month,
+                )
+              : "None",
+          ],
+          [
+            "Active Students",
+            String(record.summary?.totalActiveStudents || 0),
+          ],
+          [
+            "Eligible Students",
+            String(record.summary?.eligibleStudents || 0),
+          ],
+        ],
+        headStyles: {
+          fillColor: [20, 45, 120],
+          textColor: [255, 255, 255],
+        },
+      });
+
+      autoTable(doc, {
+        startY: doc.lastAutoTable.finalY + 8,
+        theme: "grid",
+        head: [["Payment Date", "Account", "Amount", "Details"]],
+        body:
+          (record.payroll.paymentEntries || []).map((entry) => [
+            entry.paymentDate
+              ? dayjs(entry.paymentDate).format("DD MMM YYYY")
+              : "N/A",
+            entry.paymentMethodName || "N/A",
+            formatCurrency(entry.amount || 0),
+            entry.details || "-",
+          ]) || [],
+        headStyles: {
+          fillColor: [15, 118, 110],
+          textColor: [255, 255, 255],
+        },
+      });
+
+      doc.save(
+        `${record.teacher.fullName.replace(/\s+/g, "_")}_Payroll_${record.month.year}_${String(
+          record.month.month,
+        ).padStart(2, "0")}.pdf`,
+      );
+    } catch (error) {
+      console.error("Payroll PDF error:", error);
+      message.error("Failed to generate payroll PDF");
     }
   };
 
@@ -290,7 +457,17 @@ const Payroll = () => {
       title: "Due",
       dataIndex: ["payroll", "dueAmount"],
       key: "dueAmount",
-      render: (value) => formatCurrency(value),
+      render: (_, record) => (
+        <div>
+          <div>{formatCurrency(record.payroll.dueAmount)}</div>
+          <div className="text-xs text-gray-500">
+            Salary: {formatCurrency(record.payroll.baseDueAmount || 0)}
+            {record.payroll.carryForwardInAmount > 0
+              ? ` | Carry: ${formatCurrency(record.payroll.carryForwardInAmount)}`
+              : ""}
+          </div>
+        </div>
+      ),
     },
     {
       title: "Paid",
@@ -302,40 +479,43 @@ const Payroll = () => {
       title: "Remaining",
       dataIndex: ["payroll", "remainingAmount"],
       key: "remainingAmount",
-      render: (value) => formatCurrency(value),
+      render: (_, record) => (
+        <div>
+          <div>{formatCurrency(record.payroll.remainingAmount)}</div>
+          <div className="text-xs text-gray-500">
+            Next carry:{" "}
+            {formatCurrency(record.payroll.carryForwardEligibleAmount || 0)}
+          </div>
+        </div>
+      ),
     },
     {
       title: "Status",
       dataIndex: ["payroll", "status"],
       key: "status",
       render: (value) => {
-        const color = value === "paid" ? "green" : value === "partial" ? "orange" : "red";
-        return <Tag color={color}>{value.toUpperCase()}</Tag>;
+        const color =
+          value === "paid" ? "green" : value === "partial" ? "orange" : "red";
+        return <Tag color={color}>{String(value || "").toUpperCase()}</Tag>;
       },
     },
     {
       title: "Action",
       key: "action",
       render: (_, record) => (
-        <Button
-          type="primary"
-          onClick={() => openPaymentModal(record)}
-          disabled={record.payroll.remainingAmount <= 0}
-        >
-          Pay
-        </Button>
+        <Space wrap>
+          <Button onClick={() => openDetailsModal(record)}>View</Button>
+          <Button
+            type="primary"
+            onClick={() => openPaymentModal(record)}
+            disabled={record.payroll.remainingAmount <= 0}
+          >
+            Pay
+          </Button>
+        </Space>
       ),
     },
   ];
-
-  const teacherOptions = payrollData.map((item) => ({
-    label: item.teacher?.fullName || "Unknown Teacher",
-    value: item.teacher?._id,
-  }));
-
-  const filteredPayrollData = selectedTeacherId
-    ? payrollData.filter((item) => String(item.teacher?._id) === String(selectedTeacherId))
-    : payrollData;
 
   return (
     <div className="space-y-4">
@@ -345,7 +525,7 @@ const Payroll = () => {
         </Card>
         <Card>
           <Statistic
-            title="Total Unpaid"
+            title="Total Remaining"
             value={filteredPayrollData.reduce(
               (sum, item) => sum + Number(item.payroll.remainingAmount || 0),
               0,
@@ -403,7 +583,11 @@ const Payroll = () => {
       </Card>
 
       <Modal
-        title={selectedRecord ? `Pay Salary — ${selectedRecord.teacher.fullName}` : "Pay Salary"}
+        title={
+          selectedRecord
+            ? `Pay Salary - ${selectedRecord.teacher.fullName}`
+            : "Pay Salary"
+        }
         open={paymentModalVisible}
         onCancel={() => setPaymentModalVisible(false)}
         onOk={handlePayment}
@@ -423,7 +607,11 @@ const Payroll = () => {
             name="amount"
             rules={[{ required: true, message: "Enter payment amount" }]}
           >
-            <InputNumber className="w-full" min={0} />
+            <InputNumber
+              className="w-full"
+              min={0}
+              max={selectedRecord?.payroll?.remainingAmount || 0}
+            />
           </Form.Item>
           <Form.Item
             label="Pay From Account"
@@ -443,34 +631,23 @@ const Payroll = () => {
           <Form.Item
             label="Salary Head of Account"
             name="head"
-            rules={allHeads.length > 0 ? [{ required: true, message: "Select salary head" }] : []}
-            extra={
-              allHeads.length === 0
-                ? "No heads found. A Salary head will be created automatically when you pay if your account has permission."
-                : "Select head of account for this payment."
+            rules={
+              allHeads.length > 0
+                ? [{ required: true, message: "Select salary head" }]
+                : []
             }
           >
             <Select
               placeholder="Select salary head"
-              options={allHeads
-                .filter((h) => h.isActive !== false)
-                .filter((h) =>
-                  selectedHeadTypeId
-                    ? String(
-                        typeof h.type === "object" && h.type?._id
-                          ? h.type._id
-                          : h.type,
-                      ) === String(selectedHeadTypeId)
-                    : true,
-                )
-                .map((head) => ({ label: head.name, value: head._id }))}
+              options={getVisibleHeadOptions()}
               showSearch
               allowClear
               optionFilterProp="label"
               onChange={(value) => {
                 const head = allHeads.find((h) => String(h._id) === String(value));
                 const typeId =
-                  head && (typeof head.type === "object" ? head.type?._id : head.type);
+                  head &&
+                  (typeof head.type === "object" ? head.type?._id : head.type);
                 if (typeId) {
                   setSelectedHeadTypeId(typeId);
                   form.setFieldsValue({ headTypeId: typeId });
@@ -478,10 +655,17 @@ const Payroll = () => {
               }}
             />
           </Form.Item>
-          <Form.Item label="Income / Expense Type" name="headTypeId" rules={[{ required: true }]}> 
+          <Form.Item
+            label="Income / Expense Type"
+            name="headTypeId"
+            rules={[{ required: true }]}
+          >
             <Select
               placeholder="Select type"
-              options={accountingTypes.map((t) => ({ label: t.name, value: t._id }))}
+              options={accountingTypes.map((t) => ({
+                label: t.name,
+                value: t._id,
+              }))}
               showSearch
               optionFilterProp="label"
               onChange={(value) => {
@@ -490,10 +674,7 @@ const Payroll = () => {
               }}
             />
           </Form.Item>
-          <Form.Item
-            label="Details"
-            name="details"
-          >
+          <Form.Item label="Details" name="details">
             <Input.TextArea rows={3} placeholder="Payment details" />
           </Form.Item>
           <Form.Item name="year" hidden>
@@ -503,6 +684,215 @@ const Payroll = () => {
             <InputNumber />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={
+          selectedRecord
+            ? `Payroll Detail - ${selectedRecord.teacher.fullName}`
+            : "Payroll Detail"
+        }
+        open={detailsModalVisible}
+        onCancel={closeDetailsModal}
+        footer={
+          selectedRecord
+            ? [
+                <Button key="close" onClick={closeDetailsModal}>
+                  Close
+                </Button>,
+                <Button
+                  key="pdf"
+                  type="primary"
+                  onClick={() => exportPayrollDetailsPdf(selectedRecord)}
+                >
+                  Download PDF
+                </Button>,
+              ]
+            : null
+        }
+        width={980}
+      >
+        {selectedRecord ? (
+          <div className="space-y-4">
+            <Descriptions bordered column={2} size="small">
+              <Descriptions.Item label="Teacher">
+                {selectedRecord.teacher.fullName}
+              </Descriptions.Item>
+              <Descriptions.Item label="Month">
+                {selectedRecord.month.displayLabel}
+              </Descriptions.Item>
+              <Descriptions.Item label="Salary Type">
+                {selectedRecord.salaryConfig?.salaryType === "per_student"
+                  ? "Per Student"
+                  : "Fixed"}
+              </Descriptions.Item>
+              <Descriptions.Item label="Status">
+                <Tag
+                  color={
+                    selectedRecord.payroll.status === "paid"
+                      ? "green"
+                      : selectedRecord.payroll.status === "partial"
+                      ? "orange"
+                      : "red"
+                  }
+                >
+                  {String(selectedRecord.payroll.status).toUpperCase()}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Current Month Salary">
+                {formatCurrency(selectedRecord.payroll.baseDueAmount || 0)}
+              </Descriptions.Item>
+              <Descriptions.Item label="Carry From Previous Month">
+                {formatCurrency(selectedRecord.payroll.carryForwardInAmount || 0)}
+              </Descriptions.Item>
+              <Descriptions.Item label="Total Due">
+                {formatCurrency(selectedRecord.payroll.dueAmount || 0)}
+              </Descriptions.Item>
+              <Descriptions.Item label="Paid">
+                {formatCurrency(selectedRecord.payroll.paidAmount || 0)}
+              </Descriptions.Item>
+              <Descriptions.Item label="Remaining">
+                {formatCurrency(selectedRecord.payroll.remainingAmount || 0)}
+              </Descriptions.Item>
+              <Descriptions.Item label="Next Month Carry">
+                {formatCurrency(
+                  selectedRecord.payroll.carryForwardEligibleAmount || 0,
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="Carry Source">
+                {selectedRecord.payroll.carryForwardSourceMonth
+                  ? getMonthLabel(
+                      selectedRecord.payroll.carryForwardSourceMonth.year,
+                      selectedRecord.payroll.carryForwardSourceMonth.month,
+                    )
+                  : "None"}
+              </Descriptions.Item>
+              <Descriptions.Item label="Eligible Students">
+                {selectedRecord.summary?.eligibleStudents || 0}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+              <Card size="small">
+                <Statistic
+                  title="Carry Applied"
+                  value={selectedRecord.payroll.appliedToCarry || 0}
+                  formatter={(value) => formatCurrency(value)}
+                />
+              </Card>
+              <Card size="small">
+                <Statistic
+                  title="Current Salary Applied"
+                  value={selectedRecord.payroll.appliedToCurrent || 0}
+                  formatter={(value) => formatCurrency(value)}
+                />
+              </Card>
+              <Card size="small">
+                <Statistic
+                  title="Active Students"
+                  value={selectedRecord.summary?.totalActiveStudents || 0}
+                />
+              </Card>
+              <Card size="small">
+                <Statistic
+                  title="Courses"
+                  value={selectedRecord.summary?.totalAssignedCourses || 0}
+                />
+              </Card>
+            </div>
+
+            <Card size="small" title="Assigned Courses">
+              <Space wrap>
+                {(selectedRecord.courses || []).map((course) => (
+                  <Tag key={course._id} color="blue">
+                    {course.courseName} ({course.activeStudentCount || 0} students)
+                  </Tag>
+                ))}
+              </Space>
+            </Card>
+
+            <Card size="small" title="Payment History">
+              <Table
+                rowKey={(entry, index) =>
+                  entry.transactionId || `${entry.paymentDate}-${index}`
+                }
+                pagination={false}
+                dataSource={selectedRecord.payroll.paymentEntries || []}
+                columns={[
+                  {
+                    title: "Date",
+                    dataIndex: "paymentDate",
+                    key: "paymentDate",
+                    render: (value) =>
+                      value ? dayjs(value).format("DD MMM YYYY") : "N/A",
+                  },
+                  {
+                    title: "Account",
+                    dataIndex: "paymentMethodName",
+                    key: "paymentMethodName",
+                    render: (value) => value || "N/A",
+                  },
+                  {
+                    title: "Amount",
+                    dataIndex: "amount",
+                    key: "amount",
+                    render: (value) => formatCurrency(value),
+                  },
+                  {
+                    title: "Details",
+                    dataIndex: "details",
+                    key: "details",
+                    render: (value) => value || "-",
+                  },
+                ]}
+              />
+            </Card>
+
+            <Card size="small" title="Student Salary Breakdown">
+              <Table
+                rowKey={(student) => student.studentId}
+                pagination={{ pageSize: 6 }}
+                dataSource={selectedRecord.studentsForSalary || []}
+                columns={[
+                  {
+                    title: "Student",
+                    dataIndex: "studentName",
+                    key: "studentName",
+                  },
+                  {
+                    title: "Reg No",
+                    dataIndex: "registrationNo",
+                    key: "registrationNo",
+                  },
+                  {
+                    title: "Attendance %",
+                    dataIndex: "attendancePercentage",
+                    key: "attendancePercentage",
+                    render: (value) => `${Number(value || 0).toFixed(1)}%`,
+                  },
+                  {
+                    title: "Salary",
+                    dataIndex: "calculatedSalaryAmount",
+                    key: "calculatedSalaryAmount",
+                    render: (value) => formatCurrency(value),
+                  },
+                  {
+                    title: "Status",
+                    dataIndex: "isEligible",
+                    key: "isEligible",
+                    render: (value) => (
+                      <Tag color={value ? "green" : "orange"}>
+                        {value ? "Eligible" : "Not Eligible"}
+                      </Tag>
+                    ),
+                  },
+                ]}
+              />
+            </Card>
+          </div>
+        ) : (
+          <Text type="secondary">No payroll record selected.</Text>
+        )}
       </Modal>
     </div>
   );

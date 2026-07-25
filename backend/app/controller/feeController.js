@@ -10,6 +10,54 @@ import {
 } from "../utils/installmentCalculator.js";
 import { createAutoAccountingEntry } from "../utils/autoAccountingEntry.js";
 
+const getDb = async () => {
+  const mongoose = (await import("mongoose")).default;
+  return mongoose.connection.db;
+};
+
+const findRawById = async (collectionName, id) => {
+  const normalizedId = String(id || "").trim();
+  if (!normalizedId) {
+    return null;
+  }
+
+  const db = await getDb();
+  return db.collection(collectionName).findOne({ _id: normalizedId });
+};
+
+const findRawFeeStructure = async ({ feeStructureId, studentId, courseId }) => {
+  const db = await getDb();
+
+  if (feeStructureId) {
+    return findRawById("feestructures", feeStructureId);
+  }
+
+  return db.collection("feestructures").findOne({
+    student: String(studentId || "").trim(),
+    course: String(courseId || "").trim(),
+  });
+};
+
+const getRawStudentAndCourse = async (studentId, courseId) => {
+  const db = await getDb();
+  const [student, course] = await Promise.all([
+    db
+      .collection("admissions")
+      .findOne(
+        { _id: String(studentId || "").trim() },
+        { projection: { registrationNo: 1, studentName: 1, mobileNumber: 1 } },
+      ),
+    db
+      .collection("courses")
+      .findOne(
+        { _id: String(courseId || "").trim() },
+        { projection: { courseName: 1, courseId: 1 } },
+      ),
+  ]);
+
+  return { student, course };
+};
+
 // Create or Update Fee Structure
 export const createOrUpdateFeeStructure = async (req, res) => {
   try {
@@ -258,13 +306,20 @@ export const recordFeePayment = async (req, res) => {
       });
     }
 
-    // Get fee structure (prefer explicit feeStructureId for duplicate course enrollments)
-    const feeStructure = feeStructureId
-      ? await FeeStructureSchema.findById(feeStructureId)
-      : await FeeStructureSchema.findOne({
-          student: studentId,
-          course: courseId,
-        });
+    const normalizedAmount = Number(amount || 0);
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid payment amount is required",
+      });
+    }
+
+    // Restored databases may store fee structure IDs as strings, so resolve via raw collection.
+    const feeStructure = await findRawFeeStructure({
+      feeStructureId,
+      studentId,
+      courseId,
+    });
 
     if (!feeStructure) {
       return res.status(404).json({
@@ -276,48 +331,54 @@ export const recordFeePayment = async (req, res) => {
     // Generate receipt number
     const paymentCount = await FeePaymentSchema.countDocuments();
     const receiptNo = generateReceiptNumber("RCP", paymentCount + 1);
-
-    // Create payment record
-    const payment = new FeePaymentSchema({
+    const resolvedPaymentDate = paymentDate ? new Date(paymentDate) : new Date();
+    const db = await getDb();
+    const payment = {
+      _id: crypto.randomUUID(),
       receiptNo,
-      student: studentId,
-      course: courseId,
-      feeStructure: feeStructure._id,
-      amount,
-      paymentDate: paymentDate || new Date(),
+      voucherNo: voucherNo || "",
+      student: String(studentId),
+      course: String(courseId),
+      feeStructure: String(feeStructure._id),
+      installmentNumber: installmentNumber || null,
+      amount: normalizedAmount,
+      paymentDate: resolvedPaymentDate,
       paymentMethod: paymentMethod || "Cash",
       accountingPaymentMethodId: accountingPaymentMethodId || null,
-      transactionId,
-      chequeNo,
-      bankName,
-      installmentNumber,
-      voucherNo,
-      remarks,
-      receivedBy,
+      transactionId: transactionId || "",
+      chequeNo: chequeNo || "",
+      bankName: bankName || "",
+      remarks: remarks || "",
+      receivedBy: receivedBy || null,
+      status: "Completed",
       paymentType: paymentType || "Installment",
-    });
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      __v: 0,
+    };
 
-    await payment.save();
-    const resolvedPaymentDate = paymentDate ? new Date(paymentDate) : new Date();
+    await db.collection("feepayments").insertOne(payment);
 
     // Update fee structure (using rounded amounts)
-    feeStructure.paidAmount = Math.round(feeStructure.paidAmount + amount);
+    feeStructure.paidAmount = Math.round(
+      Number(feeStructure.paidAmount || 0) + normalizedAmount,
+    );
     // Ensure remainingAmount is never negative
     const calculatedRemaining = Math.round(
-      feeStructure.totalFee - feeStructure.paidAmount,
+      Number(feeStructure.totalFee || 0) - feeStructure.paidAmount,
     );
     feeStructure.remainingAmount = Math.max(0, calculatedRemaining);
 
     // Update installment if applicable
-    if (installmentNumber && feeStructure.installments.length > 0) {
+    if (installmentNumber && (feeStructure.installments || []).length > 0) {
       const installmentIndex = feeStructure.installments.findIndex(
-        (inst) => inst.installmentNumber === installmentNumber,
+        (inst) => Number(inst.installmentNumber) === Number(installmentNumber),
       );
 
       if (installmentIndex !== -1) {
         const installment = feeStructure.installments[installmentIndex];
         installment.paidAmount = Math.round(
-          (installment.paidAmount || 0) + amount,
+          Number(installment.paidAmount || 0) + normalizedAmount,
         );
         installment.paidDate = resolvedPaymentDate;
         installment.receiptNumber = receiptNo;
@@ -338,18 +399,24 @@ export const recordFeePayment = async (req, res) => {
       feeStructure.feeStatus = "Partial";
     }
 
-    await feeStructure.save();
+    feeStructure.updatedAt = new Date();
+    await db
+      .collection("feestructures")
+      .replaceOne({ _id: feeStructure._id }, feeStructure);
 
-    const populatedPayment = await FeePaymentSchema.findById(payment._id)
-      .populate("student", "registrationNo studentName mobileNumber")
-      .populate("course", "courseName courseId");
+    const { student, course } = await getRawStudentAndCourse(studentId, courseId);
+    const populatedPayment = {
+      ...payment,
+      student,
+      course,
+    };
 
     // ── Auto accounting entry (non-blocking) ───────────────
     createAutoAccountingEntry({
       entryType: "Income",
       preferredHeadName: "Course Fees",
-      amount,
-      paymentDate: paymentDate || new Date(),
+      amount: normalizedAmount,
+      paymentDate: resolvedPaymentDate,
       studentName: populatedPayment?.student?.studentName || "Student",
       studentRegNo: populatedPayment?.student?.registrationNo,
       studentMobile: populatedPayment?.student?.mobileNumber,

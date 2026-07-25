@@ -1,4 +1,5 @@
 import courseModule from "../modules/courseModule.js";
+import "../modules/AdmissionModule.js";
 import TeacherSchema from "../modules/teacherModule.js";
 import EnrollmentSchema from "../modules/enrollmentModule.js";
 import AttendanceSchema from "../modules/attendanceModule.js";
@@ -34,6 +35,101 @@ const parseCourseRefs = (value) =>
     .filter(Boolean);
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+const getPreviousPayrollPeriod = (year, month) => {
+  const baseDate = new Date(Number(year), Number(month) - 1, 1);
+  const previous = new Date(baseDate.getFullYear(), baseDate.getMonth() - 1, 1);
+  return {
+    year: previous.getFullYear(),
+    month: previous.getMonth() + 1,
+  };
+};
+
+const deriveCarryForwardEligibleAmount = (payrollRecord) => {
+  if (!payrollRecord) {
+    return 0;
+  }
+
+  if (payrollRecord.carryForwardEligibleAmount !== undefined) {
+    return Math.max(0, Number(payrollRecord.carryForwardEligibleAmount || 0));
+  }
+
+  const baseDueAmount = Math.max(
+    0,
+    Number(
+      payrollRecord.baseDueAmount !== undefined
+        ? payrollRecord.baseDueAmount
+        : payrollRecord.dueAmount || 0,
+    ),
+  );
+  const carryForwardInAmount = Math.max(
+    0,
+    Number(payrollRecord.carryForwardInAmount || 0),
+  );
+  const paidAmount = Math.max(0, Number(payrollRecord.paidAmount || 0));
+  const appliedToCarry = Math.min(paidAmount, carryForwardInAmount);
+  const appliedToCurrent = Math.min(
+    baseDueAmount,
+    Math.max(0, paidAmount - appliedToCarry),
+  );
+
+  return Math.max(0, baseDueAmount - appliedToCurrent);
+};
+
+const calculatePayrollTotals = ({
+  baseDueAmount,
+  carryForwardInAmount,
+  paidAmount,
+}) => {
+  const normalizedBaseDueAmount = Math.max(0, Number(baseDueAmount || 0));
+  const normalizedCarryForwardInAmount = Math.max(
+    0,
+    Number(carryForwardInAmount || 0),
+  );
+  const normalizedPaidAmount = Math.max(0, Number(paidAmount || 0));
+  const totalDueAmount = normalizedBaseDueAmount + normalizedCarryForwardInAmount;
+  const appliedToCarry = Math.min(
+    normalizedPaidAmount,
+    normalizedCarryForwardInAmount,
+  );
+  const appliedToCurrent = Math.min(
+    normalizedBaseDueAmount,
+    Math.max(0, normalizedPaidAmount - appliedToCarry),
+  );
+
+  return {
+    baseDueAmount: normalizedBaseDueAmount,
+    carryForwardInAmount: normalizedCarryForwardInAmount,
+    totalDueAmount,
+    carryForwardEligibleAmount: Math.max(
+      0,
+      normalizedBaseDueAmount - appliedToCurrent,
+    ),
+    remainingAmount: Math.max(0, totalDueAmount - normalizedPaidAmount),
+    overpaidAmount: Math.max(0, normalizedPaidAmount - totalDueAmount),
+    status:
+      totalDueAmount <= 0
+        ? "paid"
+        : normalizedPaidAmount >= totalDueAmount
+        ? "paid"
+        : normalizedPaidAmount > 0
+        ? "partial"
+        : "unpaid",
+  };
+};
+
+const getTeacherCarryForwardAmount = async (teacherId, year, month) => {
+  const previousPeriod = getPreviousPayrollPeriod(year, month);
+  const previousPayrollRecord = await TeacherPayroll.findOne({
+    teacher: teacherId,
+    year: previousPeriod.year,
+    month: previousPeriod.month,
+  }).lean();
+
+  return {
+    carryForwardInAmount: deriveCarryForwardEligibleAmount(previousPayrollRecord),
+  };
+};
 
 const parseSalaryAmount = (value) => {
   if (typeof value === "number") {
@@ -751,11 +847,20 @@ const applyTeacherStudentCompensationUpdate = async (teacherId, payload = {}) =>
       isConfigured:
         payrollRecord.salaryType === "per_student"
           ? Number(payrollRecord.salaryPerStudent || 0) > 0
-          : true,
+      : true,
     },
   });
 
-  const dueAmount = Number(compensation.summary.calculatedMonthlySalary || 0);
+  const { carryForwardInAmount } = await getTeacherCarryForwardAmount(
+    teacher._id,
+    selectedYear,
+    selectedMonth,
+  );
+  const payrollTotals = calculatePayrollTotals({
+    baseDueAmount: Number(compensation.summary.calculatedMonthlySalary || 0),
+    carryForwardInAmount,
+    paidAmount: Number(payrollRecord.paidAmount || 0),
+  });
   const paidAmount = Number(payrollRecord.paidAmount || 0);
   payrollRecord.salaryType = salaryConfigOverride.salaryType;
   payrollRecord.monthlySalary = salaryConfigOverride.monthlySalary;
@@ -763,17 +868,14 @@ const applyTeacherStudentCompensationUpdate = async (teacherId, payload = {}) =>
   payrollRecord.attendanceThreshold = salaryConfigOverride.attendanceThreshold;
   payrollRecord.totalActiveStudents = compensation.summary.totalActiveStudents;
   payrollRecord.eligibleStudents = compensation.summary.eligibleStudents;
-  payrollRecord.dueAmount = dueAmount;
-  payrollRecord.remainingAmount = Math.max(0, dueAmount - paidAmount);
-  payrollRecord.overpaidAmount = Math.max(0, paidAmount - dueAmount);
-  payrollRecord.status =
-    dueAmount <= 0
-      ? "paid"
-      : paidAmount >= dueAmount
-      ? "paid"
-      : paidAmount > 0
-      ? "partial"
-      : "unpaid";
+  payrollRecord.baseDueAmount = payrollTotals.baseDueAmount;
+  payrollRecord.carryForwardInAmount = payrollTotals.carryForwardInAmount;
+  payrollRecord.carryForwardEligibleAmount =
+    payrollTotals.carryForwardEligibleAmount;
+  payrollRecord.dueAmount = payrollTotals.totalDueAmount;
+  payrollRecord.remainingAmount = payrollTotals.remainingAmount;
+  payrollRecord.overpaidAmount = payrollTotals.overpaidAmount;
+  payrollRecord.status = payrollTotals.status;
 
   await payrollRecord.save();
 
@@ -865,25 +967,31 @@ const applyTeacherMonthlySalaryConfigUpdate = async (teacherId, payload = {}) =>
       isConfigured:
         payrollRecord.salaryType === "per_student"
           ? Number(payrollRecord.salaryPerStudent || 0) > 0
-          : true,
+      : true,
     },
   });
 
-  const dueAmount = Number(compensation.summary.calculatedMonthlySalary || 0);
+  const { carryForwardInAmount } = await getTeacherCarryForwardAmount(
+    teacher._id,
+    selectedYear,
+    selectedMonth,
+  );
+  const payrollTotals = calculatePayrollTotals({
+    baseDueAmount: Number(compensation.summary.calculatedMonthlySalary || 0),
+    carryForwardInAmount,
+    paidAmount: Number(payrollRecord.paidAmount || 0),
+  });
   const paidAmount = Number(payrollRecord.paidAmount || 0);
   payrollRecord.totalActiveStudents = compensation.summary.totalActiveStudents;
   payrollRecord.eligibleStudents = compensation.summary.eligibleStudents;
-  payrollRecord.dueAmount = dueAmount;
-  payrollRecord.remainingAmount = Math.max(0, dueAmount - paidAmount);
-  payrollRecord.overpaidAmount = Math.max(0, paidAmount - dueAmount);
-  payrollRecord.status =
-    dueAmount <= 0
-      ? "paid"
-      : paidAmount >= dueAmount
-      ? "paid"
-      : paidAmount > 0
-      ? "partial"
-      : "unpaid";
+  payrollRecord.baseDueAmount = payrollTotals.baseDueAmount;
+  payrollRecord.carryForwardInAmount = payrollTotals.carryForwardInAmount;
+  payrollRecord.carryForwardEligibleAmount =
+    payrollTotals.carryForwardEligibleAmount;
+  payrollRecord.dueAmount = payrollTotals.totalDueAmount;
+  payrollRecord.remainingAmount = payrollTotals.remainingAmount;
+  payrollRecord.overpaidAmount = payrollTotals.overpaidAmount;
+  payrollRecord.status = payrollTotals.status;
 
   await payrollRecord.save();
   await teacher.populate("courseId", "courseName courseId");

@@ -31,6 +31,10 @@ import {
   getSuperAdminFinanceMonitor,
   getTeacherPayrollSummary,
   payTeacherPayroll,
+  getExpenseHeadEntries,
+  createExpenseHeadEntry,
+  updateExpenseHeadEntry,
+  deleteExpenseHeadEntry,
 } from "../controller/accountingController.js";
 
 const accountingRoute = express.Router();
@@ -43,6 +47,12 @@ accountingRoute.get("/heads", authMiddleware, authorize("accounting", "view"), g
 accountingRoute.post("/heads", authMiddleware, authorize("accounting", "create"), createHeadOfAccount);
 accountingRoute.put("/heads/:id", authMiddleware, authorize("accounting", "update"), updateHeadOfAccount);
 accountingRoute.delete("/heads/:id", authMiddleware, authorize("accounting", "delete"), deleteHeadOfAccount);
+
+// Expense Head Entries
+accountingRoute.get("/expense-head-entries", authMiddleware, authorize("accounting", "view"), getExpenseHeadEntries);
+accountingRoute.post("/expense-head-entries", authMiddleware, authorize("accounting", "create"), createExpenseHeadEntry);
+accountingRoute.put("/expense-head-entries/:id", authMiddleware, authorize("accounting", "update"), updateExpenseHeadEntry);
+accountingRoute.delete("/expense-head-entries/:id", authMiddleware, authorize("accounting", "delete"), deleteExpenseHeadEntry);
 
 // Payment Methods (Banks & Cash)
 accountingRoute.get("/payment-methods", authMiddleware, authorize("accounting", "view"), getPaymentMethods);

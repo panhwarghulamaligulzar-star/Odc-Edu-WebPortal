@@ -2,13 +2,13 @@ import mongoose from "mongoose";
 
 const connectDB = async () => {
   try {
-    const mongoUri = process.env.DEV_DB_URI || process.env.DB_URI;
+   const mongoUri = process.env.LOCAL_DB_URI || process.env.DEV_DB_URI || process.env.DB_URI;
 
-    if (!mongoUri) {
-      throw new Error(
-        "Missing DB connection string. Add DB_URI or LOCAL_DB_URI to your .env file.",
-      );
-    }
+ if (!mongoUri) {
+  throw new Error(
+    "Missing DB connection string. Add LOCAL_DB_URI, DEV_DB_URI, or DB_URI to your .env file.",
+  );
+}
 
     await mongoose.connect(mongoUri);
     console.log("MongoDB connected successfully!");

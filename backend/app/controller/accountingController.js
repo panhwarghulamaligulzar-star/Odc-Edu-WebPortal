@@ -10,6 +10,7 @@ import Enrollment from "../modules/enrollmentModule.js";
 import AppSettings from "../modules/appSettingsModule.js";
 import TeacherPayroll from "../modules/teacherPayrollModule.js";
 import TeacherSchema from "../modules/teacherModule.js";
+import ExpenseHeadEntry from "../modules/expenseHeadEntryModule.js";
 import { calculateTeacherCompensationData } from "../controller/teacherController.js";
 import PDFKit from "pdfkit";
 
@@ -58,6 +59,112 @@ const findAccountingTypeByAnyId = async (typeId) => {
   }
 
   return null;
+};
+
+const findPaymentMethodByAnyId = async (paymentMethodId) => {
+  const rawPaymentMethodId = String(paymentMethodId || "").trim();
+  if (!rawPaymentMethodId) {
+    return null;
+  }
+
+  const mongoose = (await import("mongoose")).default;
+  const collection = mongoose.connection.db.collection("paymentmethods");
+
+  const stringIdMatch = await collection.findOne({ _id: rawPaymentMethodId });
+  if (stringIdMatch) {
+    return PaymentMethod.findOne({ name: stringIdMatch.name, isActive: true });
+  }
+
+  if (mongoose.Types.ObjectId.isValid(rawPaymentMethodId)) {
+    const objectIdMatch = await collection.findOne({
+      _id: new mongoose.Types.ObjectId(rawPaymentMethodId),
+    });
+    if (objectIdMatch) {
+      return PaymentMethod.findOne({ name: objectIdMatch.name, isActive: true });
+    }
+  }
+
+  return PaymentMethod.findOne({
+    name: { $regex: new RegExp(`^${rawPaymentMethodId}$`, "i") },
+    isActive: true,
+  });
+};
+
+const findHeadOfAccountByAnyId = async (headId) => {
+  const rawHeadId = String(headId || "").trim();
+  if (!rawHeadId) {
+    return null;
+  }
+
+  const mongoose = (await import("mongoose")).default;
+  const collection = mongoose.connection.db.collection("headofaccounts");
+
+  const stringIdMatch = await collection.findOne({ _id: rawHeadId });
+  if (stringIdMatch) {
+    return HeadOfAccount.findOne({
+      name: stringIdMatch.name,
+      isActive: { $ne: false },
+    });
+  }
+
+  if (mongoose.Types.ObjectId.isValid(rawHeadId)) {
+    const objectIdMatch = await collection.findOne({
+      _id: new mongoose.Types.ObjectId(rawHeadId),
+    });
+    if (objectIdMatch) {
+      return HeadOfAccount.findOne({
+        name: objectIdMatch.name,
+        isActive: { $ne: false },
+      });
+    }
+  }
+
+  return HeadOfAccount.findOne({
+    name: { $regex: new RegExp(`^${rawHeadId}$`, "i") },
+    isActive: { $ne: false },
+  });
+};
+
+const serializeTransactionRecord = async (transactionDoc) => {
+  const data =
+    typeof transactionDoc?.toObject === "function"
+      ? transactionDoc.toObject()
+      : { ...transactionDoc };
+
+  const resolvedType =
+    data?.type?.name
+      ? data.type
+      : await findAccountingTypeByAnyId(data?.type?._id || data?.type || "");
+  const resolvedHead =
+    data?.head?.name
+      ? data.head
+      : await findHeadOfAccountByAnyId(data?.head?._id || data?.head || "");
+  const resolvedPaymentMethod =
+    data?.paymentMethod?.name
+      ? data.paymentMethod
+      : await findPaymentMethodByAnyId(
+          data?.paymentMethod?._id || data?.paymentMethod || "",
+        );
+
+  return {
+    ...data,
+    type: resolvedType
+      ? { _id: resolvedType._id, name: resolvedType.name }
+      : data?.type || null,
+    head: resolvedHead
+      ? {
+          _id: resolvedHead._id,
+          name: resolvedHead.name,
+        }
+      : data?.head || null,
+    paymentMethod: resolvedPaymentMethod
+      ? {
+          _id: resolvedPaymentMethod._id,
+          name: resolvedPaymentMethod.name,
+          type: resolvedPaymentMethod.type,
+        }
+      : data?.paymentMethod || null,
+  };
 };
 
 const serializeHeadWithType = async (headDoc) => {
@@ -219,6 +326,103 @@ const resolveAccountingTypeId = async (typeValue) => {
   }).lean();
 
   return matchedType?._id || null;
+};
+
+const getExpenseTypeRecord = async () =>
+  AccountingType.findOne({
+    name: { $regex: /^expense$/i },
+  }).lean();
+
+const getExpenseHeadFilter = async () => {
+  const expenseType = await getExpenseTypeRecord();
+  return expenseType?._id ? { type: expenseType._id } : null;
+};
+
+const buildExpenseEntryDetails = ({
+  payeeName,
+  paymentPurpose,
+  paymentMethodName,
+  voucherNo,
+  chequeNoOrTransactionId,
+  amountInWords,
+  description,
+}) => {
+  const lines = [];
+  if (payeeName) lines.push(`Payee: ${payeeName}`);
+  if (paymentPurpose) lines.push(`Purpose: ${paymentPurpose}`);
+  if (paymentMethodName) lines.push(`Method: ${paymentMethodName}`);
+  if (voucherNo) lines.push(`Voucher: ${voucherNo}`);
+  if (chequeNoOrTransactionId) lines.push(`Cheque/Txn ID: ${chequeNoOrTransactionId}`);
+  if (amountInWords) lines.push(`Amount in words: ${amountInWords}`);
+  if (description) lines.push(`Remarks: ${description}`);
+  return lines.join("\n");
+};
+
+const serializeExpenseHeadEntry = async (entry) => {
+  const data = entry?.toObject ? entry.toObject() : entry;
+  const resolvedExpenseHead =
+    data?.expenseCategory?.name
+      ? data.expenseCategory
+      : await findHeadOfAccountByAnyId(
+          data?.expenseCategory?._id || data?.expenseCategory || "",
+        );
+  const resolvedTransaction =
+    data?.transactionId?.paymentMethod || data?.transactionId?.transactionNo
+      ? data.transactionId
+      : data?.transactionId
+        ? await AccountingTransaction.findById(
+            data.transactionId?._id || data.transactionId,
+          )
+            .populate("paymentMethod", "name type")
+            .lean()
+        : null;
+  const resolvedPaymentMethod =
+    data?.paymentMethod?.name
+      ? data.paymentMethod
+      : resolvedTransaction?.paymentMethod?.name
+        ? resolvedTransaction.paymentMethod
+        : await findPaymentMethodByAnyId(
+            data?.paymentMethod?._id ||
+              data?.paymentMethod ||
+              resolvedTransaction?.paymentMethod?._id ||
+              resolvedTransaction?.paymentMethod ||
+              "",
+          );
+
+  return {
+    ...data,
+    expenseCategoryLabel:
+      resolvedExpenseHead?.name ||
+      data?.expenseCategory?.name ||
+      data?.expenseCategoryLabel ||
+      "",
+    expenseCategory:
+      resolvedExpenseHead || data?.expenseCategory || null,
+    paymentMethodLabel:
+      resolvedPaymentMethod?.name || data?.paymentMethodLabel || "",
+    paymentMethod:
+      resolvedPaymentMethod ||
+      data?.paymentMethod ||
+      resolvedTransaction?.paymentMethod ||
+      null,
+  };
+};
+
+const getNextExpenseVoucherNo = async () => {
+  const entries = await ExpenseHeadEntry.find({ isActive: true })
+    .select("voucherNo")
+    .lean();
+
+  let maxVoucherNumber = 0;
+  entries.forEach((entry) => {
+    const match = String(entry?.voucherNo || "").match(/^(\d+)$/);
+    if (!match) {
+      return;
+    }
+    maxVoucherNumber = Math.max(maxVoucherNumber, Number(match[1]));
+  });
+
+  return String(maxVoucherNumber + 1).padStart(3, "0");
 };
 
 // GET /accounting/heads — list all active heads (optional ?type=id)
@@ -694,12 +898,12 @@ export const getTeacherPayrollSummary = async (req, res) => {
     const payrollRecords = await TeacherPayroll.find({
       year: selectedYear,
       month: selectedMonth,
-    })
-      .populate("teacher", "fullName teacherId")
-      .lean();
+    }).lean();
 
     const payrollMap = new Map(
-      payrollRecords.map((record) => [String(record.teacher._id), record]),
+      payrollRecords
+        .filter((record) => record?.teacher)
+        .map((record) => [String(record.teacher), record]),
     );
 
     const payrollItems = await Promise.all(
@@ -715,18 +919,13 @@ export const getTeacherPayrollSummary = async (req, res) => {
             salaryConfigOverride,
           },
         );
-
-        const dueAmount = Number(compensation.summary.calculatedMonthlySalary || 0);
-        const paidAmount = Number(existingPayroll?.paidAmount || 0);
-        const remainingAmount = Math.max(0, dueAmount - paidAmount);
-        const statusValue =
-          dueAmount <= 0
-            ? "paid"
-            : paidAmount >= dueAmount
-            ? "paid"
-            : paidAmount > 0
-            ? "partial"
-            : "unpaid";
+        const { previousPeriod, carryForwardInAmount } =
+          await getTeacherCarryForwardAmount(teacher._id, selectedYear, selectedMonth);
+        const payrollTotals = calculatePayrollTotals({
+          baseDueAmount: Number(compensation.summary.calculatedMonthlySalary || 0),
+          carryForwardInAmount,
+          paidAmount: Number(existingPayroll?.paidAmount || 0),
+        });
 
         return {
           _id: existingPayroll ? existingPayroll._id : null,
@@ -746,10 +945,22 @@ export const getTeacherPayrollSummary = async (req, res) => {
           studentsForSalary: compensation.studentsForSalary,
           courses: compensation.courses,
           payroll: {
-            dueAmount,
-            paidAmount,
-            remainingAmount,
-            status: statusValue,
+            dueAmount: payrollTotals.totalDueAmount,
+            baseDueAmount: payrollTotals.baseDueAmount,
+            carryForwardInAmount: payrollTotals.carryForwardInAmount,
+            carryForwardSourceMonth: carryForwardInAmount
+              ? {
+                  year: previousPeriod.year,
+                  month: previousPeriod.month,
+                }
+              : null,
+            carryForwardEligibleAmount: payrollTotals.carryForwardEligibleAmount,
+            paidAmount: payrollTotals.paidAmount,
+            appliedToCarry: payrollTotals.appliedToCarry,
+            appliedToCurrent: payrollTotals.appliedToCurrent,
+            remainingAmount: payrollTotals.remainingAmount,
+            overpaidAmount: payrollTotals.overpaidAmount,
+            status: payrollTotals.status,
             paymentEntries: existingPayroll?.paymentEntries || [],
           },
         };
@@ -854,10 +1065,7 @@ export const payTeacherPayroll = async (req, res) => {
       method = fundingSelection.method;
     }
 
-    const teacher = await TeacherSchema.findById(id).populate(
-      "courseId",
-      "courseName courseId",
-    );
+    const teacher = await getTeacherByAnyId(id);
     if (!teacher) {
       return res.status(404).json({
         success: false,
@@ -877,7 +1085,18 @@ export const payTeacherPayroll = async (req, res) => {
       studentAdjustments: payrollRecord?.studentAdjustments || [],
       salaryConfigOverride,
     });
-    const dueAmount = Number(compensation.summary.calculatedMonthlySalary || 0);
+    const { previousPeriod, carryForwardInAmount } = await getTeacherCarryForwardAmount(
+      teacher._id,
+      selectedYear,
+      selectedMonth,
+    );
+    const baseDueAmount = Number(compensation.summary.calculatedMonthlySalary || 0);
+    const currentPaidAmount = Number(payrollRecord?.paidAmount || 0);
+    const beforePaymentTotals = calculatePayrollTotals({
+      baseDueAmount,
+      carryForwardInAmount,
+      paidAmount: currentPaidAmount,
+    });
     const availableBalance = Number(method.currentBalance || 0);
 
     if (txnType.name !== "Income" && availableBalance < normalizedPaymentAmount) {
@@ -922,6 +1141,20 @@ export const payTeacherPayroll = async (req, res) => {
       });
     }
 
+    if (beforePaymentTotals.remainingAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: `${teacher.fullName} has no remaining salary due for ${compensation.month.displayLabel}.`,
+      });
+    }
+
+    if (normalizedPaymentAmount > beforePaymentTotals.remainingAmount) {
+      return res.status(400).json({
+        success: false,
+        message: `Payment amount cannot exceed the remaining payroll balance of PKR ${beforePaymentTotals.remainingAmount.toLocaleString("en-PK")} for ${teacher.fullName}.`,
+      });
+    }
+
     const transactionNo = await generateTransactionNo();
     const txn = new AccountingTransaction({
       transactionNo,
@@ -942,6 +1175,11 @@ export const payTeacherPayroll = async (req, res) => {
 
     let updatedPayroll;
     if (!payrollRecord) {
+      const afterPaymentTotals = calculatePayrollTotals({
+        baseDueAmount,
+        carryForwardInAmount,
+        paidAmount: normalizedPaymentAmount,
+      });
       updatedPayroll = await TeacherPayroll.create({
         teacher: teacher._id,
         year: selectedYear,
@@ -952,16 +1190,14 @@ export const payTeacherPayroll = async (req, res) => {
         attendanceThreshold: salaryConfigOverride.attendanceThreshold,
         totalActiveStudents: compensation.summary.totalActiveStudents,
         eligibleStudents: compensation.summary.eligibleStudents,
-        dueAmount,
-        paidAmount: normalizedPaymentAmount,
-        remainingAmount: Math.max(0, dueAmount - normalizedPaymentAmount),
-        overpaidAmount: Math.max(0, normalizedPaymentAmount - dueAmount),
-        status:
-          normalizedPaymentAmount >= dueAmount
-            ? "paid"
-            : normalizedPaymentAmount > 0
-            ? "partial"
-            : "unpaid",
+        baseDueAmount: afterPaymentTotals.baseDueAmount,
+        carryForwardInAmount: afterPaymentTotals.carryForwardInAmount,
+        carryForwardEligibleAmount: afterPaymentTotals.carryForwardEligibleAmount,
+        dueAmount: afterPaymentTotals.totalDueAmount,
+        paidAmount: afterPaymentTotals.paidAmount,
+        remainingAmount: afterPaymentTotals.remainingAmount,
+        overpaidAmount: afterPaymentTotals.overpaidAmount,
+        status: afterPaymentTotals.status,
         paymentEntries: [
           {
             paymentDate: new Date(paymentDate),
@@ -974,17 +1210,11 @@ export const payTeacherPayroll = async (req, res) => {
         ],
       });
     } else {
-      const paidAmount = Number(payrollRecord.paidAmount || 0) + normalizedPaymentAmount;
-      const remainingAmount = Math.max(0, dueAmount - paidAmount);
-      const overpaidAmount = Math.max(0, paidAmount - dueAmount);
-      const status =
-        dueAmount <= 0
-          ? "paid"
-          : paidAmount >= dueAmount
-          ? "paid"
-          : paidAmount > 0
-          ? "partial"
-          : "unpaid";
+      const afterPaymentTotals = calculatePayrollTotals({
+        baseDueAmount,
+        carryForwardInAmount,
+        paidAmount: currentPaidAmount + normalizedPaymentAmount,
+      });
 
       payrollRecord.salaryType = salaryConfigOverride.salaryType;
       payrollRecord.monthlySalary = salaryConfigOverride.monthlySalary;
@@ -992,11 +1222,15 @@ export const payTeacherPayroll = async (req, res) => {
       payrollRecord.attendanceThreshold = salaryConfigOverride.attendanceThreshold;
       payrollRecord.totalActiveStudents = compensation.summary.totalActiveStudents;
       payrollRecord.eligibleStudents = compensation.summary.eligibleStudents;
-      payrollRecord.dueAmount = dueAmount;
-      payrollRecord.paidAmount = paidAmount;
-      payrollRecord.remainingAmount = remainingAmount;
-      payrollRecord.overpaidAmount = overpaidAmount;
-      payrollRecord.status = status;
+      payrollRecord.baseDueAmount = afterPaymentTotals.baseDueAmount;
+      payrollRecord.carryForwardInAmount = afterPaymentTotals.carryForwardInAmount;
+      payrollRecord.carryForwardEligibleAmount =
+        afterPaymentTotals.carryForwardEligibleAmount;
+      payrollRecord.dueAmount = afterPaymentTotals.totalDueAmount;
+      payrollRecord.paidAmount = afterPaymentTotals.paidAmount;
+      payrollRecord.remainingAmount = afterPaymentTotals.remainingAmount;
+      payrollRecord.overpaidAmount = afterPaymentTotals.overpaidAmount;
+      payrollRecord.status = afterPaymentTotals.status;
       payrollRecord.paymentEntries.push({
         paymentDate: new Date(paymentDate),
         paymentMethod: method._id,
@@ -1013,6 +1247,9 @@ export const payTeacherPayroll = async (req, res) => {
       success: true,
       data: updatedPayroll,
       transaction: txn,
+      carryForwardSourceMonth: carryForwardInAmount
+        ? { year: previousPeriod.year, month: previousPeriod.month }
+        : null,
       message: `Teacher salary recorded successfully in ${txnType.name} using ${method.name}.`,
     });
   } catch (error) {
@@ -1199,6 +1436,751 @@ const buildDueEntries = (feeStructure) => {
   ];
 };
 
+// ============================================================
+// EXPENSE HEAD ENTRIES
+// ============================================================
+
+export const getExpenseHeadEntries = async (req, res) => {
+  try {
+    const { payeeName = "", expenseCategory = "", paymentMethod = "" } = req.query;
+    const filter = { isActive: true };
+
+    if (payeeName.trim()) {
+      filter.payeeName = { $regex: new RegExp(payeeName.trim(), "i") };
+    }
+    if (expenseCategory) {
+      filter.expenseCategory = expenseCategory;
+    }
+    if (paymentMethod) {
+      filter.paymentMethod = paymentMethod;
+    }
+
+    const entries = await ExpenseHeadEntry.find(filter)
+      .populate("expenseCategory", "name")
+      .populate("paymentMethod", "name type")
+      .populate("transactionId", "transactionNo")
+      .sort({ date: -1, createdAt: -1 });
+
+    const payeeNames = await ExpenseHeadEntry.distinct("payeeName", {
+      isActive: true,
+      payeeName: { $nin: ["", null] },
+    });
+
+    res.status(200).json({
+      success: true,
+      data: await Promise.all(entries.map(serializeExpenseHeadEntry)),
+      meta: {
+        nextVoucherNo: await getNextExpenseVoucherNo(),
+        payeeNames: payeeNames.filter(Boolean).sort((a, b) => a.localeCompare(b)),
+      },
+      message: "Expense head entries retrieved successfully",
+    });
+  } catch (error) {
+    console.error("Error fetching expense head entries:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+export const createExpenseHeadEntry = async (req, res) => {
+  try {
+    const {
+      voucherNo,
+      date,
+      payeeName,
+      paymentPurpose,
+      expenseCategory,
+      paymentMethod,
+      chequeNoOrTransactionId,
+      amount,
+      amountInWords,
+      description,
+    } = req.body;
+
+    if (
+      !date ||
+      !payeeName ||
+      !paymentPurpose ||
+      !expenseCategory ||
+      !paymentMethod ||
+      amount === undefined
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Voucher No, Date, Payee Name, Payment Purpose, Expense Category, Payment Method and Amount are required",
+      });
+    }
+
+    const normalizedAmount = Number(amount);
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Amount must be greater than zero",
+      });
+    }
+
+    const resolvedVoucherNo = String(
+      voucherNo || (await getNextExpenseVoucherNo()),
+    ).trim();
+
+    const existingVoucher = await ExpenseHeadEntry.findOne({
+      voucherNo: resolvedVoucherNo,
+      date: new Date(date),
+      isActive: true,
+    });
+    if (existingVoucher) {
+      return res.status(409).json({
+        success: false,
+        message: "This voucher number already exists for the selected date",
+      });
+    }
+
+    const selectedHead = await findHeadOfAccountByAnyId(expenseCategory);
+    if (!selectedHead?._id) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid expense head is required",
+      });
+    }
+
+    const selectedType = await findAccountingTypeByAnyId(
+      selectedHead.type?._id || selectedHead.type,
+    );
+    if (!selectedType?._id) {
+      return res.status(404).json({
+        success: false,
+        message: "Expense accounting type is not configured for this head",
+      });
+    }
+
+    const method = await findPaymentMethodByAnyId(paymentMethod);
+    if (!method) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment method not found",
+      });
+    }
+
+    const availableBalance = Number(method.currentBalance || 0);
+    if (availableBalance < normalizedAmount) {
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient balance in ${method.name}. Available balance is PKR ${availableBalance.toLocaleString("en-PK")}.`,
+      });
+    }
+
+    const transactionNo = await generateTransactionNo();
+    const txn = await AccountingTransaction.create({
+      transactionNo,
+      name: `Expense Payment - ${payeeName.trim()}`,
+      type: selectedType._id,
+      head: selectedHead._id,
+      paymentMethod: method._id,
+      paymentDate: new Date(date),
+      amount: normalizedAmount,
+      billReference: voucherNo.trim(),
+      details: buildExpenseEntryDetails({
+        payeeName,
+        paymentPurpose,
+        paymentMethodName: method.name,
+        voucherNo,
+        chequeNoOrTransactionId,
+        amountInWords,
+        description,
+      }),
+      createdBy: req.user?._id || null,
+    });
+
+    await adjustBalance(method._id, normalizedAmount, -1);
+
+    const entry = await ExpenseHeadEntry.create({
+      voucherNo: resolvedVoucherNo,
+      date: new Date(date),
+      payeeName: payeeName.trim(),
+      paymentPurpose: paymentPurpose.trim(),
+      expenseCategory: selectedHead._id,
+      paymentMethod: method._id,
+      chequeNoOrTransactionId: chequeNoOrTransactionId?.trim() || "",
+      amount: normalizedAmount,
+      amountInWords: amountInWords?.trim() || "",
+      description: description?.trim() || "",
+      transactionId: txn._id,
+      createdBy: req.user?._id || null,
+      isActive: true,
+    });
+
+    const populatedEntry = await ExpenseHeadEntry.findById(entry._id)
+      .populate("expenseCategory", "name")
+      .populate("paymentMethod", "name type")
+      .populate("transactionId", "transactionNo");
+
+    res.status(201).json({
+      success: true,
+      data: await serializeExpenseHeadEntry(populatedEntry),
+      message: "Expense head entry created successfully",
+    });
+  } catch (error) {
+    console.error("Error creating expense head entry:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+export const updateExpenseHeadEntry = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      voucherNo,
+      date,
+      payeeName,
+      paymentPurpose,
+      expenseCategory,
+      paymentMethod,
+      chequeNoOrTransactionId,
+      amount,
+      amountInWords,
+      description,
+    } = req.body;
+
+    const entry = await ExpenseHeadEntry.findById(id);
+    if (!entry || entry.isActive === false) {
+      return res.status(404).json({
+        success: false,
+        message: "Expense head entry not found",
+      });
+    }
+
+    const normalizedAmount = Number(amount);
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Amount must be greater than zero",
+      });
+    }
+
+    const selectedHead = await findHeadOfAccountByAnyId(expenseCategory);
+    if (!selectedHead?._id) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid expense head is required",
+      });
+    }
+
+    const selectedType = await findAccountingTypeByAnyId(
+      selectedHead.type?._id || selectedHead.type,
+    );
+    if (!selectedType?._id) {
+      return res.status(404).json({
+        success: false,
+        message: "Expense accounting type is not configured for this head",
+      });
+    }
+
+    const method = await findPaymentMethodByAnyId(paymentMethod);
+    if (!method) {
+      return res.status(404).json({
+        success: false,
+        message: "Payment method not found",
+      });
+    }
+
+    const duplicateVoucher = await ExpenseHeadEntry.findOne({
+      _id: { $ne: id },
+      voucherNo: String(voucherNo || "").trim(),
+      date: new Date(date),
+      isActive: true,
+    });
+    if (duplicateVoucher) {
+      return res.status(409).json({
+        success: false,
+        message: "This voucher number already exists for the selected date",
+      });
+    }
+
+    const existingTxn = entry.transactionId
+      ? await AccountingTransaction.findById(entry.transactionId)
+      : null;
+
+    const oldMethodId = existingTxn?.paymentMethod || entry.paymentMethod;
+    const oldAmount = Number(existingTxn?.amount ?? entry.amount ?? 0);
+
+    if (oldMethodId && oldAmount > 0) {
+      await adjustBalance(oldMethodId, oldAmount, 1);
+    }
+
+    const availableBalance = Number(method.currentBalance || 0);
+    if (availableBalance < normalizedAmount) {
+      if (oldMethodId && oldAmount > 0) {
+        await adjustBalance(oldMethodId, oldAmount, -1);
+      }
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient balance in ${method.name}. Available balance is PKR ${availableBalance.toLocaleString("en-PK")}.`,
+      });
+    }
+
+    let txn = existingTxn;
+    if (!txn) {
+      txn = new AccountingTransaction({
+        transactionNo: await generateTransactionNo(),
+      });
+    }
+
+    txn.name = `Expense Payment - ${payeeName.trim()}`;
+    txn.type = selectedType._id;
+    txn.head = selectedHead._id;
+    txn.paymentMethod = method._id;
+    txn.paymentDate = new Date(date);
+    txn.amount = normalizedAmount;
+    txn.billReference = voucherNo.trim();
+    txn.details = buildExpenseEntryDetails({
+      payeeName,
+      paymentPurpose,
+      paymentMethodName: method.name,
+      voucherNo,
+      chequeNoOrTransactionId,
+      amountInWords,
+      description,
+    });
+    txn.createdBy = req.user?._id || txn.createdBy || null;
+    await txn.save();
+
+    await adjustBalance(method._id, normalizedAmount, -1);
+
+    entry.voucherNo = String(voucherNo || "").trim();
+    entry.date = new Date(date);
+    entry.payeeName = payeeName.trim();
+    entry.paymentPurpose = paymentPurpose.trim();
+    entry.expenseCategory = selectedHead._id;
+    entry.paymentMethod = method._id;
+    entry.chequeNoOrTransactionId = chequeNoOrTransactionId?.trim() || "";
+    entry.amount = normalizedAmount;
+    entry.amountInWords = amountInWords?.trim() || "";
+    entry.description = description?.trim() || "";
+    entry.transactionId = txn._id;
+    await entry.save();
+
+    const populatedEntry = await ExpenseHeadEntry.findById(entry._id)
+      .populate("expenseCategory", "name")
+      .populate("paymentMethod", "name type")
+      .populate("transactionId", "transactionNo");
+
+    res.status(200).json({
+      success: true,
+      data: await serializeExpenseHeadEntry(populatedEntry),
+      message: "Expense head entry updated successfully",
+    });
+  } catch (error) {
+    console.error("Error updating expense head entry:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+export const deleteExpenseHeadEntry = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const entry = await ExpenseHeadEntry.findById(id);
+    if (!entry || entry.isActive === false) {
+      return res.status(404).json({
+        success: false,
+        message: "Expense head entry not found",
+      });
+    }
+
+    const txn = entry.transactionId
+      ? await AccountingTransaction.findById(entry.transactionId)
+      : null;
+
+    if (txn) {
+      await adjustBalance(txn.paymentMethod, Number(txn.amount || 0), 1);
+      await AccountingTransaction.findByIdAndDelete(txn._id);
+    }
+
+    entry.isActive = false;
+    await entry.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Expense head entry deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting expense head entry:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+const buildEntityMapById = (items = []) =>
+  new Map(items.map((item) => [String(item?._id), item]));
+
+const getReceiptOverviewBaseData = async () => {
+  const mongoose = (await import("mongoose")).default;
+  const db = mongoose.connection.db;
+  const enrollmentFilter = { status: "Active" };
+
+  const activeEnrollments = await Enrollment.find(enrollmentFilter)
+    .sort({ enrollmentDate: -1, createdAt: -1 })
+    .lean();
+
+  const studentIds = Array.from(
+    new Set(
+      activeEnrollments
+        .map((item) => String(item?.student || "").trim())
+        .filter(Boolean),
+    ),
+  );
+  const courseIds = Array.from(
+    new Set(
+      activeEnrollments
+        .map((item) => String(item?.course || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+  const [students, courses] = await Promise.all([
+    db
+      .collection("admissions")
+      .find(
+        { _id: { $in: studentIds } },
+        { projection: { registrationNo: 1, studentName: 1, mobileNumber: 1 } },
+      )
+      .toArray(),
+    db
+      .collection("courses")
+      .find(
+        { _id: { $in: courseIds } },
+        { projection: { courseName: 1, courseId: 1 } },
+      )
+      .toArray(),
+  ]);
+
+  const studentsById = buildEntityMapById(students);
+  const coursesById = buildEntityMapById(courses);
+
+  const latestEnrollmentByStudentCourse = new Map();
+  const enrollmentsById = new Map();
+
+  for (const enrollment of activeEnrollments) {
+    const studentId = String(enrollment?.student || "").trim();
+    const courseIdValue = String(enrollment?.course || "").trim();
+
+    if (!studentId || !courseIdValue) {
+      continue;
+    }
+
+    const normalizedEnrollment = {
+      ...enrollment,
+      student: studentsById.get(studentId) || null,
+      course: coursesById.get(courseIdValue) || null,
+    };
+
+    enrollmentsById.set(String(enrollment._id), normalizedEnrollment);
+
+    const key = `${studentId}:${courseIdValue}`;
+    if (!latestEnrollmentByStudentCourse.has(key)) {
+      latestEnrollmentByStudentCourse.set(key, enrollment);
+    }
+  }
+
+  const latestEnrollmentIds = Array.from(latestEnrollmentByStudentCourse.values()).map(
+    (item) => item._id,
+  );
+
+  if (!latestEnrollmentIds.length) {
+    return {
+      rows: [],
+      summary: {
+        totalDues: 0,
+        collected: 0,
+        remaining: 0,
+        studentCount: 0,
+        paidCount: 0,
+        partialCount: 0,
+        pendingCount: 0,
+      },
+    };
+  }
+
+  const enrolledFeeStructures = await db
+    .collection("feestructures")
+    .find({ enrollment: { $in: latestEnrollmentIds } })
+    .sort({ createdAt: -1 })
+    .toArray();
+
+  const latestFeeStructureByEnrollment = new Map();
+  for (const item of enrolledFeeStructures) {
+    const enrollmentId = String(item.enrollment || "");
+    if (!latestFeeStructureByEnrollment.has(enrollmentId)) {
+      latestFeeStructureByEnrollment.set(enrollmentId, item);
+    }
+  }
+
+  const filteredFeeStructures = Array.from(latestFeeStructureByEnrollment.values());
+  const feeStructureIds = filteredFeeStructures.map((item) => item._id);
+
+  const payments = await db
+    .collection("feepayments")
+    .find(
+      { feeStructure: { $in: feeStructureIds } },
+      {
+        projection: {
+          feeStructure: 1,
+          receiptNo: 1,
+          voucherNo: 1,
+          amount: 1,
+          paymentDate: 1,
+          paymentMethod: 1,
+          paymentType: 1,
+          status: 1,
+          createdAt: 1,
+          installmentNumber: 1,
+        },
+      },
+    )
+    .sort({ paymentDate: -1, createdAt: -1 })
+    .toArray();
+
+  const paymentsByFeeStructure = payments.reduce((acc, payment) => {
+    const key = String(payment.feeStructure);
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(payment);
+    return acc;
+  }, {});
+
+  const mappedRows = filteredFeeStructures
+    .flatMap((item) => {
+      const rowPayments = paymentsByFeeStructure[String(item._id)] || [];
+      const latestPayment = rowPayments[0] || null;
+      const latestPaymentMeta = latestPayment
+        ? {
+            _id: latestPayment._id,
+            receiptNo: latestPayment.receiptNo,
+            voucherNo: latestPayment.voucherNo,
+            amount: latestPayment.amount || 0,
+            paymentDate: latestPayment.paymentDate,
+            paymentMethod: latestPayment.paymentMethod,
+            paymentType: latestPayment.paymentType,
+            status: latestPayment.status,
+          }
+        : null;
+
+      const normalizedFeeStructure = {
+        ...item,
+        student: studentsById.get(String(item.student || "")) || null,
+        course: coursesById.get(String(item.course || "")) || null,
+        enrollment: enrollmentsById.get(String(item.enrollment || "")) || null,
+      };
+
+      return buildDueEntries(normalizedFeeStructure).map((entry) => {
+        const matchedPayment =
+          rowPayments.find(
+            (payment) =>
+              (entry.receiptNo && payment.receiptNo === entry.receiptNo) ||
+              (entry.installmentNumber &&
+                payment.installmentNumber === entry.installmentNumber),
+          ) || null;
+
+        return {
+          _id: entry.dueEntryId,
+          feeStructureId: item._id,
+          student: normalizedFeeStructure.student,
+          course: normalizedFeeStructure.course,
+          enrollment: normalizedFeeStructure.enrollment,
+          totalFee: item.totalFee || 0,
+          amount: entry.amount,
+          paidAmount: entry.paidAmount,
+          remainingAmount: entry.remainingAmount,
+          dueStatus: entry.status,
+          feeStatus: item.feeStatus,
+          installmentEnabled: !!item.installmentEnabled,
+          numberOfInstallments: item.numberOfInstallments || 1,
+          dueDate: entry.dueDate,
+          description: entry.description,
+          installmentNumber: entry.installmentNumber,
+          selectedInstallment: entry.selectedInstallment,
+          installments: item.installments || [],
+          receiptNo: entry.receiptNo,
+          voucherNo: entry.voucherNo,
+          paymentId: matchedPayment?._id || latestPaymentMeta?._id || null,
+          latestPayment: latestPaymentMeta,
+          paymentCount: rowPayments.length,
+        };
+      });
+    })
+    .filter((row) => row.student?._id && row.course?._id && row.enrollment?._id);
+
+  const summary = mappedRows.reduce(
+    (acc, row) => {
+      acc.totalDues += row.amount || 0;
+      acc.collected += row.paidAmount || 0;
+      acc.remaining += row.remainingAmount || 0;
+      acc.studentCount += 1;
+      if (row.dueStatus === "Paid") acc.paidCount += 1;
+      if (row.dueStatus === "Partial") acc.partialCount += 1;
+      if (row.dueStatus === "Pending") acc.pendingCount += 1;
+      return acc;
+    },
+    {
+      totalDues: 0,
+      collected: 0,
+      remaining: 0,
+      studentCount: 0,
+      paidCount: 0,
+      partialCount: 0,
+      pendingCount: 0,
+    },
+  );
+
+  return {
+    rows: mappedRows,
+    summary,
+  };
+};
+
+const getPreviousPayrollPeriod = (year, month) => {
+  const baseDate = new Date(Number(year), Number(month) - 1, 1);
+  const previous = new Date(baseDate.getFullYear(), baseDate.getMonth() - 1, 1);
+  return {
+    year: previous.getFullYear(),
+    month: previous.getMonth() + 1,
+  };
+};
+
+const deriveCarryForwardEligibleAmount = (payrollRecord) => {
+  if (!payrollRecord) {
+    return 0;
+  }
+
+  if (payrollRecord.carryForwardEligibleAmount !== undefined) {
+    return Math.max(0, Number(payrollRecord.carryForwardEligibleAmount || 0));
+  }
+
+  const baseDueAmount = Math.max(
+    0,
+    Number(
+      payrollRecord.baseDueAmount !== undefined
+        ? payrollRecord.baseDueAmount
+        : payrollRecord.dueAmount || 0,
+    ),
+  );
+  const carryForwardInAmount = Math.max(
+    0,
+    Number(payrollRecord.carryForwardInAmount || 0),
+  );
+  const paidAmount = Math.max(0, Number(payrollRecord.paidAmount || 0));
+  const appliedToCarry = Math.min(paidAmount, carryForwardInAmount);
+  const appliedToCurrent = Math.min(
+    baseDueAmount,
+    Math.max(0, paidAmount - appliedToCarry),
+  );
+
+  return Math.max(0, baseDueAmount - appliedToCurrent);
+};
+
+const calculatePayrollTotals = ({
+  baseDueAmount,
+  carryForwardInAmount,
+  paidAmount,
+}) => {
+  const normalizedBaseDueAmount = Math.max(0, Number(baseDueAmount || 0));
+  const normalizedCarryForwardInAmount = Math.max(
+    0,
+    Number(carryForwardInAmount || 0),
+  );
+  const normalizedPaidAmount = Math.max(0, Number(paidAmount || 0));
+  const totalDueAmount = normalizedBaseDueAmount + normalizedCarryForwardInAmount;
+  const appliedToCarry = Math.min(
+    normalizedPaidAmount,
+    normalizedCarryForwardInAmount,
+  );
+  const appliedToCurrent = Math.min(
+    normalizedBaseDueAmount,
+    Math.max(0, normalizedPaidAmount - appliedToCarry),
+  );
+  const carryForwardEligibleAmount = Math.max(
+    0,
+    normalizedBaseDueAmount - appliedToCurrent,
+  );
+  const remainingAmount = Math.max(0, totalDueAmount - normalizedPaidAmount);
+  const overpaidAmount = Math.max(0, normalizedPaidAmount - totalDueAmount);
+  const status =
+    totalDueAmount <= 0
+      ? "paid"
+      : normalizedPaidAmount >= totalDueAmount
+      ? "paid"
+      : normalizedPaidAmount > 0
+      ? "partial"
+      : "unpaid";
+
+  return {
+    baseDueAmount: normalizedBaseDueAmount,
+    carryForwardInAmount: normalizedCarryForwardInAmount,
+    totalDueAmount,
+    paidAmount: normalizedPaidAmount,
+    appliedToCarry,
+    appliedToCurrent,
+    carryForwardEligibleAmount,
+    remainingAmount,
+    overpaidAmount,
+    status,
+  };
+};
+
+const getTeacherCarryForwardAmount = async (teacherId, year, month) => {
+  const previousPeriod = getPreviousPayrollPeriod(year, month);
+  const previousPayrollRecord = await TeacherPayroll.findOne({
+    teacher: teacherId,
+    year: previousPeriod.year,
+    month: previousPeriod.month,
+  }).lean();
+
+  return {
+    previousPeriod,
+    previousPayrollRecord,
+    carryForwardInAmount: deriveCarryForwardEligibleAmount(previousPayrollRecord),
+  };
+};
+
+const getTeacherByAnyId = async (teacherId) => {
+  const normalizedTeacherId = String(teacherId || "").trim();
+  if (!normalizedTeacherId) {
+    return null;
+  }
+
+  const directTeacher = await TeacherSchema.findById(normalizedTeacherId)
+    .populate("courseId", "courseName courseId");
+  if (directTeacher) {
+    return directTeacher;
+  }
+
+  const mongoose = (await import("mongoose")).default;
+  const db = mongoose.connection.db;
+  const rawTeacher = await db
+    .collection("teachers")
+    .findOne({ _id: normalizedTeacherId });
+
+  if (!rawTeacher) {
+    return null;
+  }
+
+  const rawCourseIds = Array.isArray(rawTeacher.courseId)
+    ? rawTeacher.courseId.map((item) => String(item || "").trim()).filter(Boolean)
+    : [];
+  const rawCourses = rawCourseIds.length
+    ? await db
+        .collection("courses")
+        .find(
+          { _id: { $in: rawCourseIds } },
+          { projection: { courseName: 1, courseId: 1 } },
+        )
+        .toArray()
+    : [];
+
+  return {
+    ...rawTeacher,
+    courseId: rawCourses,
+  };
+};
+
 // GET /accounting/receipts/dues
 export const getReceiptDuesOverview = async (req, res) => {
   try {
@@ -1213,46 +2195,9 @@ export const getReceiptDuesOverview = async (req, res) => {
       limit = 50,
     } = req.query;
 
-    const enrollmentFilter = { status: "Active" };
-    if (courseId) enrollmentFilter.course = courseId;
+    const { rows: allRows } = await getReceiptOverviewBaseData();
 
-    const activeEnrollments = await Enrollment.find(enrollmentFilter)
-      .populate("student", "registrationNo studentName mobileNumber")
-      .populate("course", "courseName courseId")
-      .sort({ enrollmentDate: -1, createdAt: -1 })
-      .lean();
-
-    const latestEnrollmentByStudentCourse = new Map();
-    for (const enrollment of activeEnrollments) {
-      const studentId = String(enrollment.student?._id || enrollment.student || "");
-      const courseIdValue = String(
-        enrollment.course?._id || enrollment.course || "",
-      );
-
-      if (!studentId || !courseIdValue) {
-        continue;
-      }
-
-      const key = `${studentId}:${courseIdValue}`;
-      if (!latestEnrollmentByStudentCourse.has(key)) {
-        latestEnrollmentByStudentCourse.set(key, enrollment);
-      }
-    }
-
-    const enrolledFeeStructures = await FeeStructure.find({
-      enrollment: {
-        $in: Array.from(latestEnrollmentByStudentCourse.values()).map(
-          (item) => item._id,
-        ),
-      },
-    })
-      .populate("student", "registrationNo studentName mobileNumber")
-      .populate("course", "courseName courseId")
-      .populate("enrollment", "status enrollmentDate")
-      .sort({ createdAt: -1 })
-      .lean();
-
-    if (!enrolledFeeStructures.length) {
+    if (!allRows.length) {
       return res.status(200).json({
         success: true,
         data: [],
@@ -1275,94 +2220,8 @@ export const getReceiptDuesOverview = async (req, res) => {
       });
     }
 
-    const latestFeeStructureByEnrollment = new Map();
-    for (const item of enrolledFeeStructures) {
-      const enrollmentId = String(item.enrollment?._id || item.enrollment);
-      if (!latestFeeStructureByEnrollment.has(enrollmentId)) {
-        latestFeeStructureByEnrollment.set(enrollmentId, item);
-      }
-    }
-
-    const filteredFeeStructures = Array.from(latestFeeStructureByEnrollment.values());
-
-    const feeStructureIds = filteredFeeStructures.map((item) => item._id);
-
-    const payments = await FeePayment.find({
-      feeStructure: { $in: feeStructureIds },
-    })
-      .select(
-        "feeStructure receiptNo voucherNo amount paymentDate paymentMethod paymentType status createdAt installmentNumber",
-      )
-      .sort({ paymentDate: -1, createdAt: -1 })
-      .lean();
-
-    const paymentsByFeeStructure = payments.reduce((acc, payment) => {
-      const key = String(payment.feeStructure);
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(payment);
-      return acc;
-    }, {});
-
-    const mappedRows = filteredFeeStructures.flatMap((item) => {
-      const rowPayments = paymentsByFeeStructure[String(item._id)] || [];
-      const latestPayment = rowPayments[0] || null;
-      const latestPaymentMeta = latestPayment
-        ? {
-            _id: latestPayment._id,
-            receiptNo: latestPayment.receiptNo,
-            voucherNo: latestPayment.voucherNo,
-            amount: latestPayment.amount || 0,
-            paymentDate: latestPayment.paymentDate,
-            paymentMethod: latestPayment.paymentMethod,
-            paymentType: latestPayment.paymentType,
-            status: latestPayment.status,
-          }
-        : null;
-
-      return buildDueEntries(item).map((entry) => {
-        const matchedPayment =
-          rowPayments.find(
-            (payment) =>
-              (entry.receiptNo && payment.receiptNo === entry.receiptNo) ||
-              (entry.installmentNumber &&
-                payment.installmentNumber === entry.installmentNumber),
-          ) || null;
-
-        return {
-          _id: entry.dueEntryId,
-          feeStructureId: item._id,
-          student: item.student,
-          course: item.course,
-          enrollment: item.enrollment,
-          totalFee: item.totalFee || 0,
-          amount: entry.amount,
-          paidAmount: entry.paidAmount,
-          remainingAmount: entry.remainingAmount,
-          dueStatus: entry.status,
-          feeStatus: item.feeStatus,
-          installmentEnabled: !!item.installmentEnabled,
-          numberOfInstallments: item.numberOfInstallments || 1,
-          dueDate: entry.dueDate,
-          description: entry.description,
-          installmentNumber: entry.installmentNumber,
-          selectedInstallment: entry.selectedInstallment,
-          installments: item.installments || [],
-          receiptNo: entry.receiptNo,
-          voucherNo: entry.voucherNo,
-          paymentId: matchedPayment?._id || latestPaymentMeta?._id || null,
-          latestPayment: latestPaymentMeta,
-          paymentCount: rowPayments.length,
-        };
-      });
-    }).filter(
-      (row) =>
-        row.student?._id &&
-        row.course?._id &&
-        row.enrollment,
-    );
-
     const searchValue = search.trim().toLowerCase();
-    let filteredRows = mappedRows.filter((row) => {
+    let filteredRows = allRows.filter((row) => {
       const normalizedStatus = String(status || "").trim().toLowerCase();
       if (normalizedStatus) {
         if (normalizedStatus === "unpaid" && row.remainingAmount <= 0) {
@@ -1375,6 +2234,10 @@ export const getReceiptDuesOverview = async (req, res) => {
         ) {
           return false;
         }
+      }
+
+      if (courseId && String(row.course?._id || "") !== String(courseId)) {
+        return false;
       }
 
       const rowDueDate = row.dueDate ? new Date(row.dueDate) : null;
@@ -2150,9 +3013,13 @@ export const getTransactions = async (req, res) => {
       AccountingTransaction.countDocuments(filter),
     ]);
 
+    const serializedTransactions = await Promise.all(
+      transactions.map(serializeTransactionRecord),
+    );
+
     res.status(200).json({
       success: true,
-      data: transactions,
+      data: serializedTransactions,
       pagination: { total, page: parseInt(page), limit: parseInt(limit) },
     });
   } catch (error) {
@@ -2175,7 +3042,10 @@ export const getTransactionById = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Transaction not found" });
 
-    res.status(200).json({ success: true, data: txn });
+    res.status(200).json({
+      success: true,
+      data: await serializeTransactionRecord(txn),
+    });
   } catch (error) {
     console.error("Error fetching transaction:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
@@ -2249,7 +3119,7 @@ export const createTransaction = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      data: txn,
+      data: await serializeTransactionRecord(txn),
       message: "Transaction created successfully",
     });
   } catch (error) {
@@ -2309,7 +3179,7 @@ export const updateTransaction = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: txn,
+      data: await serializeTransactionRecord(txn),
       message: "Transaction updated successfully",
     });
   } catch (error) {
