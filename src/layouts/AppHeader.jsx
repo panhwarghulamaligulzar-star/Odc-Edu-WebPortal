@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { FaSearch, FaUser, FaSignOutAlt, FaCog, FaBars, FaTimes } from 'react-icons/fa';
+import { FaSearch, FaSignOutAlt, FaCog } from 'react-icons/fa';
 import { NavLink, useNavigate } from 'react-router-dom';
 import useZustandStore from '../stores/zustandStore';
 import { TbArrowsMaximize } from "react-icons/tb";
@@ -19,17 +19,38 @@ const handleLogout = () => {
   navigate("/login", { replace: true });
 };
 
-// Helper function to get correct profile image source
 const getProfileImageSrc = (profile) => {
-  if (!profile) {
-    return "/dummy-user.png";
-  } else if (profile.startsWith('http') || profile.startsWith('https')) {
-    // It's a URL, use it directly
-    return profile;
-  } else {
-    // It's base64 data, prefix with data URI
-    return `data:image/png;base64,${profile}`;
+  const rawProfile = String(profile || "").trim();
+
+  if (!rawProfile) {
+    return null;
   }
+
+  if (
+    rawProfile.startsWith("http://") ||
+    rawProfile.startsWith("https://") ||
+    rawProfile.startsWith("data:image")
+  ) {
+    return rawProfile;
+  }
+
+  return `data:image/png;base64,${rawProfile}`;
+};
+
+const getUserInitials = (name) => {
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!parts.length) {
+    return "NA";
+  }
+
+  const first = parts[0]?.[0] || "";
+  const last = (parts.length > 1 ? parts[parts.length - 1]?.[0] : parts[0]?.[1]) || "";
+
+  return `${first}${last}`.toUpperCase();
 };
 
 useEffect(() => {
@@ -47,6 +68,9 @@ useEffect(() => {
     document.removeEventListener("mousedown", handleClickOutside);
   };
 }, []);
+
+const profileImageSrc = getProfileImageSrc(adminInfo?.userData?.profile);
+const profileInitials = getUserInitials(adminInfo?.userData?.name);
 
 
   return (
@@ -79,28 +103,44 @@ useEffect(() => {
             <div
               className="relative"
               ref={profileMenuRef}
+              onMouseEnter={() => setDropdownOpen(true)}
+              onMouseLeave={() => setDropdownOpen(false)}
             >
-             <div
-              className="btn-md-cricle cursor-pointer"
+             <button
+              type="button"
+              className="btn-md-cricle cursor-pointer overflow-hidden"
               onClick={() => setDropdownOpen((prev) => !prev)}
-             >
-            <img
-              src={getProfileImageSrc(adminInfo?.userData?.profile)}
-              alt="profile"
-              className="w-12 h-12 rounded-full object-cover border border-gray-300 shadow-sm"
-            />
-          </div>
+              aria-label="Open profile menu"
+            >
+              {profileImageSrc ? (
+                <img
+                  src={profileImageSrc}
+                  alt={adminInfo?.userData?.name || "profile"}
+                  className="w-12 h-12 rounded-full object-cover border border-gray-300 shadow-sm"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded-full border border-gray-300 shadow-sm bg-[#01134C] text-white flex items-center justify-center font-semibold text-sm">
+                  {profileInitials}
+                </div>
+              )}
+            </button>
 
               {dropdownOpen && (
-                <div className="absolute right-0 top-full mt-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
-                  <div className="px-4 py-2 text-gray-700 font-medium  flex justify-start items-center "><FaSignOutAlt className="mr-2" /><span>{adminInfo?.userData?.name}</span></div>
+                <div className="absolute right-0 top-full pt-2 z-50">
+                  <div className="w-56 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                    <div className="px-4 py-3 text-gray-700 font-medium border-b border-gray-100">
+                      <div className="text-sm font-semibold truncate">
+                        {adminInfo?.userData?.name || "Profile"}
+                      </div>
+                    </div>
                   <button
                     onClick={handleLogout}
-                    className="w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100 flex items-center"
+                    className="w-full text-left px-4 py-3 text-gray-700 hover:bg-gray-100 flex items-center"
                   >
                     <FaSignOutAlt className="mr-2" />
                     Logout
                   </button>
+                </div>
                 </div>
               )}
             </div>

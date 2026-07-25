@@ -16,9 +16,10 @@ const AccountingTransactionSchema = new mongoose.Schema(
       trim: true,
     },
     type: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "AccountingType",
       required: true,
+      trim: true,
     },
     head: {
       type: mongoose.Schema.Types.ObjectId,

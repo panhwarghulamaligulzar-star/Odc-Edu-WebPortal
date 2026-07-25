@@ -34,6 +34,60 @@ const denyRestrictedAccountingAccess = (res) =>
       "This financial summary is restricted to the super admin. Ask the super admin to enable accounting balance visibility if needed.",
   });
 
+const findAccountingTypeByAnyId = async (typeId) => {
+  const rawTypeId = String(typeId || "").trim();
+  if (!rawTypeId) {
+    return null;
+  }
+
+  const mongoose = (await import("mongoose")).default;
+  const collection = mongoose.connection.db.collection("accountingtypes");
+
+  const stringIdMatch = await collection.findOne({ _id: rawTypeId });
+  if (stringIdMatch) {
+    return stringIdMatch;
+  }
+
+  if (mongoose.Types.ObjectId.isValid(rawTypeId)) {
+    const objectIdMatch = await collection.findOne({
+      _id: new mongoose.Types.ObjectId(rawTypeId),
+    });
+    if (objectIdMatch) {
+      return objectIdMatch;
+    }
+  }
+
+  return null;
+};
+
+const serializeHeadWithType = async (headDoc) => {
+  if (!headDoc) {
+    return null;
+  }
+
+  const head =
+    typeof headDoc.toObject === "function" ? headDoc.toObject() : { ...headDoc };
+
+  if (head.type?.name) {
+    return {
+      ...head,
+      typeLabel: head.type.name,
+    };
+  }
+
+  const typeId = head.type?._id || head.type || null;
+  if (!typeId) {
+    return { ...head, type: null };
+  }
+
+  const typeRecord = await findAccountingTypeByAnyId(typeId);
+  return {
+    ...head,
+    type: typeRecord ? { _id: typeRecord._id, name: typeRecord.name } : null,
+    typeLabel: typeRecord?.name || null,
+  };
+};
+
 const sanitizeTransferBalanceFields = (transfer, balancesVisible) => {
   const data = transfer?.toObject ? transfer.toObject() : transfer;
 
@@ -148,6 +202,25 @@ export const getAccountingTypes = async (req, res) => {
 // HEADS OF ACCOUNT
 // ============================================================
 
+const resolveAccountingTypeId = async (typeValue) => {
+  const rawType = String(typeValue || "").trim();
+  if (!rawType) {
+    return null;
+  }
+
+  const existingTypeById = await findAccountingTypeByAnyId(rawType);
+  if (existingTypeById) {
+    return existingTypeById._id;
+  }
+
+  const normalizedType = rawType.toLowerCase();
+  const matchedType = await AccountingType.findOne({
+    name: { $regex: new RegExp(`^${normalizedType}$`, "i") },
+  }).lean();
+
+  return matchedType?._id || null;
+};
+
 // GET /accounting/heads — list all active heads (optional ?type=id)
 export const getHeadsOfAccount = async (req, res) => {
   try {
@@ -161,9 +234,13 @@ export const getHeadsOfAccount = async (req, res) => {
       .populate("type", "name")
       .sort({ name: 1 });
 
+    const serializedHeads = await Promise.all(
+      heads.map((head) => serializeHeadWithType(head)),
+    );
+
     res.status(200).json({
       success: true,
-      data: heads,
+      data: serializedHeads,
       message: "Heads of account retrieved successfully",
     });
   } catch (error) {
@@ -184,10 +261,18 @@ export const createHeadOfAccount = async (req, res) => {
       });
     }
 
+    const resolvedTypeId = await resolveAccountingTypeId(type);
+    if (!resolvedTypeId) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid accounting type is required",
+      });
+    }
+
     // Check if a head with the same name exists under the same type
     const existing = await HeadOfAccount.findOne({
       name: { $regex: new RegExp(`^${name.trim()}$`, "i") },
-      type,
+      type: resolvedTypeId,
     });
     if (existing) {
       return res.status(409).json({
@@ -199,16 +284,17 @@ export const createHeadOfAccount = async (req, res) => {
 
     const head = new HeadOfAccount({
       name: name.trim(),
-      type,
+      type: resolvedTypeId,
       description: description?.trim() || "",
     });
 
     await head.save();
     await head.populate("type", "name");
+    const serializedHead = await serializeHeadWithType(head);
 
     res.status(201).json({
       success: true,
-      data: head,
+      data: serializedHead,
       message: "Head of account created successfully",
     });
   } catch (error) {
@@ -220,10 +306,50 @@ export const createHeadOfAccount = async (req, res) => {
 // PUT /accounting/heads/:id — update a head
 export const updateHeadOfAccount = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { name, type, description, isActive } = req.body;
+    const id = req.params.id || req.body.id || req.body._id;
+    const { name, type, description, isActive, originalHead } = req.body;
 
-    const head = await HeadOfAccount.findById(id);
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Head ID is required to update a head of account",
+      });
+    }
+
+    const mongoose = (await import("mongoose")).default;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid head of account ID",
+      });
+    }
+
+    let head = await HeadOfAccount.findById(id);
+    if (!head && originalHead) {
+      const originalFilter = {};
+
+      if (originalHead.id && mongoose.Types.ObjectId.isValid(originalHead.id)) {
+        originalFilter._id = originalHead.id;
+      } else {
+        if (originalHead.name) {
+          originalFilter.name = originalHead.name.trim();
+        }
+        if (originalHead.type && mongoose.Types.ObjectId.isValid(originalHead.type)) {
+          originalFilter.type = originalHead.type;
+        }
+        if (originalHead.description !== undefined) {
+          originalFilter.description = (originalHead.description || "").trim();
+        }
+        if (originalHead.isActive !== undefined) {
+          originalFilter.isActive = originalHead.isActive;
+        }
+      }
+
+      if (Object.keys(originalFilter).length > 0) {
+        head = await HeadOfAccount.findOne(originalFilter);
+      }
+    }
+
     if (!head) {
       return res.status(404).json({
         success: false,
@@ -231,17 +357,46 @@ export const updateHeadOfAccount = async (req, res) => {
       });
     }
 
-    if (name) head.name = name.trim();
-    if (type) head.type = type;
-    if (description !== undefined) head.description = description.trim();
+    const nextName = name ? name.trim() : head.name;
+    const resolvedNextType = type
+      ? await resolveAccountingTypeId(type)
+      : head.type;
+
+    if (!resolvedNextType) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid accounting type is required",
+      });
+    }
+
+    if (name || type) {
+      const existing = await HeadOfAccount.findOne({
+        _id: { $ne: head._id },
+        name: { $regex: new RegExp(`^${nextName}$`, "i") },
+        type: resolvedNextType,
+      });
+
+      if (existing) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "A head of account with this name already exists for this type",
+        });
+      }
+    }
+
+    head.name = nextName;
+    head.type = resolvedNextType;
+    if (description !== undefined) head.description = description?.trim() || "";
     if (isActive !== undefined) head.isActive = isActive;
 
     await head.save();
     await head.populate("type", "name");
+    const serializedHead = await serializeHeadWithType(head);
 
     res.status(200).json({
       success: true,
-      data: head,
+      data: serializedHead,
       message: "Head of account updated successfully",
     });
   } catch (error) {
@@ -253,7 +408,22 @@ export const updateHeadOfAccount = async (req, res) => {
 // DELETE /accounting/heads/:id — soft-delete (isActive = false)
 export const deleteHeadOfAccount = async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id || req.body.id || req.body._id;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Head ID is required to deactivate a head of account",
+      });
+    }
+
+    const mongoose = (await import("mongoose")).default;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid head of account ID",
+      });
+    }
 
     const head = await HeadOfAccount.findById(id);
     if (!head) {
@@ -723,7 +893,6 @@ export const payTeacherPayroll = async (req, res) => {
     if (requestedHeadId) {
       salaryHead = await HeadOfAccount.findOne({
         _id: requestedHeadId,
-        type: txnType._id,
         isActive: { $ne: false },
       });
     }

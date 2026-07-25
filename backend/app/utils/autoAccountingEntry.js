@@ -113,12 +113,18 @@ export const createAutoAccountingEntry = async (opts) => {
   } = opts;
 
   // 1 ─ Resolve AccountingType
+  const normalizedEntryType =
+    typeof entryType === "string" &&
+    entryType.trim().toLowerCase() === "expense"
+      ? "Expense"
+      : "Income";
+
   const txnType = await AccountingType.findOne({
-    name: new RegExp(`^${entryType}$`, "i"),
+    name: new RegExp(`^${normalizedEntryType}$`, "i"),
   });
   if (!txnType) {
     console.warn(
-      `[AutoAccounting] AccountingType "${entryType}" not found — skipping.`,
+      `[AutoAccounting] AccountingType "${normalizedEntryType}" not found — skipping.`,
     );
     return;
   }
