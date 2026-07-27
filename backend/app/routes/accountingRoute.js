@@ -20,6 +20,7 @@ import {
   createTransaction,
   updateTransaction,
   deleteTransaction,
+  revertTransaction,
   getFundTransfers,
   createFundTransfer,
   deleteFundTransfer,
@@ -70,6 +71,7 @@ accountingRoute.get("/transactions", authMiddleware, authorize("accounting", "vi
 accountingRoute.get("/transactions/:id", authMiddleware, authorize("accounting", "view"), getTransactionById);
 accountingRoute.post("/transactions", authMiddleware, authorize("accounting", "create"), createTransaction);
 accountingRoute.put("/transactions/:id", authMiddleware, authorize("accounting", "update"), updateTransaction);
+accountingRoute.post("/transactions/:id/revert", authMiddleware, authorize("accounting", "delete"), revertTransaction);
 accountingRoute.delete("/transactions/:id", authMiddleware, authorize("accounting", "delete"), deleteTransaction);
 
 // Fund Transfers

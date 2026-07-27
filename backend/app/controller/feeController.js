@@ -15,44 +15,55 @@ const getDb = async () => {
   return mongoose.connection.db;
 };
 
+const getIdVariants = async (value) => {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return [];
+  }
+
+  const mongoose = (await import("mongoose")).default;
+  const variants = [rawValue];
+
+  if (mongoose.Types.ObjectId.isValid(rawValue)) {
+    variants.push(new mongoose.Types.ObjectId(rawValue));
+  }
+
+  return variants;
+};
+
 const findRawById = async (collectionName, id) => {
-  const normalizedId = String(id || "").trim();
-  if (!normalizedId) {
+  const idVariants = await getIdVariants(id);
+  if (!idVariants.length) {
     return null;
   }
 
   const db = await getDb();
-  return db.collection(collectionName).findOne({ _id: normalizedId });
+  return db.collection(collectionName).findOne({ _id: { $in: idVariants } });
 };
 
 const findRawFeeStructure = async ({ feeStructureId, studentId, courseId }) => {
   const db = await getDb();
 
   if (feeStructureId) {
-    return findRawById("feestructures", feeStructureId);
+    const directMatch = await findRawById("feestructures", feeStructureId);
+    if (directMatch) {
+      return directMatch;
+    }
   }
 
+  const studentVariants = await getIdVariants(studentId);
+  const courseVariants = await getIdVariants(courseId);
+
   return db.collection("feestructures").findOne({
-    student: String(studentId || "").trim(),
-    course: String(courseId || "").trim(),
+    student: { $in: studentVariants },
+    course: { $in: courseVariants },
   });
 };
 
 const getRawStudentAndCourse = async (studentId, courseId) => {
-  const db = await getDb();
   const [student, course] = await Promise.all([
-    db
-      .collection("admissions")
-      .findOne(
-        { _id: String(studentId || "").trim() },
-        { projection: { registrationNo: 1, studentName: 1, mobileNumber: 1 } },
-      ),
-    db
-      .collection("courses")
-      .findOne(
-        { _id: String(courseId || "").trim() },
-        { projection: { courseName: 1, courseId: 1 } },
-      ),
+    findRawById("admissions", studentId),
+    findRawById("courses", courseId),
   ]);
 
   return { student, course };
@@ -333,13 +344,12 @@ export const recordFeePayment = async (req, res) => {
     const receiptNo = generateReceiptNumber("RCP", paymentCount + 1);
     const resolvedPaymentDate = paymentDate ? new Date(paymentDate) : new Date();
     const db = await getDb();
-    const payment = {
-      _id: crypto.randomUUID(),
+    const payment = await FeePaymentSchema.create({
       receiptNo,
       voucherNo: voucherNo || "",
-      student: String(studentId),
-      course: String(courseId),
-      feeStructure: String(feeStructure._id),
+      student: feeStructure.student || studentId,
+      course: String(feeStructure.course || courseId),
+      feeStructure: feeStructure._id,
       installmentNumber: installmentNumber || null,
       amount: normalizedAmount,
       paymentDate: resolvedPaymentDate,
@@ -352,12 +362,7 @@ export const recordFeePayment = async (req, res) => {
       receivedBy: receivedBy || null,
       status: "Completed",
       paymentType: paymentType || "Installment",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      __v: 0,
-    };
-
-    await db.collection("feepayments").insertOne(payment);
+    });
 
     // Update fee structure (using rounded amounts)
     feeStructure.paidAmount = Math.round(
@@ -406,7 +411,7 @@ export const recordFeePayment = async (req, res) => {
 
     const { student, course } = await getRawStudentAndCourse(studentId, courseId);
     const populatedPayment = {
-      ...payment,
+      ...payment.toObject(),
       student,
       course,
     };

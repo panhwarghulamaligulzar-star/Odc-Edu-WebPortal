@@ -22,6 +22,7 @@ import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
+  RollbackOutlined,
   TransactionOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
@@ -47,6 +48,7 @@ import {
   createTransaction,
   updateTransaction,
   deleteTransaction,
+  revertTransactionById,
 } from "../../../services/accountingService";
 import useZustandStore from "../../../stores/zustandStore";
 import { canViewAccountingBalances } from "../../../utils/accountingAccess";
@@ -266,6 +268,20 @@ const Transactions = () => {
       } else message.error(res?.message || "Delete failed");
     } catch (err) {
       message.error(err?.message || "Delete failed");
+    }
+  };
+
+  const handleRevert = async (id) => {
+    try {
+      const res = await revertTransactionById(id);
+      if (res?.success) {
+        message.success(res.message || "Transaction reverted successfully");
+        fetchTransactions(pagination.current);
+      } else {
+        message.error(res?.message || "Revert failed");
+      }
+    } catch (err) {
+      message.error(err?.message || "Revert failed");
     }
   };
   // ── Export helpers ───────────────────────────────────────────
@@ -548,7 +564,7 @@ const Transactions = () => {
     {
       title: "Actions",
       key: "actions",
-      width: 120,
+      width: 170,
       render: (_, record) => (
         <Space>
           <Tooltip title="View Details">
@@ -569,6 +585,22 @@ const Transactions = () => {
               onClick={() => openEditModal(record)}
               style={{ borderColor: "#01134C", color: "#01134C" }}
             />
+          </Tooltip>
+          <Tooltip title="Revert">
+            <Popconfirm
+              title="Revert this transaction?"
+              description="This will undo the original payment/expense where possible and remove this transaction from the list."
+              onConfirm={() => handleRevert(record._id)}
+              okText="Revert"
+              okButtonProps={{ danger: true }}
+              cancelText="Cancel"
+            >
+              <Button
+                size="small"
+                icon={<RollbackOutlined />}
+                style={{ borderColor: "#d97706", color: "#d97706" }}
+              />
+            </Popconfirm>
           </Tooltip>
           <Tooltip title="Delete">
             <Popconfirm
