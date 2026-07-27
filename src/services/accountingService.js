@@ -208,6 +208,16 @@ export const deleteTransaction = async (id) => {
   }
 };
 
+export const revertTransactionById = async (id) => {
+  try {
+    const response = await api.post(`/accounting/transactions/${id}/revert`);
+    return response.data;
+  } catch (error) {
+    console.error("Revert Transaction Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
 // ── Fund Transfers ──────────────────────────────────────────
 
 export const getFundTransfers = async (params = {}) => {

@@ -12,7 +12,7 @@ const AccountingTypeSchema = new mongoose.Schema(
       required: true,
       unique: true,
       trim: true,
-      enum: ["Income", "Expense"],
+      enum: ["Income", "Expense", "Assets", "Liabilities", "Equity"],
     },
     description: {
       type: String,

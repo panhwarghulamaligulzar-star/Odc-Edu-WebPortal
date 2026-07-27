@@ -148,6 +148,15 @@ const serializeTransactionRecord = async (transactionDoc) => {
 
   return {
     ...data,
+    revertSourceType:
+      resolvedType?.name === "Income" &&
+      (String(data?.name || "").toLowerCase().startsWith("fee payment") ||
+        String(data?.billReference || "").toUpperCase().startsWith("RCP-"))
+        ? "fee_payment"
+        : String(data?.name || "").toLowerCase().startsWith("expense payment")
+          ? "expense_head_entry"
+          : "transaction",
+    canRevert: true,
     type: resolvedType
       ? { _id: resolvedType._id, name: resolvedType.name }
       : data?.type || null,
@@ -293,6 +302,42 @@ const getTeacherPayrollSalaryConfig = (teacher, payrollRecord = null) => {
 // GET /accounting/types — list all seeded types
 export const getAccountingTypes = async (req, res) => {
   try {
+    const defaultTypes = [
+      {
+        name: "Income",
+        description: "All money received by the organisation",
+      },
+      {
+        name: "Expense",
+        description: "All money spent by the organisation",
+      },
+      {
+        name: "Assets",
+        description: "Resources owned by the organisation",
+      },
+      {
+        name: "Liabilities",
+        description: "Amounts owed by the organisation",
+      },
+      {
+        name: "Equity",
+        description: "Owner or retained value in the organisation",
+      },
+    ];
+
+    for (const type of defaultTypes) {
+      await AccountingType.updateOne(
+        { name: type.name },
+        {
+          $setOnInsert: {
+            _id: type.name.toLowerCase(),
+            ...type,
+          },
+        },
+        { upsert: true },
+      );
+    }
+
     const types = await AccountingType.find().sort({ name: 1 });
     res.status(200).json({
       success: true,
@@ -1812,6 +1857,113 @@ export const deleteExpenseHeadEntry = async (req, res) => {
 const buildEntityMapById = (items = []) =>
   new Map(items.map((item) => [String(item?._id), item]));
 
+const getIdVariants = async (value) => {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) {
+    return [];
+  }
+
+  const mongoose = (await import("mongoose")).default;
+  const variants = [rawValue];
+
+  if (mongoose.Types.ObjectId.isValid(rawValue)) {
+    variants.push(new mongoose.Types.ObjectId(rawValue));
+  }
+
+  return variants;
+};
+
+const syncFeeStructurePaymentStatus = (feeStructure) => {
+  const totalFee = Number(feeStructure?.totalFee || 0);
+  const paidAmount = Math.max(0, Number(feeStructure?.paidAmount || 0));
+  feeStructure.paidAmount = paidAmount;
+  feeStructure.remainingAmount = Math.max(0, totalFee - paidAmount);
+
+  if (feeStructure.remainingAmount <= 0) {
+    feeStructure.feeStatus = "Paid";
+  } else if (feeStructure.paidAmount > 0) {
+    feeStructure.feeStatus = "Partial";
+  } else {
+    feeStructure.feeStatus = "Unpaid";
+  }
+};
+
+const syncInstallmentAfterRevert = async (feeStructure, payment) => {
+  if (
+    !payment?.installmentNumber ||
+    !Array.isArray(feeStructure?.installments) ||
+    !feeStructure.installments.length
+  ) {
+    return;
+  }
+
+  const targetInstallment = feeStructure.installments.find(
+    (item) =>
+      Number(item?.installmentNumber) === Number(payment.installmentNumber),
+  );
+
+  if (!targetInstallment) {
+    return;
+  }
+
+  targetInstallment.paidAmount = Math.max(
+    0,
+    Number(targetInstallment.paidAmount || 0) - Number(payment.amount || 0),
+  );
+
+  const installmentTotal = Number(targetInstallment.amount || 0);
+  if (targetInstallment.paidAmount <= 0) {
+    targetInstallment.status = "Pending";
+  } else if (targetInstallment.paidAmount >= installmentTotal) {
+    targetInstallment.status = "Paid";
+  } else {
+    targetInstallment.status = "Partial";
+  }
+
+  const latestRemainingPayment = await FeePayment.findOne({
+    _id: { $ne: payment._id },
+    feeStructure: payment.feeStructure,
+    installmentNumber: payment.installmentNumber,
+    status: "Completed",
+  })
+    .sort({ paymentDate: -1, createdAt: -1 })
+    .lean();
+
+  if (latestRemainingPayment) {
+    targetInstallment.receiptNumber = latestRemainingPayment.receiptNo || "";
+    targetInstallment.voucherNo = latestRemainingPayment.voucherNo || "";
+    targetInstallment.paidDate = latestRemainingPayment.paymentDate || null;
+  } else {
+    targetInstallment.receiptNumber = "";
+    targetInstallment.voucherNo = "";
+    targetInstallment.paidDate = null;
+  }
+};
+
+const buildRawRefFilter = async (fieldName, values = []) => {
+  const variants = [];
+
+  for (const value of values) {
+    const currentVariants = await getIdVariants(value);
+    for (const item of currentVariants) {
+      const exists = variants.some(
+        (variant) =>
+          String(variant) === String(item) &&
+          typeof variant === typeof item,
+      );
+      if (!exists) {
+        variants.push(item);
+      }
+    }
+  }
+
+  if (!variants.length) {
+    return null;
+  }
+
+  return { [fieldName]: { $in: variants } };
+};
+
 const getReceiptOverviewBaseData = async () => {
   const mongoose = (await import("mongoose")).default;
   const db = mongoose.connection.db;
@@ -1821,59 +1973,54 @@ const getReceiptOverviewBaseData = async () => {
     .sort({ enrollmentDate: -1, createdAt: -1 })
     .lean();
 
-  const studentIds = Array.from(
-    new Set(
-      activeEnrollments
-        .map((item) => String(item?.student || "").trim())
-        .filter(Boolean),
-    ),
+  const studentFilter = await buildRawRefFilter(
+    "_id",
+    activeEnrollments.map((item) => item?.student),
   );
-  const courseIds = Array.from(
-    new Set(
-      activeEnrollments
-        .map((item) => String(item?.course || "").trim())
-        .filter(Boolean),
-    ),
+  const courseFilter = await buildRawRefFilter(
+    "_id",
+    activeEnrollments.map((item) => item?.course),
   );
 
   const [students, courses] = await Promise.all([
-    db
-      .collection("admissions")
-      .find(
-        { _id: { $in: studentIds } },
-        { projection: { registrationNo: 1, studentName: 1, mobileNumber: 1 } },
-      )
-      .toArray(),
-    db
-      .collection("courses")
-      .find(
-        { _id: { $in: courseIds } },
-        { projection: { courseName: 1, courseId: 1 } },
-      )
-      .toArray(),
+    studentFilter
+      ? db
+          .collection("admissions")
+          .find(studentFilter, {
+            projection: { registrationNo: 1, studentName: 1, mobileNumber: 1 },
+          })
+          .toArray()
+      : [],
+    courseFilter
+      ? db
+          .collection("courses")
+          .find(courseFilter, {
+            projection: { courseName: 1, courseId: 1 },
+          })
+          .toArray()
+      : [],
   ]);
 
   const studentsById = buildEntityMapById(students);
   const coursesById = buildEntityMapById(courses);
-
   const latestEnrollmentByStudentCourse = new Map();
   const enrollmentsById = new Map();
 
   for (const enrollment of activeEnrollments) {
-    const studentId = String(enrollment?.student || "").trim();
-    const courseIdValue = String(enrollment?.course || "").trim();
+    const studentId = String(enrollment?.student?._id || enrollment?.student || "").trim();
+    const courseIdValue = String(
+      enrollment?.course?._id || enrollment?.course || "",
+    ).trim();
 
     if (!studentId || !courseIdValue) {
       continue;
     }
 
-    const normalizedEnrollment = {
+    enrollmentsById.set(String(enrollment._id), {
       ...enrollment,
       student: studentsById.get(studentId) || null,
       course: coursesById.get(courseIdValue) || null,
-    };
-
-    enrollmentsById.set(String(enrollment._id), normalizedEnrollment);
+    });
 
     const key = `${studentId}:${courseIdValue}`;
     if (!latestEnrollmentByStudentCourse.has(key)) {
@@ -1900,15 +2047,32 @@ const getReceiptOverviewBaseData = async () => {
     };
   }
 
-  const enrolledFeeStructures = await db
-    .collection("feestructures")
-    .find({ enrollment: { $in: latestEnrollmentIds } })
-    .sort({ createdAt: -1 })
-    .toArray();
+  const enrollmentFilterQuery = await buildRawRefFilter(
+    "enrollment",
+    latestEnrollmentIds,
+  );
+  const enrolledFeeStructures = enrollmentFilterQuery
+    ? await db
+        .collection("feestructures")
+        .find(enrollmentFilterQuery)
+        .sort({ createdAt: -1 })
+        .toArray()
+    : [];
+
+  const normalizedFeeStructures = enrolledFeeStructures
+    .sort(
+      (a, b) => new Date(b?.createdAt || 0).getTime() - new Date(a?.createdAt || 0).getTime(),
+    )
+    .map((item) => ({
+      ...item,
+      student: studentsById.get(String(item.student || "")) || null,
+      course: coursesById.get(String(item.course || "")) || null,
+      enrollment: enrollmentsById.get(String(item.enrollment || "")) || null,
+    }));
 
   const latestFeeStructureByEnrollment = new Map();
-  for (const item of enrolledFeeStructures) {
-    const enrollmentId = String(item.enrollment || "");
+  for (const item of normalizedFeeStructures) {
+    const enrollmentId = String(item.enrollment?._id || item.enrollment || "");
     if (!latestFeeStructureByEnrollment.has(enrollmentId)) {
       latestFeeStructureByEnrollment.set(enrollmentId, item);
     }
@@ -1917,27 +2081,27 @@ const getReceiptOverviewBaseData = async () => {
   const filteredFeeStructures = Array.from(latestFeeStructureByEnrollment.values());
   const feeStructureIds = filteredFeeStructures.map((item) => item._id);
 
-  const payments = await db
-    .collection("feepayments")
-    .find(
-      { feeStructure: { $in: feeStructureIds } },
-      {
-        projection: {
-          feeStructure: 1,
-          receiptNo: 1,
-          voucherNo: 1,
-          amount: 1,
-          paymentDate: 1,
-          paymentMethod: 1,
-          paymentType: 1,
-          status: 1,
-          createdAt: 1,
-          installmentNumber: 1,
-        },
-      },
-    )
-    .sort({ paymentDate: -1, createdAt: -1 })
-    .toArray();
+  const paymentFilterQuery = await buildRawRefFilter("feeStructure", feeStructureIds);
+  const payments = paymentFilterQuery
+    ? await db
+        .collection("feepayments")
+        .find(paymentFilterQuery, {
+          projection: {
+            feeStructure: 1,
+            receiptNo: 1,
+            voucherNo: 1,
+            amount: 1,
+            paymentDate: 1,
+            paymentMethod: 1,
+            paymentType: 1,
+            status: 1,
+            createdAt: 1,
+            installmentNumber: 1,
+          },
+        })
+        .sort({ paymentDate: -1, createdAt: -1 })
+        .toArray()
+    : [];
 
   const paymentsByFeeStructure = payments.reduce((acc, payment) => {
     const key = String(payment.feeStructure);
@@ -1963,14 +2127,7 @@ const getReceiptOverviewBaseData = async () => {
           }
         : null;
 
-      const normalizedFeeStructure = {
-        ...item,
-        student: studentsById.get(String(item.student || "")) || null,
-        course: coursesById.get(String(item.course || "")) || null,
-        enrollment: enrollmentsById.get(String(item.enrollment || "")) || null,
-      };
-
-      return buildDueEntries(normalizedFeeStructure).map((entry) => {
+      return buildDueEntries(item).map((entry) => {
         const matchedPayment =
           rowPayments.find(
             (payment) =>
@@ -1982,9 +2139,9 @@ const getReceiptOverviewBaseData = async () => {
         return {
           _id: entry.dueEntryId,
           feeStructureId: item._id,
-          student: normalizedFeeStructure.student,
-          course: normalizedFeeStructure.course,
-          enrollment: normalizedFeeStructure.enrollment,
+          student: item.student,
+          course: item.course,
+          enrollment: item.enrollment,
           totalFee: item.totalFee || 0,
           amount: entry.amount,
           paidAmount: entry.paidAmount,
@@ -3210,6 +3367,93 @@ export const deleteTransaction = async (req, res) => {
     });
   } catch (error) {
     console.error("Error deleting transaction:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+// POST /accounting/transactions/:id/revert
+export const revertTransaction = async (req, res) => {
+  try {
+    const txn = await AccountingTransaction.findById(req.params.id);
+    if (!txn) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Transaction not found" });
+    }
+
+    const txnType = await AccountingType.findById(txn.type);
+    const direction = txnType?.name === "Income" ? 1 : -1;
+
+    const linkedFeePayment = await FeePayment.findOne({
+      $or: [
+        { receiptNo: String(txn.billReference || "").trim() },
+        { voucherNo: String(txn.billReference || "").trim() },
+      ],
+      status: "Completed",
+    }).sort({ paymentDate: -1, createdAt: -1 });
+
+    if (linkedFeePayment) {
+      const feeStructure = await FeeStructure.findById(linkedFeePayment.feeStructure);
+      if (!feeStructure) {
+        return res.status(404).json({
+          success: false,
+          message: "Linked fee structure not found for this transaction",
+        });
+      }
+
+      feeStructure.paidAmount = Math.max(
+        0,
+        Number(feeStructure.paidAmount || 0) - Number(linkedFeePayment.amount || 0),
+      );
+      await syncInstallmentAfterRevert(feeStructure, linkedFeePayment);
+      syncFeeStructurePaymentStatus(feeStructure);
+      await feeStructure.save();
+
+      await FeePayment.findByIdAndDelete(linkedFeePayment._id);
+      await adjustBalance(txn.paymentMethod, Number(txn.amount || 0), -direction);
+      await AccountingTransaction.findByIdAndDelete(txn._id);
+
+      return res.status(200).json({
+        success: true,
+        sourceType: "fee_payment",
+        message: "Fee payment reverted successfully",
+      });
+    }
+
+    const linkedExpenseEntry = await ExpenseHeadEntry.findOne({
+      $or: [
+        { transactionId: txn._id },
+        { voucherNo: String(txn.billReference || "").trim(), isActive: true },
+      ],
+    });
+
+    if (linkedExpenseEntry) {
+      linkedExpenseEntry.isActive = false;
+      if (String(linkedExpenseEntry.transactionId || "") === String(txn._id)) {
+        linkedExpenseEntry.transactionId = null;
+      }
+      await linkedExpenseEntry.save();
+
+      await adjustBalance(txn.paymentMethod, Number(txn.amount || 0), -direction);
+      await AccountingTransaction.findByIdAndDelete(txn._id);
+
+      return res.status(200).json({
+        success: true,
+        sourceType: "expense_head_entry",
+        message: "Expense entry reverted successfully",
+      });
+    }
+
+    await adjustBalance(txn.paymentMethod, Number(txn.amount || 0), -direction);
+    await AccountingTransaction.findByIdAndDelete(txn._id);
+
+    res.status(200).json({
+      success: true,
+      sourceType: "transaction",
+      message: "Transaction reverted successfully",
+    });
+  } catch (error) {
+    console.error("Error reverting transaction:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
   }
 };

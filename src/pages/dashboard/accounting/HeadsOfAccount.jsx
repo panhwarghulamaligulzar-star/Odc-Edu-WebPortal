@@ -98,6 +98,30 @@ const normalizeTypeValue = (value) => {
   ) {
     return "expense";
   }
+  if (
+    compactValue === "asset" ||
+    compactValue === "assets" ||
+    compactValue === "assetaccount" ||
+    compactValue.includes("asset")
+  ) {
+    return "assets";
+  }
+  if (
+    compactValue === "liability" ||
+    compactValue === "liabilities" ||
+    compactValue === "liabilityaccount" ||
+    compactValue.includes("liabil")
+  ) {
+    return "liabilities";
+  }
+  if (
+    compactValue === "equity" ||
+    compactValue === "ownersequity" ||
+    compactValue === "capital" ||
+    compactValue.includes("equity")
+  ) {
+    return "equity";
+  }
   return compactValue;
 };
 
@@ -136,7 +160,11 @@ const resolveTypeLabel = (
     resolveTypeRecord(fallbackTypeId, availableTypes) ||
     null;
 
-  if (resolvedType?.name === "Income" || resolvedType?.name === "Expense") {
+  if (
+    ["Income", "Expense", "Assets", "Liabilities", "Equity"].includes(
+      resolvedType?.name,
+    )
+  ) {
     return resolvedType.name;
   }
 
@@ -147,11 +175,18 @@ const resolveTypeLabel = (
   if (!rawType) return null;
   if (normalizeTypeValue(rawType) === "income") return "Income";
   if (normalizeTypeValue(rawType) === "expense") return "Expense";
+  if (normalizeTypeValue(rawType) === "assets") return "Assets";
+  if (normalizeTypeValue(rawType) === "liabilities") return "Liabilities";
+  if (normalizeTypeValue(rawType) === "equity") return "Equity";
 
   const matchedType = availableTypes.find(
     (type) => String(type?._id || "") === rawType,
   );
-  if (matchedType?.name === "Income" || matchedType?.name === "Expense") {
+  if (
+    ["Income", "Expense", "Assets", "Liabilities", "Equity"].includes(
+      matchedType?.name,
+    )
+  ) {
     return matchedType.name;
   }
 
@@ -178,6 +213,79 @@ const normalizeHeadRecord = (head, availableTypes = [], fallbackTypeId = null) =
 
 const formatCurrency = (value) =>
   `PKR ${Number(value || 0).toLocaleString("en-PK")}`;
+
+const SMALL_NUMBER_WORDS = [
+  "Zero",
+  "One",
+  "Two",
+  "Three",
+  "Four",
+  "Five",
+  "Six",
+  "Seven",
+  "Eight",
+  "Nine",
+  "Ten",
+  "Eleven",
+  "Twelve",
+  "Thirteen",
+  "Fourteen",
+  "Fifteen",
+  "Sixteen",
+  "Seventeen",
+  "Eighteen",
+  "Nineteen",
+];
+
+const TENS_WORDS = [
+  "",
+  "",
+  "Twenty",
+  "Thirty",
+  "Forty",
+  "Fifty",
+  "Sixty",
+  "Seventy",
+  "Eighty",
+  "Ninety",
+];
+
+const numberBelowThousandToWords = (value) => {
+  const number = Number(value || 0);
+  if (number < 20) return SMALL_NUMBER_WORDS[number];
+  if (number < 100) {
+    const tens = Math.floor(number / 10);
+    const remainder = number % 10;
+    return remainder
+      ? `${TENS_WORDS[tens]} ${SMALL_NUMBER_WORDS[remainder]}`
+      : TENS_WORDS[tens];
+  }
+
+  const hundreds = Math.floor(number / 100);
+  const remainder = number % 100;
+  return remainder
+    ? `${SMALL_NUMBER_WORDS[hundreds]} Hundred ${numberBelowThousandToWords(remainder)}`
+    : `${SMALL_NUMBER_WORDS[hundreds]} Hundred`;
+};
+
+const amountToWords = (value) => {
+  const number = Math.floor(Number(value || 0));
+  if (!Number.isFinite(number) || number < 0) return "";
+  if (number === 0) return "Rupees Zero Only";
+
+  const parts = [];
+  const crores = Math.floor(number / 10000000);
+  const lakhs = Math.floor((number % 10000000) / 100000);
+  const thousands = Math.floor((number % 100000) / 1000);
+  const remainder = number % 1000;
+
+  if (crores) parts.push(`${numberBelowThousandToWords(crores)} Crore`);
+  if (lakhs) parts.push(`${numberBelowThousandToWords(lakhs)} Lakh`);
+  if (thousands) parts.push(`${numberBelowThousandToWords(thousands)} Thousand`);
+  if (remainder) parts.push(numberBelowThousandToWords(remainder));
+
+  return `Rupees ${parts.join(" ")} Only`;
+};
 
 const HeadsOfAccount = () => {
   const [heads, setHeads] = useState([]);
@@ -383,6 +491,13 @@ const HeadsOfAccount = () => {
     setEditingExpenseEntry(null);
     expenseForm.resetFields();
     setPayeeMode(payeeNames.length ? "existing" : "new");
+  };
+
+  const handleExpenseAmountChange = (value) => {
+    const numericValue = Number(value || 0);
+    expenseForm.setFieldsValue({
+      amountInWords: numericValue > 0 ? amountToWords(numericValue) : "",
+    });
   };
 
   const openExpenseDetailModal = (record) => {
@@ -616,7 +731,9 @@ const HeadsOfAccount = () => {
 
         const matchedType = typeMap.get(typeName);
         if (!matchedType) {
-          errors.push(`Row ${index + 2}: Type must be Income or Expense`);
+          errors.push(
+            `Row ${index + 2}: Type must be Income, Expense, Assets, Liabilities, or Equity`,
+          );
           continue;
         }
 
@@ -1228,10 +1345,23 @@ const HeadsOfAccount = () => {
             name="type"
             rules={[{ required: true, message: "Please select a type" }]}
           >
-            <Select placeholder="Select Income or Expense">
+            <Select placeholder="Select accounting type">
               {types.map((t) => (
                 <Option key={t._id} value={t._id}>
-                  <Tag color={t.name === "Income" ? "green" : "red"} style={{ marginRight: 6 }}>
+                  <Tag
+                    color={
+                      t.name === "Income"
+                        ? "green"
+                        : t.name === "Expense"
+                          ? "red"
+                          : t.name === "Assets"
+                            ? "blue"
+                            : t.name === "Liabilities"
+                              ? "orange"
+                              : "purple"
+                    }
+                    style={{ marginRight: 6 }}
+                  >
                     {t.name}
                   </Tag>
                 </Option>
@@ -1399,6 +1529,7 @@ const HeadsOfAccount = () => {
                   placeholder="0"
                   formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}
                   parser={(value) => value.replace(/,/g, "")}
+                  onChange={handleExpenseAmountChange}
                 />
               </Form.Item>
             </Col>
