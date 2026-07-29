@@ -3420,6 +3420,52 @@ export const revertTransaction = async (req, res) => {
       });
     }
 
+    const linkedTeacherPayroll = await TeacherPayroll.findOne({
+      "paymentEntries.transactionId": txn._id,
+    });
+
+    if (linkedTeacherPayroll) {
+      linkedTeacherPayroll.paymentEntries = (linkedTeacherPayroll.paymentEntries || []).filter(
+        (entry) => String(entry.transactionId || "") !== String(txn._id),
+      );
+
+      const recalculatedPaidAmount = linkedTeacherPayroll.paymentEntries.reduce(
+        (sum, entry) => sum + Number(entry.amount || 0),
+        0,
+      );
+
+      const baseDueAmount = Number(linkedTeacherPayroll.baseDueAmount || 0);
+      const carryForwardInAmount = Number(
+        linkedTeacherPayroll.carryForwardInAmount || 0,
+      );
+      const recalculatedTotals = calculatePayrollTotals({
+        baseDueAmount,
+        carryForwardInAmount,
+        paidAmount: recalculatedPaidAmount,
+      });
+
+      linkedTeacherPayroll.baseDueAmount = recalculatedTotals.baseDueAmount;
+      linkedTeacherPayroll.carryForwardInAmount =
+        recalculatedTotals.carryForwardInAmount;
+      linkedTeacherPayroll.carryForwardEligibleAmount =
+        recalculatedTotals.carryForwardEligibleAmount;
+      linkedTeacherPayroll.dueAmount = recalculatedTotals.totalDueAmount;
+      linkedTeacherPayroll.paidAmount = recalculatedTotals.paidAmount;
+      linkedTeacherPayroll.remainingAmount = recalculatedTotals.remainingAmount;
+      linkedTeacherPayroll.overpaidAmount = recalculatedTotals.overpaidAmount;
+      linkedTeacherPayroll.status = recalculatedTotals.status;
+      await linkedTeacherPayroll.save();
+
+      await adjustBalance(txn.paymentMethod, Number(txn.amount || 0), -direction);
+      await AccountingTransaction.findByIdAndDelete(txn._id);
+
+      return res.status(200).json({
+        success: true,
+        sourceType: "teacher_payroll",
+        message: "Teacher payroll payment reverted successfully",
+      });
+    }
+
     const linkedExpenseEntry = await ExpenseHeadEntry.findOne({
       $or: [
         { transactionId: txn._id },
@@ -3428,10 +3474,10 @@ export const revertTransaction = async (req, res) => {
     });
 
     if (linkedExpenseEntry) {
-      linkedExpenseEntry.isActive = false;
       if (String(linkedExpenseEntry.transactionId || "") === String(txn._id)) {
         linkedExpenseEntry.transactionId = null;
       }
+      linkedExpenseEntry.isActive = true;
       await linkedExpenseEntry.save();
 
       await adjustBalance(txn.paymentMethod, Number(txn.amount || 0), -direction);
@@ -3440,7 +3486,7 @@ export const revertTransaction = async (req, res) => {
       return res.status(200).json({
         success: true,
         sourceType: "expense_head_entry",
-        message: "Expense entry reverted successfully",
+        message: "Expense entry reverted successfully and restored to its source list",
       });
     }
 

@@ -69,6 +69,29 @@ const getRawStudentAndCourse = async (studentId, courseId) => {
   return { student, course };
 };
 
+const getNextReceiptNumber = async (prefix = "RCP", paymentDate = new Date()) => {
+  const date = new Date(paymentDate);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const monthPrefix = `${prefix}-${year}${month}-`;
+
+  const latestPayment = await FeePaymentSchema.findOne({
+    receiptNo: { $regex: `^${monthPrefix}` },
+  })
+    .sort({ receiptNo: -1 })
+    .select("receiptNo")
+    .lean();
+
+  const latestSequenceMatch = String(latestPayment?.receiptNo || "").match(
+    /-(\d+)$/,
+  );
+  const nextSequence = latestSequenceMatch
+    ? Number(latestSequenceMatch[1]) + 1
+    : 1;
+
+  return generateReceiptNumber(prefix, nextSequence);
+};
+
 // Create or Update Fee Structure
 export const createOrUpdateFeeStructure = async (req, res) => {
   try {
@@ -339,30 +362,45 @@ export const recordFeePayment = async (req, res) => {
       });
     }
 
-    // Generate receipt number
-    const paymentCount = await FeePaymentSchema.countDocuments();
-    const receiptNo = generateReceiptNumber("RCP", paymentCount + 1);
     const resolvedPaymentDate = paymentDate ? new Date(paymentDate) : new Date();
     const db = await getDb();
-    const payment = await FeePaymentSchema.create({
-      receiptNo,
-      voucherNo: voucherNo || "",
-      student: feeStructure.student || studentId,
-      course: String(feeStructure.course || courseId),
-      feeStructure: feeStructure._id,
-      installmentNumber: installmentNumber || null,
-      amount: normalizedAmount,
-      paymentDate: resolvedPaymentDate,
-      paymentMethod: paymentMethod || "Cash",
-      accountingPaymentMethodId: accountingPaymentMethodId || null,
-      transactionId: transactionId || "",
-      chequeNo: chequeNo || "",
-      bankName: bankName || "",
-      remarks: remarks || "",
-      receivedBy: receivedBy || null,
-      status: "Completed",
-      paymentType: paymentType || "Installment",
-    });
+    let payment = null;
+    let receiptNo = null;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      receiptNo = await getNextReceiptNumber("RCP", resolvedPaymentDate);
+
+      try {
+        payment = await FeePaymentSchema.create({
+          receiptNo,
+          voucherNo: voucherNo || "",
+          student: feeStructure.student || studentId,
+          course: String(feeStructure.course || courseId),
+          feeStructure: feeStructure._id,
+          installmentNumber: installmentNumber || null,
+          amount: normalizedAmount,
+          paymentDate: resolvedPaymentDate,
+          paymentMethod: paymentMethod || "Cash",
+          accountingPaymentMethodId: accountingPaymentMethodId || null,
+          transactionId: transactionId || "",
+          chequeNo: chequeNo || "",
+          bankName: bankName || "",
+          remarks: remarks || "",
+          receivedBy: receivedBy || null,
+          status: "Completed",
+          paymentType: paymentType || "Installment",
+        });
+        break;
+      } catch (error) {
+        if (error?.code !== 11000 || !String(error?.message || "").includes("receiptNo")) {
+          throw error;
+        }
+
+        if (attempt === 2) {
+          throw error;
+        }
+      }
+    }
 
     // Update fee structure (using rounded amounts)
     feeStructure.paidAmount = Math.round(

@@ -4,6 +4,7 @@ import {
   Tabs,
   Tag,
   Button,
+  Radio,
   Descriptions,
   Row,
   Col,
@@ -18,6 +19,7 @@ import {
   Spin,
   Tooltip,
   message,
+  QRCode,
 } from "antd";
 import {
   ArrowLeftOutlined,
@@ -32,6 +34,7 @@ import {
   TeamOutlined,
   CalendarOutlined,
   ReloadOutlined,
+  PrinterOutlined,
 } from "@ant-design/icons";
 import {
   FaUser,
@@ -57,15 +60,18 @@ import api from "../../api/axiosInstance";
 import StudentFeeProfile from "./StudentFeeProfile";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
+import odysseyLogo from "../../assets/images/logos/LOGO.png";
 
 const THEME = "#01134C";
 const ACCENT = "#E8FC0A";
+const MAX_PROFILE_PHOTO_SIZE = 5 * 1024 * 1024;
 
 /* ──────────────────────────────────────────────────────────────────────────
    Small helpers
    ──────────────────────────────────────────────────────────────────────── */
 const fmt = (v) => (v ? dayjs(v).format("DD MMM YYYY") : "—");
 const fmtPKR = (n) => `PKR ${Number(n || 0).toLocaleString("en-PK")}`;
+const fmtIdDate = (v) => (v ? dayjs(v).format("DD/MM/YYYY") : "00/00/0000");
 
 const statusColor = {
   active: "green",
@@ -150,6 +156,12 @@ const StudentProfile = () => {
   const [certifications, setCertifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("personal");
+  const [profilePhotoMode, setProfilePhotoMode] = useState("upload");
+  const [photoUpdating, setPhotoUpdating] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const uploadInputRef = React.useRef(null);
+  const cameraVideoRef = React.useRef(null);
+  const cameraStreamRef = React.useRef(null);
 
   /* ── Fetch all data ── */
   const fetchAll = useCallback(async () => {
@@ -180,6 +192,190 @@ const StudentProfile = () => {
     fetchAll();
   }, [fetchAll]);
 
+  const validateProfilePicture = (file) => {
+    if (!file) {
+      return false;
+    }
+
+    if (!file.type?.startsWith("image/")) {
+      message.error("Please select a valid image file for the profile photo.");
+      return false;
+    }
+
+    if (file.size > MAX_PROFILE_PHOTO_SIZE) {
+      message.error("Profile photo must be smaller than 5 MB.");
+      return false;
+    }
+
+    return true;
+  };
+
+  const updateProfilePhoto = async (file) => {
+    if (!student?._id || !validateProfilePicture(file)) {
+      return;
+    }
+
+    setPhotoUpdating(true);
+    try {
+      const formData = new FormData();
+      formData.append("profilePicture", file);
+
+      const response = await api.put(`/student/admission/${student._id}`, formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      if (response.data?.success) {
+        message.success("Profile photo updated successfully.");
+        await fetchAll();
+      } else {
+        message.error("Failed to update profile photo.");
+      }
+    } catch (error) {
+      message.error(error.response?.data?.message || "Failed to update profile photo.");
+    } finally {
+      setPhotoUpdating(false);
+    }
+  };
+
+  const handleProfilePhotoChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    await updateProfilePhoto(file);
+  };
+
+  const triggerProfilePhotoInput = () => {
+    if (profilePhotoMode === "camera") {
+      startCamera();
+      return;
+    }
+
+    uploadInputRef.current?.click();
+  };
+
+  const stopCamera = () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
+    }
+
+    if (cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = null;
+    }
+
+    setCameraOpen(false);
+  };
+
+  const bindStreamToCameraVideo = async (stream) => {
+    let attempts = 0;
+
+    while (!cameraVideoRef.current && attempts < 20) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      attempts += 1;
+    }
+
+    const videoElement = cameraVideoRef.current;
+
+    if (!videoElement) {
+      throw new Error("Camera preview element is not ready.");
+    }
+
+    videoElement.srcObject = stream;
+
+    await new Promise((resolve, reject) => {
+      const handleLoaded = () => {
+        videoElement
+          .play()
+          .then(resolve)
+          .catch(reject);
+      };
+
+      videoElement.onloadedmetadata = handleLoaded;
+      videoElement.onerror = () => reject(new Error("Failed to load camera preview."));
+
+      if (videoElement.readyState >= 1) {
+        handleLoaded();
+      }
+    });
+  };
+
+  const startCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      message.error("Camera is not supported in this browser.");
+      return;
+    }
+
+    try {
+      stopCamera();
+      let stream = null;
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "user" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+      }
+
+      cameraStreamRef.current = stream;
+      setCameraOpen(true);
+      await bindStreamToCameraVideo(stream);
+    } catch (error) {
+      console.error("Failed to open camera:", error);
+      message.error("Could not open the system camera. Please allow camera access.");
+    }
+  };
+
+  const captureCameraPhoto = async () => {
+    const video = cameraVideoRef.current;
+
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      message.error("Camera is not ready yet. Please try again.");
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const context = canvas.getContext("2d");
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob(
+      async (blob) => {
+        if (!blob) {
+          message.error("Failed to capture photo from camera.");
+          return;
+        }
+
+        const capturedFile = new File(
+          [blob],
+          `student-profile-camera-${Date.now()}.jpg`,
+          { type: "image/jpeg" },
+        );
+
+        stopCamera();
+        await updateProfilePhoto(capturedFile);
+      },
+      "image/jpeg",
+      0.92,
+    );
+  };
+
+  useEffect(() => () => stopCamera(), []);
+
   /* ── Stats derived from enrollments ── */
   const totalPaid = enrollments.reduce((sum, e) => {
     if (!e.feeStructure?.installments) return sum;
@@ -206,6 +402,15 @@ const StudentProfile = () => {
       e.status?.toLowerCase() === "active" ||
       e.status?.toLowerCase() === "enrolled",
   ).length;
+  const primaryEnrollment =
+    enrollments.find(
+      (e) =>
+        e.status?.toLowerCase() === "active" ||
+        e.status?.toLowerCase() === "enrolled",
+    ) || enrollments[0] || null;
+  const idCardExpiry = student?.registrationDate
+    ? dayjs(student.registrationDate).add(1, "year")
+    : null;
 
   /* ── Loading ── */
   if (loading) {
@@ -897,6 +1102,146 @@ const StudentProfile = () => {
     );
   };
 
+  const IdCardTab = () => {
+    if (!student?.isActive) {
+      return (
+        <div className="py-10">
+          <Empty description="ID card is available for active students only" />
+        </div>
+      );
+    }
+
+    const courseName =
+      primaryEnrollment?.course?.courseName ||
+      student?.lastClassAttended ||
+      "Student";
+    const studentCode = student?.registrationNo || "N/A";
+    const joinDate = fmtIdDate(student?.registrationDate || student?.createdAt);
+    const expiryDate = fmtIdDate(idCardExpiry);
+    const contactNumber =
+      student?.mobileNumber ||
+      student?.whatsappNumber ||
+      student?.emergencyContactNumber ||
+      "N/A";
+    const emailAddress = student?.emailAddress || "N/A";
+    const guardianName = student?.fatherName || student?.guardianName || "N/A";
+    const attendanceQrValue = JSON.stringify({
+      type: "student_attendance",
+      studentId: student?._id || student?.id || "",
+      studentCode,
+      studentName: student?.studentName || "",
+    });
+
+    return (
+      <div className="student-id-print-area py-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-5">
+          <div>
+            <div className="text-xl font-bold" style={{ color: THEME }}>
+              Student ID Card
+            </div>
+            <div className="text-sm text-gray-500">
+              Front and back print layout for active students
+            </div>
+          </div>
+          <Button
+            icon={<PrinterOutlined />}
+            onClick={() => window.print()}
+            style={{
+              background: THEME,
+              borderColor: THEME,
+              color: ACCENT,
+              fontWeight: 700,
+            }}
+          >
+            Print ID Card
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 id-card-grid">
+          <div className="id-card-shell">
+            <div className="student-id-card student-id-front">
+              <div className="id-front-side-navy" />
+              <div className="id-front-side-gold" />
+              <div className="id-front-bottom-gold" />
+              <div className="id-front-bottom-navy-band" />
+
+              <div className="id-card-photo-wrap">
+                {student?.profilePicture ? (
+                  <img
+                    src={student.profilePicture}
+                    alt={student.studentName}
+                    className="id-card-photo"
+                  />
+                ) : (
+                  <div className="id-card-photo id-card-photo-fallback">
+                    <FaUser size={74} color="#94A3B8" />
+                  </div>
+                )}
+              </div>
+
+              <div className="id-card-brand-simple">
+                <div className="id-card-brand-simple-title">
+                  {student?.studentName || "Student Name"}
+                </div>
+                <div className="id-card-brand-simple-subtitle">{courseName}</div>
+              </div>
+
+              <div className="id-card-details">
+                <div><span>ID</span><strong>{studentCode}</strong></div>
+                <div><span>DOB</span><strong>{fmtIdDate(student?.dateOfBirth)}</strong></div>
+                <div><span>Phone</span><strong>{contactNumber}</strong></div>
+                <div><span>Join</span><strong>{joinDate}</strong></div>
+                <div><span>Email</span><strong>{emailAddress}</strong></div>
+              </div>
+
+              <div className="id-front-qr-block">
+                <div className="id-front-qr-shell">
+                  <QRCode
+                    value={attendanceQrValue}
+                    size={72}
+                    bordered={false}
+                    color="#152b57"
+                    bgColor="#ffffff"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="id-card-shell">
+            <div className="student-id-card student-id-back">
+              <div className="id-back-main">
+                <div className="id-back-logo-badge">
+                  <img src={odysseyLogo} alt="Odyssey Academy" className="id-back-logo-large" />
+                </div>
+                <div className="id-back-logo-title">ODYSSEY ACADEMY</div>
+                <div className="id-back-logo-subtitle">Student Identity Card</div>
+              </div>
+
+              <div className="id-card-back-title">Terms & Conditions</div>
+
+              <div className="id-card-back-points">
+                <div>This card is valid only for the enrolled active student.</div>
+                <div>Carry this card during classes, exams and campus visits.</div>
+                <div>Report loss of this card to the academy immediately.</div>
+              </div>
+
+              <div className="id-back-dates">
+                <div>JOIN DATE : {joinDate}</div>
+                <div>EXPIRE DATE : {expiryDate}</div>
+              </div>
+
+              <div className="id-back-bottom-gold" />
+              <div className="id-back-bottom-navy-band">
+                <div className="id-back-bottom-text">odysseyacademy.edu.pk</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   /* ══════════════════════════════════════════════════════════════════════
      TAB items
      ══════════════════════════════════════════════════════════════════════ */
@@ -944,6 +1289,17 @@ const StudentProfile = () => {
         </span>
       ),
       children: <CertificationsTab />,
+    },
+    {
+      key: "id-card",
+      label: (
+        <span className="flex items-center gap-1.5">
+          <IdcardOutlined />
+          ID Card
+          {student?.isActive ? <Badge count="Active" color="green" size="small" /> : null}
+        </span>
+      ),
+      children: <IdCardTab />,
     },
   ];
 
@@ -993,8 +1349,21 @@ const StudentProfile = () => {
           background: `linear-gradient(135deg, ${THEME} 0%, #0a2480 100%)`,
         }}
       >
-        {/* Avatar */}
-        <div className="shrink-0">
+        <input
+          ref={uploadInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleProfilePhotoChange}
+          style={{ display: "none" }}
+        />
+        <input
+          ref={uploadInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleProfilePhotoChange}
+          style={{ display: "none" }}
+        />
+        <div className="shrink-0 flex flex-col items-center gap-3">
           {student.profilePicture ? (
             <img
               src={student.profilePicture}
@@ -1009,6 +1378,70 @@ const StudentProfile = () => {
               <FaUser size={40} color="rgba(255,255,255,0.8)" />
             </div>
           )}
+          <Radio.Group
+            value={profilePhotoMode}
+            onChange={(e) => {
+              const nextMode = e.target.value;
+              setProfilePhotoMode(nextMode);
+              if (nextMode !== "camera") {
+                stopCamera();
+              }
+            }}
+            optionType="button"
+            buttonStyle="solid"
+            size="small"
+          >
+            <Radio.Button value="upload">System</Radio.Button>
+            <Radio.Button value="camera">Camera</Radio.Button>
+          </Radio.Group>
+          <Button
+            onClick={triggerProfilePhotoInput}
+            loading={photoUpdating}
+            size="small"
+            style={{
+              background: "#ffffff",
+              borderColor: "#ffffff",
+              color: THEME,
+              fontWeight: 600,
+            }}
+          >
+            {profilePhotoMode === "camera" ? "Capture & Update" : "Upload & Update"}
+          </Button>
+          {profilePhotoMode === "camera" && cameraOpen && (
+            <div
+              style={{
+                width: "240px",
+                background: "rgba(255,255,255,0.14)",
+                borderRadius: "16px",
+                padding: "12px",
+              }}
+            >
+              <video
+                ref={cameraVideoRef}
+                autoPlay
+                playsInline
+                muted
+                style={{
+                  width: "100%",
+                  minHeight: "220px",
+                  objectFit: "cover",
+                  borderRadius: "12px",
+                  background: "#0f172a",
+                }}
+              />
+              <div className="flex gap-2 justify-center mt-3 flex-wrap">
+                <Button type="primary" size="small" onClick={captureCameraPhoto}>
+                  Capture Photo
+                </Button>
+                <Button size="small" onClick={stopCamera}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          )}
+          <span className="text-white/70 text-xs text-center">
+            Max size 5 MB
+          </span>
         </div>
 
         {/* Name + basic meta */}
@@ -1136,6 +1569,392 @@ const StudentProfile = () => {
         }
         .student-profile-tabs .ant-tabs-content-holder {
           padding: 0 24px 24px;
+        }
+        .id-card-shell {
+          display: flex;
+          justify-content: center;
+        }
+        .student-id-card {
+          position: relative;
+          width: min(100%, 392px);
+          aspect-ratio: 0.66;
+          background: #ffffff;
+          border-radius: 0;
+          overflow: hidden;
+          box-shadow: 0 18px 34px rgba(15, 23, 42, 0.22);
+          border: 1px solid rgba(15, 23, 42, 0.08);
+          padding: 0;
+        }
+        .student-id-front,
+        .student-id-back {
+          color: #0f172a;
+        }
+        .student-id-front {
+          background: #ffffff;
+        }
+        .student-id-back {
+          background: #152b57;
+          color: #ffffff;
+        }
+        .id-front-side-navy,
+        .id-front-side-gold,
+        .id-front-bottom-gold,
+        .id-front-bottom-navy-band,
+        .id-back-bottom-gold,
+        .id-back-bottom-navy-band {
+          position: absolute;
+          pointer-events: none;
+        }
+        .id-front-side-navy {
+          top: 0;
+          right: 0;
+          width: 42px;
+          height: 100%;
+          background: #152b57;
+        }
+        .id-front-side-gold {
+          top: 158px;
+          right: 0;
+          width: 42px;
+          height: 124px;
+          background: #d79d19;
+          clip-path: polygon(0 0, 100% 30%, 100% 100%, 0 100%);
+        }
+        .id-front-bottom-gold {
+          left: 0;
+          right: 42px;
+          bottom: 96px;
+          height: 220px;
+          background: #d79d19;
+          clip-path: ellipse(112% 100% at 0% 100%);
+        }
+        .id-front-bottom-navy-band {
+          left: 0;
+          right: 0;
+          bottom: 0;
+          height: 96px;
+          background: #152b57;
+        }
+        .id-back-bottom-gold {
+          left: 0;
+          right: 0;
+          bottom: 96px;
+          height: 196px;
+          background: #d79d19;
+          clip-path: ellipse(128% 100% at 100% 100%);
+        }
+        .id-back-bottom-navy-band {
+          left: 0;
+          right: 0;
+          bottom: 0;
+          height: 96px;
+          background: #102244;
+        }
+        .id-card-brand {
+          display: none;
+        }
+        .id-card-logo {
+          width: 94px;
+          height: 94px;
+          object-fit: contain;
+          border-radius: 999px;
+          background: #ffffff;
+          padding: 8px;
+          box-shadow: 0 10px 25px rgba(15, 23, 42, 0.12);
+          border: 4px solid #d79d19;
+        }
+        .id-card-photo-wrap {
+          position: relative;
+          z-index: 2;
+          display: flex;
+          justify-content: center;
+          margin: 30px 0 10px;
+        }
+        .id-card-photo {
+          width: 168px;
+          height: 168px;
+          border-radius: 999px;
+          object-fit: cover;
+          border: 6px solid #d79d19;
+          box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
+          background: #f8fafc;
+        }
+        .id-card-photo-fallback {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .id-card-brand-simple {
+          position: relative;
+          z-index: 2;
+          text-align: center;
+          margin-bottom: 0;
+        }
+        .id-card-brand-simple-title {
+          color: #d79d19;
+          font-size: 19px;
+          font-weight: 900;
+          line-height: 1.1;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+        }
+        .id-card-brand-simple-subtitle {
+          color: #9ca3af;
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          margin-top: 2px;
+        }
+        .id-card-details {
+          position: absolute;
+          z-index: 2;
+          left: 50%;
+          transform: translateX(-50%);
+          width: min(100%, 198px);
+          max-width: 198px;
+          top: 286px;
+          display: grid;
+          gap: 10px;
+          justify-items: center;
+        }
+        .id-card-details div,
+        .id-card-back-lines div,
+        .id-card-back-extra div {
+          display: flex;
+          justify-content: space-between;
+          gap: 16px;
+          align-items: baseline;
+          border-bottom: none;
+          padding-bottom: 0;
+          width: 100%;
+        }
+        .id-card-details span,
+        .id-card-back-lines span,
+        .id-card-back-extra span {
+          font-size: 12px;
+          color: #111827;
+          min-width: 52px;
+          flex-shrink: 0;
+          text-transform: none;
+          letter-spacing: 0;
+          font-weight: 800;
+          text-align: right;
+        }
+        .id-card-details strong,
+        .id-card-back-lines strong,
+        .id-card-back-extra strong {
+          font-size: 12px;
+          font-weight: 700;
+          color: #0f172a;
+          text-align: right;
+          word-break: break-word;
+          min-width: 122px;
+        }
+        .id-card-details div:nth-child(1) strong,
+        .id-card-details div:nth-child(2) strong,
+        .id-card-details div:nth-child(3) strong,
+        .id-card-details div:nth-child(4) strong,
+        .id-card-details div:nth-child(5) strong {
+          min-width: 0;
+        }
+        .id-card-details div:nth-child(5) strong {
+          max-width: 150px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .id-back-main {
+          position: relative;
+          z-index: 2;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          text-align: center;
+          color: #ffffff;
+          margin-top: 54px;
+        }
+        .id-back-logo-badge {
+          width: 96px;
+          height: 96px;
+          border-radius: 999px;
+          background: #d79d19;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin-bottom: 14px;
+          box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+        }
+        .id-back-logo-large {
+          width: 80px;
+          height: 80px;
+          object-fit: contain;
+          background: #ffffff;
+          border-radius: 999px;
+          padding: 7px;
+          display: block;
+        }
+        .id-back-logo-title {
+          font-size: 16px;
+          font-weight: 800;
+          line-height: 1.1;
+          letter-spacing: 0.08em;
+        }
+        .id-back-logo-subtitle {
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.12em;
+          margin-top: 3px;
+          text-transform: uppercase;
+        }
+        .id-card-back-title {
+          position: relative;
+          z-index: 2;
+          text-align: center;
+          font-size: 14px;
+          font-weight: 800;
+          margin: 104px 0 10px;
+          color: #ffffff;
+          text-transform: uppercase;
+        }
+        .id-card-back-lines {
+          display: none;
+        }
+        .id-card-back-points {
+          position: relative;
+          z-index: 2;
+          display: grid;
+          gap: 6px;
+          margin-bottom: 28px;
+          padding: 0 42px;
+        }
+        .id-card-back-points div {
+          position: relative;
+          padding-left: 0;
+          color: rgba(229, 231, 235, 0.9);
+          font-size: 9px;
+          line-height: 1.45;
+          text-align: center;
+          font-weight: 600;
+        }
+        .id-card-back-points div::before {
+          display: none;
+        }
+        .id-back-dates {
+          position: relative;
+          z-index: 2;
+          text-align: center;
+          color: #ffffff;
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          display: grid;
+          gap: 5px;
+          margin-bottom: 110px;
+        }
+        .id-back-bottom-text {
+          position: absolute;
+          left: 0;
+          right: 0;
+          top: 34px;
+          text-align: center;
+          font-size: 10px;
+          color: #ffffff;
+          font-weight: 700;
+          letter-spacing: 0.42em;
+          text-transform: uppercase;
+        }
+        .id-front-qr-block {
+          position: absolute;
+          left: 0;
+          right: 0;
+          bottom: 10px;
+          z-index: 2;
+          display: flex;
+          justify-content: center;
+        }
+        .id-front-qr-shell {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 6px;
+          background: #ffffff;
+          border-radius: 6px;
+          box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
+        }
+        .id-front-qr-shell canvas,
+        .id-front-qr-shell svg {
+          display: block;
+        }
+        @media (max-width: 768px) {
+          .student-id-card {
+            width: min(100%, 352px);
+          }
+          .id-card-logo {
+            width: 86px;
+            height: 86px;
+          }
+          .id-card-photo {
+            width: 154px;
+            height: 154px;
+          }
+          .id-card-details {
+            left: 50%;
+            transform: translateX(-50%);
+            width: min(100%, 184px);
+            max-width: 184px;
+            top: 274px;
+          }
+          .id-card-details strong {
+            min-width: 106px;
+          }
+          .id-back-logo-title {
+            font-size: 15px;
+          }
+          .id-card-back-points {
+            padding: 0 28px;
+          }
+          .id-card-back-points div {
+            font-size: 8.5px;
+          }
+          .id-back-logo-badge {
+            width: 90px;
+            height: 90px;
+          }
+          .id-back-logo-large {
+            width: 76px;
+            height: 76px;
+          }
+          .id-front-qr-shell {
+            padding: 5px;
+          }
+        }
+        @media print {
+          body * {
+            visibility: hidden !important;
+          }
+          .student-id-print-area,
+          .student-id-print-area * {
+            visibility: visible !important;
+          }
+          .student-id-print-area {
+            position: absolute !important;
+            inset: 0 !important;
+            padding: 24px !important;
+            background: #ffffff !important;
+          }
+          .id-card-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+          .student-id-card {
+            box-shadow: none !important;
+            break-inside: avoid;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .ant-btn {
+            display: none !important;
+          }
         }
       `}</style>
     </div>

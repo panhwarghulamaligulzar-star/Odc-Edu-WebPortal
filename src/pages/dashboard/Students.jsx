@@ -24,6 +24,7 @@ import {
   Row,
   Col,
   Tabs,
+  Grid,
 } from "antd";
 import CourseAssignmentForm from "../../components/forms/CourseAssignmentForm";
 import StudentFeeProfile from "./StudentFeeProfile";
@@ -66,6 +67,8 @@ import { updateEnrollmentStatus } from "../../services/feeService";
 
 const { TextArea } = Input;
 const { Option } = Select;
+const { useBreakpoint } = Grid;
+const MAX_PROFILE_PHOTO_SIZE = 5 * 1024 * 1024;
 
 const STUDENT_CATEGORY_LABELS = {
   all: "All Categories",
@@ -235,6 +238,29 @@ const getStudentLifecycleStatus = (student) => {
   };
 };
 
+const getEnrollmentStatusSummary = (student) => {
+  const enrollments = Array.isArray(student?.enrollments) ? student.enrollments : [];
+
+  return enrollments.reduce(
+    (summary, enrollment) => {
+      const status = normalizeEnrollmentStatus(enrollment?.status);
+
+      if (ACTIVE_ENROLLMENT_STATUS_SET.has(status)) {
+        summary.active += 1;
+      } else if (status === "completed") {
+        summary.passout += 1;
+      } else if (status === "dropped") {
+        summary.dropout += 1;
+      } else {
+        summary.other += 1;
+      }
+
+      return summary;
+    },
+    { total: enrollments.length, active: 0, passout: 0, dropout: 0, other: 0 },
+  );
+};
+
 // ─── PDF DESIGN CONSTANTS ──────────────────────────────────────────────────────
 const PDF_COLORS = {
   primary:      [15,  40, 100],    // Deep navy  — used for text & accents
@@ -398,6 +424,8 @@ const drawFields = (doc, fields, x, y, colWidth, rowH = 7) => {
 // ─── Students Component ────────────────────────────────────────────────────────
 const Students = () => {
   const navigate = useNavigate();
+  const screens = useBreakpoint();
+  const isMobile = !screens.md;
   const permissions = useModulePermissions("students");
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -418,6 +446,8 @@ const Students = () => {
   const [courseForm] = Form.useForm();
   const [profilePicture, setProfilePicture] = useState(null);
   const [profilePictureUrl, setProfilePictureUrl] = useState(null);
+  const [photoInputMode, setPhotoInputMode] = useState("upload");
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [searchText, setSearchText] = useState("");
   const [genderFilter, setGenderFilter] = useState("all");
   const [enrollmentFilter, setEnrollmentFilter] = useState("all");
@@ -442,6 +472,10 @@ const Students = () => {
     [],
   );
   const fileInputRef = useRef(null);
+  const profileUploadInputRef = useRef(null);
+  const profileCameraInputRef = useRef(null);
+  const profileCameraVideoRef = useRef(null);
+  const profileCameraStreamRef = useRef(null);
   const [tablePageSize, setTablePageSize] = useState(3);
   const [tablePage, setTablePage] = useState(1);
   const [activeStudentCategory, setActiveStudentCategory] = useState("all");
@@ -475,6 +509,8 @@ const Students = () => {
 
   const filteredStudents = useMemo(() => {
     let filtered = [...students];
+    const enrollmentCategoryForFilters =
+      activeStudentCategory === "all" ? "all" : activeStudentCategory;
 
     filtered = filtered.filter((student) =>
       matchesStudentCategory(student, activeStudentCategory),
@@ -517,7 +553,7 @@ const Students = () => {
 
     if (courseFilter !== "all") {
       filtered = filtered.filter((student) =>
-        student.enrollments?.some(
+        getEnrollmentsForCategory(student, enrollmentCategoryForFilters).some(
           (enrollment) => enrollment.course?._id === courseFilter,
         ),
       );
@@ -525,7 +561,7 @@ const Students = () => {
 
     if (batchFilter !== "all") {
       filtered = filtered.filter((student) =>
-        student.enrollments?.some(
+        getEnrollmentsForCategory(student, enrollmentCategoryForFilters).some(
           (enrollment) => enrollment.batch?._id === batchFilter,
         ),
       );
@@ -753,13 +789,190 @@ const Students = () => {
   };
 
   const closeStudentModal = () => {
+    if (profileCameraStreamRef.current) {
+      profileCameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      profileCameraStreamRef.current = null;
+    }
     setModalVisible(false);
     form.resetFields();
     setEditMode(false);
     setEditingStudent(null);
     setProfilePicture(null);
     setProfilePictureUrl(null);
+    setPhotoInputMode("upload");
+    setCameraOpen(false);
     setStudentFormTab("photo");
+  };
+
+  const readProfilePicture = (file) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setProfilePictureUrl(event.target?.result || null);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const validateProfilePicture = (file) => {
+    if (!file) {
+      return false;
+    }
+
+    if (!file.type?.startsWith("image/")) {
+      message.error("Please select a valid image file for the profile photo.");
+      return false;
+    }
+
+    if (file.size > MAX_PROFILE_PHOTO_SIZE) {
+      message.error("Profile photo must be smaller than 5 MB.");
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleProfilePictureSelection = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!validateProfilePicture(file)) {
+      return;
+    }
+
+    setProfilePicture(file);
+    readProfilePicture(file);
+    message.success("Profile photo selected successfully.");
+  };
+
+  const triggerProfilePhotoPicker = () => {
+    if (photoInputMode === "camera") {
+      startProfileCamera();
+      return;
+    }
+
+    profileUploadInputRef.current?.click();
+  };
+
+  const stopProfileCamera = () => {
+    if (profileCameraStreamRef.current) {
+      profileCameraStreamRef.current.getTracks().forEach((track) => track.stop());
+      profileCameraStreamRef.current = null;
+    }
+
+    if (profileCameraVideoRef.current) {
+      profileCameraVideoRef.current.srcObject = null;
+    }
+
+    setCameraOpen(false);
+  };
+
+  const bindStreamToProfileVideo = async (stream) => {
+    let attempts = 0;
+
+    while (!profileCameraVideoRef.current && attempts < 20) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      attempts += 1;
+    }
+
+    const videoElement = profileCameraVideoRef.current;
+
+    if (!videoElement) {
+      throw new Error("Camera preview element is not ready.");
+    }
+
+    videoElement.srcObject = stream;
+
+    await new Promise((resolve, reject) => {
+      const handleLoaded = () => {
+        videoElement
+          .play()
+          .then(resolve)
+          .catch(reject);
+      };
+
+      videoElement.onloadedmetadata = handleLoaded;
+      videoElement.onerror = () => reject(new Error("Failed to load camera preview."));
+
+      if (videoElement.readyState >= 1) {
+        handleLoaded();
+      }
+    });
+  };
+
+  const startProfileCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      message.error("Camera is not supported in this browser.");
+      return;
+    }
+
+    try {
+      stopProfileCamera();
+      let stream = null;
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "user" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+          audio: false,
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+      }
+
+      profileCameraStreamRef.current = stream;
+      setCameraOpen(true);
+      await bindStreamToProfileVideo(stream);
+    } catch (error) {
+      console.error("Failed to open camera:", error);
+      message.error("Could not open the system camera. Please allow camera access.");
+    }
+  };
+
+  const captureProfileCameraPhoto = async () => {
+    const video = profileCameraVideoRef.current;
+
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      message.error("Camera is not ready yet. Please try again.");
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const context = canvas.getContext("2d");
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob(
+      async (blob) => {
+        if (!blob) {
+          message.error("Failed to capture photo from camera.");
+          return;
+        }
+
+        const capturedFile = new File(
+          [blob],
+          `student-camera-${Date.now()}.jpg`,
+          { type: "image/jpeg" },
+        );
+
+        if (!validateProfilePicture(capturedFile)) {
+          return;
+        }
+
+        setProfilePicture(capturedFile);
+        readProfilePicture(capturedFile);
+        stopProfileCamera();
+        message.success("Camera photo captured successfully.");
+      },
+      "image/jpeg",
+      0.92,
+    );
   };
 
   const handleStudentStepAction = async () => {
@@ -1015,6 +1228,9 @@ const Students = () => {
     if (student.profilePicture) {
       setProfilePictureUrl(student.profilePicture);
     }
+    setProfilePicture(null);
+    setPhotoInputMode("upload");
+    setCameraOpen(false);
     setStudentFormTab("photo");
     setModalVisible(true);
   };
@@ -1090,7 +1306,14 @@ const Students = () => {
         courseCategory: courseCategory,
         batchId: values.batchId || null,
         enrollmentDate: values.enrollmentDate.format("YYYY-MM-DD"),
-        status: "Active",
+        status: values.status || "Active",
+        completionDate:
+          values.status === "Completed"
+            ? (typeof values.completionDate === "string"
+                ? values.completionDate
+                : values.completionDate?.format("YYYY-MM-DD")) ||
+              dayjs().format("YYYY-MM-DD")
+            : null,
         admissionFee: values.admissionFee,
         courseFee: values.courseFee,
         certificateFee: values.certificateFee,
@@ -1825,7 +2048,7 @@ const Students = () => {
 
   return (
     <>
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-start gap-3 mb-6">
         <div
           className="w-10 h-10 rounded-lg flex items-center justify-center"
           style={{ background: "#01134C" }}
@@ -1845,17 +2068,20 @@ const Students = () => {
           style={{
             background: "white",
             borderRadius: "05px",
-            padding: "24px",
+            padding: isMobile ? "16px" : "24px",
             marginBottom: "24px",
             boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
             marginTop: "20px",
+            overflow: "hidden",
           }}
         >
           <div
             style={{
               display: "flex",
               justifyContent: "space-between",
-              alignItems: "center",
+              alignItems: isMobile ? "stretch" : "center",
+              flexDirection: isMobile ? "column" : "row",
+              gap: isMobile ? "14px" : "16px",
               marginBottom: "20px",
             }}
           >
@@ -1872,7 +2098,14 @@ const Students = () => {
                 <strong>{STUDENT_CATEGORY_LABELS[activeStudentCategory]}</strong>
               </p>
             </div>
-            <div className="flex gap-2">
+            <div
+              style={{
+                display: "flex",
+                gap: "8px",
+                flexWrap: "wrap",
+                width: isMobile ? "100%" : "auto",
+              }}
+            >
               {permissions.export && (
                 <Button
                   type="default"
@@ -1888,6 +2121,7 @@ const Students = () => {
                     height: "40px",
                     paddingInline: "16px",
                     fontWeight: 600,
+                    width: isMobile ? "100%" : "auto",
                   }}
                 >
                   Download Excel
@@ -1907,6 +2141,7 @@ const Students = () => {
                     height: "40px",
                     paddingInline: "16px",
                     fontWeight: 600,
+                    width: isMobile ? "100%" : "auto",
                   }}
                 >
                   Import Excel/CSV
@@ -1930,6 +2165,7 @@ const Students = () => {
                     height: "40px",
                     paddingInline: "16px",
                     fontWeight: 600,
+                    width: isMobile ? "100%" : "auto",
                   }}
                 >
                   Add New Student
@@ -1945,7 +2181,7 @@ const Students = () => {
               gap: "10px",
               marginTop: "20px",
               flexWrap: "wrap",
-              alignItems: "center",
+              alignItems: "stretch",
             }}
           >
             <Input
@@ -1955,7 +2191,7 @@ const Students = () => {
               onChange={(e) => setSearchText(e.target.value)}
               size="large"
               style={{
-                width: 250,
+                width: isMobile ? "100%" : 250,
                 borderRadius: "10px",
                 border: "2px solid #E2E8F0",
               }}
@@ -1965,7 +2201,7 @@ const Students = () => {
               value={genderFilter}
               onChange={setGenderFilter}
               size="large"
-              style={{ width: 130, borderRadius: "10px" }}
+              style={{ width: isMobile ? "100%" : 130, borderRadius: "10px" }}
             >
               <Option value="all">All Genders</Option>
               <Option value="male">Male</Option>
@@ -1975,7 +2211,7 @@ const Students = () => {
               value={enrollmentFilter}
               onChange={setEnrollmentFilter}
               size="large"
-              style={{ width: 150, borderRadius: "10px" }}
+              style={{ width: isMobile ? "100%" : 150, borderRadius: "10px" }}
             >
               <Option value="all">All Students</Option>
               <Option value="enrolled">Enrolled</Option>
@@ -1985,7 +2221,7 @@ const Students = () => {
               value={activeStudentCategory}
               onChange={setActiveStudentCategory}
               size="large"
-              style={{ width: 170, borderRadius: "10px" }}
+              style={{ width: isMobile ? "100%" : 170, borderRadius: "10px" }}
             >
               <Option value="all">All Categories</Option>
               <Option value="active">Active Students</Option>
@@ -1996,7 +2232,7 @@ const Students = () => {
               value={courseFilter}
               onChange={setCourseFilter}
               size="large"
-              style={{ width: 180, borderRadius: "10px" }}
+              style={{ width: isMobile ? "100%" : 180, borderRadius: "10px" }}
               placeholder="Course"
             >
               <Option value="all">All Courses</Option>
@@ -2010,7 +2246,7 @@ const Students = () => {
               value={batchFilter}
               onChange={setBatchFilter}
               size="large"
-              style={{ width: 180, borderRadius: "10px" }}
+              style={{ width: isMobile ? "100%" : 180, borderRadius: "10px" }}
               placeholder="Batch"
             >
               <Option value="all">All Batches</Option>
@@ -2036,6 +2272,7 @@ const Students = () => {
                   borderRadius: "10px",
                   borderColor: "#667eea",
                   color: "#667eea",
+                  width: isMobile ? "100%" : "auto",
                 }}
               >
                 Clear
@@ -2390,6 +2627,76 @@ const Students = () => {
                   key="courses"
                   width={260}
                   render={(record) => {
+                    if (activeStudentCategory === "all") {
+                      const lifecycleStatus = getStudentLifecycleStatus(record);
+                      const enrollmentSummary = getEnrollmentStatusSummary(record);
+
+                      return (
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "10px",
+                            padding: "8px 0",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: "8px",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <span
+                              style={{
+                                fontSize: "12px",
+                                color: "#475569",
+                                fontWeight: 600,
+                              }}
+                            >
+                              {enrollmentSummary.total}{" "}
+                              {enrollmentSummary.total === 1
+                                ? "enrollment"
+                                : "enrollments"}
+                            </span>
+                            <Tag color={lifecycleStatus.color} style={{ margin: 0 }}>
+                              {lifecycleStatus.label}
+                            </Tag>
+                          </div>
+
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "8px",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <Tag color="green" style={{ margin: 0 }}>
+                              Active: {enrollmentSummary.active}
+                            </Tag>
+                            <Tag color="purple" style={{ margin: 0 }}>
+                              Passout: {enrollmentSummary.passout}
+                            </Tag>
+                            <Tag color="red" style={{ margin: 0 }}>
+                              Dropout: {enrollmentSummary.dropout}
+                            </Tag>
+                          </div>
+
+                          <div
+                            style={{
+                              fontSize: "11px",
+                              lineHeight: 1.5,
+                              color: "#64748B",
+                            }}
+                          >
+                            {lifecycleStatus.note}
+                          </div>
+                        </div>
+                      );
+                    }
+
                     const displayCategory =
                       activeStudentCategory === "all"
                         ? "active"
@@ -2589,8 +2896,16 @@ const Students = () => {
                                       color: "#64748B",
                                     }}
                                   >
-                                    Assigned on{" "}
-                                    {dayjs(enrollment.enrollmentDate).format("DD MMM YYYY")}
+                                    {statusMeta.tagLabel === "Passout"
+                                      ? "Completed on "
+                                      : statusMeta.tagLabel === "Dropout"
+                                        ? "Updated on "
+                                        : "Assigned on "}
+                                    {dayjs(
+                                      enrollment.completionDate ||
+                                        enrollment.updatedAt ||
+                                        enrollment.enrollmentDate,
+                                    ).format("DD MMM YYYY")}
                                   </div>
                                   {permissions.update && (
                                     <Button
@@ -3011,12 +3326,13 @@ const Students = () => {
         open={modalVisible}
         onCancel={closeStudentModal}
         footer={null}
-        width={960}
+        width={isMobile ? "calc(100vw - 16px)" : 960}
         centered
         styles={{
           body: {
             paddingTop: 12,
-            maxHeight: "78vh",
+            paddingInline: isMobile ? 12 : 24,
+            maxHeight: isMobile ? "82vh" : "78vh",
             overflow: "hidden",
           },
         }}
@@ -3082,64 +3398,91 @@ const Students = () => {
                     key: "photo",
                     label: "Photo",
                     children: (
-                      <div
-                        style={{
-                          background:
-                            "linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)",
-                          padding: "25px",
-                          borderRadius: "16px",
-                          border: "2px dashed #667eea",
-                          textAlign: "center",
-                        }}
-                      >
+                      <>
+                        <input
+                          ref={profileUploadInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleProfilePictureSelection}
+                          style={{ display: "none" }}
+                        />
                         <div
                           style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            alignItems: "center",
-                            gap: "10px",
+                            background:
+                              "linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)",
+                            padding: isMobile ? "16px" : "25px",
+                            borderRadius: "16px",
+                            border: "2px dashed #667eea",
+                            textAlign: "center",
+                            overflow: "hidden",
                           }}
                         >
                           <div
                             style={{
-                              width: "120px",
-                              height: "120px",
-                              borderRadius: "50%",
-                              overflow: "hidden",
-                              background: "white",
                               display: "flex",
+                              flexDirection: "column",
                               alignItems: "center",
-                              justifyContent: "center",
-                              boxShadow: "0 8px 25px rgba(0,0,0,0.1)",
-                              border: "4px solid white",
-                              position: "relative",
+                              gap: "14px",
                             }}
                           >
-                            {profilePictureUrl ? (
-                              <img
-                                src={profilePictureUrl}
-                                alt="Profile"
-                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                              />
-                            ) : (
-                              <FaUser style={{ fontSize: "50px", color: "#667eea", opacity: 0.5 }} />
-                            )}
-                          </div>
-                          <Upload
-                            accept="image/*"
-                            showUploadList={false}
-                            beforeUpload={(file) => {
-                              const reader = new FileReader();
-                              reader.onload = (e) => {
-                                setProfilePictureUrl(e.target.result);
-                              };
-                              reader.readAsDataURL(file);
-                              setProfilePicture(file);
-                              return false;
-                            }}
-                          >
+                            <div
+                              style={{
+                                width: "120px",
+                                height: "120px",
+                                borderRadius: "50%",
+                                overflow: "hidden",
+                                background: "white",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                boxShadow: "0 8px 25px rgba(0,0,0,0.1)",
+                                border: "4px solid white",
+                                position: "relative",
+                              }}
+                            >
+                              {profilePictureUrl ? (
+                                <img
+                                  src={profilePictureUrl}
+                                  alt="Profile"
+                                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                />
+                              ) : (
+                                <FaUser
+                                  style={{ fontSize: "50px", color: "#667eea", opacity: 0.5 }}
+                                />
+                              )}
+                            </div>
+
+                            <Radio.Group
+                              value={photoInputMode}
+                              onChange={(e) => {
+                                const nextMode = e.target.value;
+                                setPhotoInputMode(nextMode);
+                                if (nextMode !== "camera") {
+                                  stopProfileCamera();
+                                }
+                              }}
+                              optionType="button"
+                              buttonStyle="solid"
+                              style={{ width: isMobile ? "100%" : "auto" }}
+                            >
+                              <Radio.Button
+                                value="upload"
+                                style={{ width: isMobile ? "50%" : "auto", textAlign: "center" }}
+                              >
+                                Upload From System
+                              </Radio.Button>
+                              <Radio.Button
+                                value="camera"
+                                style={{ width: isMobile ? "50%" : "auto", textAlign: "center" }}
+                              >
+                                Use Camera
+                              </Radio.Button>
+                            </Radio.Group>
+
                             <Button
                               icon={<FaCamera />}
+                              onClick={triggerProfilePhotoPicker}
                               style={{
                                 background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
                                 border: "none",
@@ -3148,16 +3491,71 @@ const Students = () => {
                                 height: "40px",
                                 padding: "0 25px",
                                 fontWeight: "600",
+                                width: isMobile ? "100%" : "auto",
+                                maxWidth: isMobile ? "100%" : "none",
                               }}
                             >
-                              {profilePictureUrl ? "Change Photo" : "Upload Photo"}
+                              {photoInputMode === "camera"
+                                ? profilePictureUrl
+                                  ? "Retake Photo"
+                                  : "Open Camera"
+                                : profilePictureUrl
+                                  ? "Change Photo"
+                                  : "Upload Photo"}
                             </Button>
-                          </Upload>
-                          <p style={{ margin: 0, fontSize: "12px", color: "#718096" }}>
-                            Recommended: Square image, max 5MB
-                          </p>
+
+                            {photoInputMode === "camera" && cameraOpen && (
+                              <div
+                                style={{
+                                  width: "100%",
+                                  maxWidth: isMobile ? "100%" : "360px",
+                                  background: "rgba(255,255,255,0.85)",
+                                  borderRadius: "16px",
+                                  padding: "14px",
+                                  boxShadow: "0 10px 30px rgba(0,0,0,0.12)",
+                                }}
+                              >
+                                <video
+                                  ref={profileCameraVideoRef}
+                                  autoPlay
+                                  playsInline
+                                  muted
+                                  style={{
+                                    width: "100%",
+                                    minHeight: "220px",
+                                    objectFit: "cover",
+                                    borderRadius: "12px",
+                                    background: "#0f172a",
+                                  }}
+                                />
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "center",
+                                    gap: "10px",
+                                    marginTop: "12px",
+                                    flexWrap: "wrap",
+                                  }}
+                                >
+                                  <Button type="primary" onClick={captureProfileCameraPhoto}>
+                                    Capture Photo
+                                  </Button>
+                                  <Button onClick={stopProfileCamera}>Close Camera</Button>
+                                </div>
+                              </div>
+                            )}
+
+                            <p style={{ margin: 0, fontSize: "12px", color: "#718096" }}>
+                              {photoInputMode === "camera"
+                                ? "Use Camera opens the live system camera, then Capture Photo adds it to the upload area."
+                                : "System upload mode only lets the user choose a photo from the device."}
+                            </p>
+                            <p style={{ margin: 0, fontSize: "12px", color: "#718096" }}>
+                              Recommended: Square image, max 5 MB
+                            </p>
+                          </div>
                         </div>
-                      </div>
+                      </>
                     ),
                   },
                   {
@@ -3184,8 +3582,8 @@ const Students = () => {
                         >
                           <FaUser /> BASIC INFORMATION
                         </h4>
-                        <Row gutter={16}>
-              <Col span={8}>
+                        <Row gutter={[16, 0]}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="registrationNo"
                   label={
@@ -3207,7 +3605,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="registrationDate"
                   label={
@@ -3221,7 +3619,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="studentName"
                   label={
@@ -3239,7 +3637,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="gender"
                   label={
@@ -3254,7 +3652,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="dateOfBirth"
                   label={
@@ -3268,7 +3666,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="cnicOrBForm"
                   label={
@@ -3294,7 +3692,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="religion"
                   label={
@@ -3309,7 +3707,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="caste"
                   label={
@@ -3324,7 +3722,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="mobileNumber"
                   label={
@@ -3350,7 +3748,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="disability"
                   label={
@@ -3394,8 +3792,8 @@ const Students = () => {
                         >
                           <FaUser /> FAMILY INFORMATION
                         </h4>
-                        <Row gutter={16}>
-              <Col span={16}>
+                        <Row gutter={[16, 0]}>
+              <Col xs={24} lg={16}>
                 <Form.Item
                   name="fatherName"
                   label={
@@ -3413,7 +3811,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="fatherCnic"
                   label={
@@ -3439,7 +3837,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="fatherOccupation"
                   label={
@@ -3456,7 +3854,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="fatherContact"
                   label={
@@ -3482,7 +3880,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="motherName"
                   label={
@@ -3499,7 +3897,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={16}>
+              <Col xs={24} lg={16}>
                 <Form.Item
                   name="guardianName"
                   label={
@@ -3516,7 +3914,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="guardianContact"
                   label={
@@ -3568,8 +3966,8 @@ const Students = () => {
                         >
                           <FaBook /> ADDITIONAL INFORMATION
                         </h4>
-                        <Row gutter={16}>
-              <Col span={8}>
+                        <Row gutter={[16, 0]}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="previousSchoolCollege"
                   label={
@@ -3586,7 +3984,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="lastClassAttended"
                   label={
@@ -3603,7 +4001,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={8}>
+              <Col xs={24} sm={12} lg={8}>
                 <Form.Item
                   name="emergencyContactNumber"
                   label={
@@ -3629,7 +4027,7 @@ const Students = () => {
                 </Form.Item>
               </Col>
 
-              <Col span={24}>
+              <Col xs={24}>
                 <Form.Item
                   name="permanentAddress"
                   label={
