@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
+  AutoComplete,
   Table,
   Tag,
   Button,
@@ -89,6 +90,7 @@ const Transactions = () => {
   const [types, setTypes] = useState([]);
   const [heads, setHeads] = useState([]);
   const [methods, setMethods] = useState([]);
+  const [partyNames, setPartyNames] = useState([]);
 
   // Modal state
   const [modalVisible, setModalVisible] = useState(false);
@@ -160,6 +162,7 @@ const Transactions = () => {
 
         if (txnRes?.success) {
           setTransactions(txnRes.data);
+          setPartyNames(txnRes.meta?.partyNames || []);
           setPagination((p) => ({
             ...p,
             current: page,
@@ -985,7 +988,18 @@ const Transactions = () => {
             name="name"
             rules={[{ required: true, message: "Please enter a name" }]}
           >
-            <Input placeholder="e.g. Ahmed Khan — Tuition Fee" />
+            <AutoComplete
+              placeholder="e.g. Ahmed Khan - Tuition Fee"
+              options={partyNames.map((name) => ({
+                value: name,
+                label: name,
+              }))}
+              filterOption={(inputValue, option) =>
+                String(option?.value || "")
+                  .toLowerCase()
+                  .includes(String(inputValue || "").toLowerCase())
+              }
+            />
           </Form.Item>
 
           <Row gutter={12}>

@@ -8,6 +8,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Popconfirm,
   Select,
   Space,
   Statistic,
@@ -23,10 +24,12 @@ import {
   getTeacherPayroll,
   getPaymentMethods,
   payTeacherPayroll,
+  deleteTeacherPayroll,
   getAccountingTypes,
   getHeadsOfAccount,
   createHeadOfAccount,
 } from "../../../services/accountingService";
+import { DeleteOutlined } from "@ant-design/icons";
 
 const { Text } = Typography;
 
@@ -299,6 +302,22 @@ const Payroll = () => {
     }
   };
 
+  const handleDeletePayroll = async (record) => {
+    try {
+      const res = await deleteTeacherPayroll(record?._id, {
+        teacherId: record?.teacher?._id,
+        year: record?.month?.year,
+        month: record?.month?.month,
+      });
+      if (res?.success) {
+        message.success(res.message || "Payroll entry deleted successfully");
+        await fetchPayroll(selectedMonth);
+      }
+    } catch (error) {
+      message.error(error.message || "Failed to delete payroll record");
+    }
+  };
+
   const filteredPayrollData = useMemo(
     () =>
       selectedTeacherId
@@ -512,6 +531,20 @@ const Payroll = () => {
           >
             Pay
           </Button>
+          <Popconfirm
+            title="Delete payroll record?"
+            description="This will remove the payroll entry from the table and reverse any linked payroll transactions."
+            okText="Delete"
+            cancelText="Cancel"
+            onConfirm={() => handleDeletePayroll(record)}
+          >
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+            >
+              Delete
+            </Button>
+          </Popconfirm>
         </Space>
       ),
     },

@@ -32,6 +32,7 @@ import {
   getSuperAdminFinanceMonitor,
   getTeacherPayrollSummary,
   payTeacherPayroll,
+  deleteTeacherPayroll,
   getExpenseHeadEntries,
   createExpenseHeadEntry,
   updateExpenseHeadEntry,
@@ -64,6 +65,7 @@ accountingRoute.delete("/payment-methods/:id", authMiddleware, authorize("accoun
 // Payroll
 accountingRoute.get("/payroll", authMiddleware, authorize("accounting", "view"), getTeacherPayrollSummary);
 accountingRoute.post("/payroll/:id/pay", authMiddleware, authorize("accounting", "create"), payTeacherPayroll);
+accountingRoute.delete("/payroll/:id", authMiddleware, authorize("accounting", "delete"), deleteTeacherPayroll);
 
 // Transactions — summary MUST be before /:id to avoid route conflict
 accountingRoute.get("/transactions/summary", authMiddleware, authorize("accounting", "view"), getTransactionSummary);

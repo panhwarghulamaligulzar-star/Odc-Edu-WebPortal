@@ -13,6 +13,8 @@ import TeacherSchema from "../modules/teacherModule.js";
 import ExpenseHeadEntry from "../modules/expenseHeadEntryModule.js";
 import { calculateTeacherCompensationData } from "../controller/teacherController.js";
 import PDFKit from "pdfkit";
+import fs from "fs";
+import path from "path";
 
 const getAccountingVisibilitySettings = async () => {
   const settings = await AppSettings.findOne().lean();
@@ -401,6 +403,26 @@ const buildExpenseEntryDetails = ({
   if (amountInWords) lines.push(`Amount in words: ${amountInWords}`);
   if (description) lines.push(`Remarks: ${description}`);
   return lines.join("\n");
+};
+
+const getSharedPartyNames = async () => {
+  const [expensePayeeNames, transactionNames] = await Promise.all([
+    ExpenseHeadEntry.distinct("payeeName", {
+      isActive: true,
+      payeeName: { $nin: ["", null] },
+    }),
+    AccountingTransaction.distinct("name", {
+      name: { $nin: ["", null] },
+    }),
+  ]);
+
+  return Array.from(
+    new Set(
+      [...expensePayeeNames, ...transactionNames]
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
 };
 
 const serializeExpenseHeadEntry = async (entry) => {
@@ -954,6 +976,9 @@ export const getTeacherPayrollSummary = async (req, res) => {
     const payrollItems = await Promise.all(
       teachers.map(async (teacher) => {
         const existingPayroll = payrollMap.get(String(teacher._id));
+        if (existingPayroll?.isDeleted === true) {
+          return null;
+        }
         const salaryConfigOverride = getTeacherPayrollSalaryConfig(teacher, existingPayroll);
         const compensation = await calculateTeacherCompensationData(
           teacher,
@@ -1012,9 +1037,10 @@ export const getTeacherPayrollSummary = async (req, res) => {
       }),
     );
 
+    const visiblePayrollItems = payrollItems.filter(Boolean);
     const filteredItems = status
-      ? payrollItems.filter((item) => item.payroll.status === status)
-      : payrollItems;
+      ? visiblePayrollItems.filter((item) => item.payroll.status === status)
+      : visiblePayrollItems;
 
     const paginated = filteredItems.slice(
       (Number(page) - 1) * Number(limit),
@@ -1136,7 +1162,10 @@ export const payTeacherPayroll = async (req, res) => {
       selectedMonth,
     );
     const baseDueAmount = Number(compensation.summary.calculatedMonthlySalary || 0);
-    const currentPaidAmount = Number(payrollRecord?.paidAmount || 0);
+    const currentPaidAmount =
+      payrollRecord?.isDeleted === true
+        ? 0
+        : Number(payrollRecord?.paidAmount || 0);
     const beforePaymentTotals = calculatePayrollTotals({
       baseDueAmount,
       carryForwardInAmount,
@@ -1261,6 +1290,7 @@ export const payTeacherPayroll = async (req, res) => {
         paidAmount: currentPaidAmount + normalizedPaymentAmount,
       });
 
+      payrollRecord.isDeleted = false;
       payrollRecord.salaryType = salaryConfigOverride.salaryType;
       payrollRecord.monthlySalary = salaryConfigOverride.monthlySalary;
       payrollRecord.salaryPerStudent = salaryConfigOverride.salaryPerStudent;
@@ -1300,6 +1330,107 @@ export const payTeacherPayroll = async (req, res) => {
   } catch (error) {
     console.error("Error processing teacher payroll payment:", error);
     res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+export const deleteTeacherPayroll = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { teacherId, year, month } = req.body || {};
+
+    let payrollRecord = null;
+
+    if (id && id !== "by-context") {
+      payrollRecord = await TeacherPayroll.findById(id);
+    }
+
+    if (!payrollRecord && teacherId && year && month) {
+      payrollRecord = await TeacherPayroll.findOne({
+        teacher: teacherId,
+        year: Number(year),
+        month: Number(month),
+      });
+    }
+
+    if (!payrollRecord) {
+      if (!teacherId || !year || !month) {
+        return res.status(404).json({
+          success: false,
+          message: "Payroll record not found",
+        });
+      }
+
+      const hiddenRecord = await TeacherPayroll.create({
+        teacher: teacherId,
+        year: Number(year),
+        month: Number(month),
+        dueAmount: 0,
+        remainingAmount: 0,
+        paidAmount: 0,
+        baseDueAmount: 0,
+        carryForwardInAmount: 0,
+        carryForwardEligibleAmount: 0,
+        overpaidAmount: 0,
+        totalActiveStudents: 0,
+        eligibleStudents: 0,
+        paymentEntries: [],
+        isDeleted: true,
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: hiddenRecord,
+        message: "Payroll entry deleted successfully",
+      });
+    }
+
+    const paymentEntries = Array.isArray(payrollRecord.paymentEntries)
+      ? payrollRecord.paymentEntries
+      : [];
+
+    for (const entry of paymentEntries) {
+      if (!entry?.transactionId) {
+        continue;
+      }
+
+      const txn = await AccountingTransaction.findById(entry.transactionId);
+      if (!txn) {
+        continue;
+      }
+
+      const txnType = await AccountingType.findById(txn.type);
+      const direction = txnType?.name === "Income" ? 1 : -1;
+
+      await adjustBalance(
+        txn.paymentMethod,
+        Number(txn.amount || 0),
+        -direction,
+      );
+      await AccountingTransaction.findByIdAndDelete(txn._id);
+    }
+
+    payrollRecord.paymentEntries = [];
+    payrollRecord.paidAmount = 0;
+    payrollRecord.baseDueAmount = 0;
+    payrollRecord.carryForwardInAmount = 0;
+    payrollRecord.carryForwardEligibleAmount = 0;
+    payrollRecord.dueAmount = 0;
+    payrollRecord.remainingAmount = 0;
+    payrollRecord.overpaidAmount = 0;
+    payrollRecord.status = "paid";
+    payrollRecord.isDeleted = true;
+    await payrollRecord.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Payroll entry deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting teacher payroll:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };
 
@@ -1506,17 +1637,15 @@ export const getExpenseHeadEntries = async (req, res) => {
       .populate("transactionId", "transactionNo")
       .sort({ date: -1, createdAt: -1 });
 
-    const payeeNames = await ExpenseHeadEntry.distinct("payeeName", {
-      isActive: true,
-      payeeName: { $nin: ["", null] },
-    });
+    const partyNames = await getSharedPartyNames();
 
     res.status(200).json({
       success: true,
       data: await Promise.all(entries.map(serializeExpenseHeadEntry)),
       meta: {
         nextVoucherNo: await getNextExpenseVoucherNo(),
-        payeeNames: payeeNames.filter(Boolean).sort((a, b) => a.localeCompare(b)),
+        payeeNames: partyNames,
+        partyNames,
       },
       message: "Expense head entries retrieved successfully",
     });
@@ -2288,6 +2417,7 @@ const getTeacherCarryForwardAmount = async (teacherId, year, month) => {
     teacher: teacherId,
     year: previousPeriod.year,
     month: previousPeriod.month,
+    isDeleted: { $ne: true },
   }).lean();
 
   return {
@@ -2713,65 +2843,155 @@ export const exportReceiptDues = async (req, res) => {
       },
     );
 
-    // Create PDF document with professional layout
-    const doc = new PDFKit({ margin: 40, size: "A4", bufferPages: true });
+    const appSettings = (await AppSettings.findOne().lean()) || {};
+    const primaryColor = appSettings.pdfPrimaryColor || appSettings.themeColor || "#142D78";
+    const accentColor = appSettings.accentColor || "#f59e0b";
+    const schoolName = appSettings.schoolName || "ODYSSEY ACADEMY KHIPRO";
+    const headerText = appSettings.pdfHeaderText || "Student Receipt Dues Report";
+    const schoolAddress = appSettings.address || "Bin Muqarab Colony Main 7G Road, Khipro";
+    const schoolEmail = appSettings.email || "askodysseyacademy@gmail.com";
+    const schoolPhone = appSettings.phone || "+923492425428";
+    const fontFamily = appSettings.pdfFontFamily || "Helvetica";
+    const pageSize = appSettings.pdfPageSize || "A4";
+    const lightGray = "#f8fafc";
+    const headerCard = "#eaf2fb";
+    const borderColor = "#dbe5f1";
+    const darkGray = "#334155";
+
+    const resolveAssetPath = (relativePath = "") => {
+      if (!relativePath) return null;
+      const cleanPath = String(relativePath).split("?")[0].replace(/^\/+/, "");
+      const absolutePath = path.resolve(process.cwd(), "backend", cleanPath);
+      return fs.existsSync(absolutePath) ? absolutePath : null;
+    };
+
+    const logoPath =
+      resolveAssetPath(appSettings.pdfLogo) ||
+      resolveAssetPath(appSettings.logo) ||
+      path.resolve(process.cwd(), "backend", "public", "assets", "LOGO-gGjlK6W5.png");
+
+    const doc = new PDFKit({ margin: 40, size: pageSize });
     const chunks = [];
     doc.on("data", (chunk) => chunks.push(chunk));
 
-    // Colors
-    const primaryColor = "#0f766e";
-    const secondaryColor = "#134e4a";
-    const lightGray = "#f3f4f6";
-    const darkGray = "#374151";
+    const generatedLabel = new Date().toLocaleDateString("en-GB", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
 
-    // Helper function to draw header
-    const drawHeader = (pageNum = 1, totalPages = 0) => {
-      // Top bar with primary color
-      doc.rect(0, 0, doc.page.width, 45).fill(primaryColor);
-      
-      // Company name
+    const drawHeader = (pageNum = 1) => {
+      const cardX = 40;
+      const cardY = 20;
+      const cardWidth = doc.page.width - 80;
+      const cardHeight = 92;
+
+      doc.roundedRect(cardX, cardY, cardWidth, cardHeight, 8).fill(headerCard);
+
+      if (logoPath && fs.existsSync(logoPath)) {
+        try {
+          doc.image(logoPath, 58, 34, {
+            fit: [42, 42],
+            align: "left",
+            valign: "center",
+          });
+        } catch (error) {
+          console.warn("Unable to render receipt report logo:", error.message);
+        }
+      }
+
       doc.fillColor("#ffffff")
-        .fontSize(22)
+        .font("Helvetica-Bold");
+
+      doc.fillColor(primaryColor)
         .font("Helvetica-Bold")
-        .text("ODC Education Center", 40, 12, { align: "center" });
-      
-      // Report title below header
-      doc.fillColor(secondaryColor)
-        .fontSize(14)
-        .font("Helvetica")
-        .text("Student Receipt Dues Report", 40, 55);
-      
-      // Date on right side
-      doc.fillColor(darkGray)
+        .fontSize(18)
+        .text(schoolName, 128, 44, {
+          width: doc.page.width - 250,
+        });
+
+      doc.font(fontFamily)
+        .fontSize(10)
+        .fillColor("#475569")
+        .text(schoolAddress, 128, 70, {
+          width: doc.page.width - 250,
+        });
+
+      doc.fillColor("#64748b")
+        .font(fontFamily)
         .fontSize(9)
-        .text(`Generated: ${new Date().toLocaleDateString("en-GB", { 
-          year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' 
-        })}`, doc.page.width - 180, 55);
-      
-      // Line under title
-      doc.strokeColor(primaryColor)
-        .lineWidth(2)
-        .moveTo(40, 78)
-        .lineTo(doc.page.width - 40, 78)
-        .stroke();
-      
-      return 90; // Return starting Y position for content
+        .text(schoolEmail, 128, 90, {
+          width: 170,
+          lineBreak: false,
+        });
+
+      doc.fillColor(accentColor)
+        .rect(304, 94, 6, 6)
+        .fill();
+
+      doc.fillColor("#64748b")
+        .font(fontFamily)
+        .fontSize(9)
+        .text(schoolPhone, 320, 90, {
+          width: 110,
+          lineBreak: false,
+        });
+
+      doc.fillColor(darkGray)
+        .font(fontFamily)
+        .fontSize(8)
+        .text(`Generated: ${generatedLabel} | Page ${pageNum}`, doc.page.width - 210, 92, {
+          width: 160,
+          align: "right",
+          lineBreak: false,
+        });
+
+      doc.fillColor(primaryColor)
+        .font("Helvetica-Bold")
+        .fontSize(12)
+        .text(headerText, 40, 126, {
+          width: doc.page.width - 80,
+        });
+
+      doc.fillColor(accentColor)
+        .rect(40, 144, doc.page.width - 80, 2.5)
+        .fill();
+
+      return 160;
     };
 
-    // Draw initial header
+    const drawTableHeader = (tableTop) => {
+      doc.save();
+      doc.roundedRect(40, tableTop, doc.page.width - 80, 24, 4).fill(primaryColor);
+
+      let headerX = 47;
+      doc.fillColor("#ffffff").fontSize(8.5).font("Helvetica-Bold");
+      tableHeaders.forEach((header) => {
+        doc.text(header.label, headerX, tableTop + 7, {
+          width: header.width - 6,
+          align: header.align === "right" ? "right" : "left",
+          lineBreak: false,
+        });
+        headerX += header.width;
+      });
+      doc.restore();
+    };
+
     let contentTop = drawHeader();
 
     // Summary Box
     const boxTop = contentTop + 10;
-    doc.rect(40, boxTop, doc.page.width - 80, 85).fill(lightGray).stroke(primaryColor);
-    
-    doc.fillColor(secondaryColor)
+    doc.roundedRect(40, boxTop, doc.page.width - 80, 92, 6).fillAndStroke(lightGray, borderColor);
+
+    doc.fillColor(primaryColor)
       .fontSize(11)
       .font("Helvetica-Bold")
       .text("Financial Summary", 50, boxTop + 8);
     
     // Summary items in two columns
-    doc.fontSize(10).font("Helvetica").fillColor(darkGray);
+    doc.fontSize(10).font(fontFamily).fillColor(darkGray);
     const summaryLeft = 50;
     const summaryRight = 220;
     let summaryY = boxTop + 28;
@@ -2779,41 +2999,41 @@ export const exportReceiptDues = async (req, res) => {
     // Left column
     doc.text(`Total Dues:`, summaryLeft, summaryY);
     doc.font("Helvetica-Bold").text(`Rs ${summary.totalDues.toLocaleString("en-PK")}`, summaryLeft + 70, summaryY);
-    doc.font("Helvetica").fillColor(darkGray);
+    doc.font(fontFamily).fillColor(darkGray);
     
     doc.text(`Collected:`, summaryLeft, summaryY + 14);
     doc.font("Helvetica-Bold").fillColor("#059669").text(`Rs ${summary.collected.toLocaleString("en-PK")}`, summaryLeft + 70, summaryY + 14);
-    doc.font("Helvetica").fillColor(darkGray);
+    doc.font(fontFamily).fillColor(darkGray);
     
     doc.text(`Remaining:`, summaryLeft, summaryY + 28);
     doc.font("Helvetica-Bold").fillColor("#dc2626").text(`Rs ${summary.remaining.toLocaleString("en-PK")}`, summaryLeft + 70, summaryY + 28);
     
     // Right column
-    doc.fillColor(darkGray).font("Helvetica");
+    doc.fillColor(darkGray).font(fontFamily);
     doc.text(`Total Entries:`, summaryRight, summaryY);
     doc.font("Helvetica-Bold").text(`${summary.studentCount}`, summaryRight + 75, summaryY);
     
-    doc.font("Helvetica");
+    doc.font(fontFamily);
     doc.text(`Paid:`, summaryRight, summaryY + 14);
     doc.font("Helvetica-Bold").fillColor("#059669").text(`${summary.paidCount}`, summaryRight + 75, summaryY + 14);
     
-    doc.font("Helvetica").fillColor(darkGray);
+    doc.font(fontFamily).fillColor(darkGray);
     doc.text(`Partial:`, summaryRight, summaryY + 28);
     doc.font("Helvetica-Bold").fillColor("#2563eb").text(`${summary.partialCount}`, summaryRight + 75, summaryY + 28);
     
-    doc.font("Helvetica").fillColor(darkGray);
+    doc.font(fontFamily).fillColor(darkGray);
     doc.text(`Pending:`, summaryRight + 100, summaryY + 28);
     doc.font("Helvetica-Bold").fillColor("#d97706").text(`${summary.pendingCount}`, summaryRight + 175, summaryY + 28);
     
     // Filters info
-    doc.fillColor(darkGray).font("Helvetica").fontSize(8);
+    doc.fillColor(darkGray).font(fontFamily).fontSize(8);
     let filterY = boxTop + 70;
-    doc.text(`Filter: ${status || "All Status"} | Course: ${courseId || "All"}`, 50, filterY);
+    doc.text(`Filter: ${status || "All Status"} | Course: ${courseId || "All"} | Export: ${exportType}`, 50, filterY);
     if (dueDateFrom && dueDateTo) {
       doc.text(`Date Range: ${new Date(dueDateFrom).toLocaleDateString("en-GB")} - ${new Date(dueDateTo).toLocaleDateString("en-GB")}`, 300, filterY);
     }
 
-    contentTop = boxTop + 100;
+    contentTop = boxTop + 112;
 
     // Table
     const tableHeaders = [
@@ -2827,70 +3047,37 @@ export const exportReceiptDues = async (req, res) => {
       { label: "Status", width: 50 },
     ];
 
-    // Calculate table width
-    const tableWidth = tableHeaders.reduce((sum, h) => sum + h.width, 0);
-    const tableX = (doc.page.width - tableWidth) / 2;
-
-    // Table header background
-    doc.rect(40, contentTop, doc.page.width - 80, 22).fill(primaryColor);
-    
-    // Table headers
-    let headerX = 45;
-    doc.fillColor("#ffffff").fontSize(9).font("Helvetica-Bold");
-    tableHeaders.forEach((h, i) => {
-      if (h.align === "right") {
-        doc.text(h.label, headerX + h.width - 10, contentTop + 6, { width: h.width, align: "right" });
-      } else {
-        doc.text(h.label, headerX, contentTop + 6, { width: h.width });
-      }
-      headerX += h.width;
-    });
+    drawTableHeader(contentTop);
 
     // Draw data rows
-    let rowY = contentTop + 22;
-    const rowHeight = 18;
-    const pageHeight = doc.page.height - 60;
+    let rowY = contentTop + 28;
+    const rowHeight = 19;
+    const pageHeight = doc.page.height - 40;
     let pageNum = 1;
 
     filteredRows.forEach((row, index) => {
       // Check if we need a new page
       if (rowY + rowHeight > pageHeight) {
-        // Draw footer on current page
-        doc.fillColor(darkGray).fontSize(8)
-          .text(`Page ${pageNum}`, 50, pageHeight + 10)
-          .text("ODC Education Center - Receipt Dues Report", doc.page.width - 180, pageHeight + 10);
-        
         doc.addPage();
         pageNum++;
-        rowY = 40;
-        
-        // Redraw header on new page
-        doc = drawHeader(pageNum);
-        rowY = contentTop;
-        
-        // Redraw table header
-        doc.rect(40, rowY, doc.page.width - 80, 22).fill(primaryColor);
-        headerX = 45;
-        doc.fillColor("#ffffff").fontSize(9).font("Helvetica-Bold");
-        tableHeaders.forEach((h, i) => {
-          if (h.align === "right") {
-            doc.text(h.label, headerX + h.width - 10, rowY + 6, { width: h.width, align: "right" });
-          } else {
-            doc.text(h.label, headerX, rowY + 6, { width: h.width });
-          }
-          headerX += h.width;
-        });
-        rowY += 22;
+
+        contentTop = drawHeader(pageNum);
+        drawTableHeader(contentTop);
+        rowY = contentTop + 28;
       }
 
-      // Alternate row colors
       if (index % 2 === 0) {
-        doc.rect(40, rowY, doc.page.width - 80, rowHeight).fill(lightGray);
+        doc.rect(40, rowY, doc.page.width - 80, rowHeight).fill("#f8fafc");
       }
 
-      // Draw row data
-      doc.fillColor(darkGray).fontSize(8).font("Helvetica");
-      let dataX = 45;
+      doc.strokeColor(borderColor)
+        .lineWidth(0.4)
+        .moveTo(40, rowY + rowHeight)
+        .lineTo(doc.page.width - 40, rowY + rowHeight)
+        .stroke();
+
+      doc.fillColor(darkGray).fontSize(8).font(fontFamily);
+      let dataX = 47;
       const rowData = [
         String(index + 1),
         row.student?.registrationNo || "-",
@@ -2904,15 +3091,15 @@ export const exportReceiptDues = async (req, res) => {
 
       tableHeaders.forEach((h, i) => {
         const value = rowData[i];
-        if (h.align === "right") {
-          doc.text(value, dataX + h.width - 5, rowY + 4, { width: h.width, align: "right" });
-        } else {
-          doc.text(value, dataX, rowY + 4, { width: h.width });
-        }
+        doc.fillColor(darkGray);
+        doc.text(value, dataX, rowY + 5, {
+          width: h.width - 6,
+          align: h.align === "right" ? "right" : "left",
+          lineBreak: false,
+        });
         dataX += h.width;
       });
 
-      // Status color
       if (row.dueStatus === "Paid") {
         doc.fillColor("#059669");
       } else if (row.dueStatus === "Partial") {
@@ -2920,23 +3107,41 @@ export const exportReceiptDues = async (req, res) => {
       } else if (row.dueStatus === "Pending") {
         doc.fillColor("#d97706");
       }
-      doc.text(row.dueStatus || "-", dataX - 50, rowY + 4, { width: 50 });
+      doc.font("Helvetica-Bold").text(row.dueStatus || "-", dataX - 50, rowY + 5, {
+        width: 44,
+        lineBreak: false,
+      });
+      doc.font(fontFamily);
 
       rowY += rowHeight;
     });
 
-    // Draw total row
-    doc.rect(40, rowY, doc.page.width - 80, 20).fill(primaryColor);
-    doc.fillColor("#ffffff").fontSize(9).font("Helvetica-Bold");
-    doc.text("TOTAL", 45, rowY + 5, { width: 170 });
-    doc.text(summary.totalDues.toLocaleString("en-PK"), 270, rowY + 5, { width: 60, align: "right" });
-    doc.text(summary.collected.toLocaleString("en-PK"), 330, rowY + 5, { width: 60, align: "right" });
-    doc.text(summary.remaining.toLocaleString("en-PK"), 395, rowY + 5, { width: 65, align: "right" });
+    if (rowY + 20 > pageHeight) {
+      doc.addPage();
+      pageNum++;
+      contentTop = drawHeader(pageNum);
+      drawTableHeader(contentTop);
+      rowY = contentTop + 28;
+    }
 
-    // Footer on last page
-    doc.fillColor(darkGray).fontSize(8)
-      .text(`Page ${pageNum}`, 50, pageHeight + 10)
-      .text("ODC Education Center - Receipt Dues Report", doc.page.width - 180, pageHeight + 10);
+    doc.roundedRect(40, rowY, doc.page.width - 80, 22, 4).fill(primaryColor);
+    doc.fillColor("#ffffff").fontSize(9).font("Helvetica-Bold");
+    doc.text("TOTAL", 47, rowY + 6, { width: 170, lineBreak: false });
+    doc.text(summary.totalDues.toLocaleString("en-PK"), 269, rowY + 6, {
+      width: 55,
+      align: "right",
+      lineBreak: false,
+    });
+    doc.text(summary.collected.toLocaleString("en-PK"), 329, rowY + 6, {
+      width: 55,
+      align: "right",
+      lineBreak: false,
+    });
+    doc.text(summary.remaining.toLocaleString("en-PK"), 394, rowY + 6, {
+      width: 60,
+      align: "right",
+      lineBreak: false,
+    });
 
     doc.end();
 
@@ -3170,14 +3375,16 @@ export const getTransactions = async (req, res) => {
       AccountingTransaction.countDocuments(filter),
     ]);
 
-    const serializedTransactions = await Promise.all(
-      transactions.map(serializeTransactionRecord),
-    );
+    const [serializedTransactions, partyNames] = await Promise.all([
+      Promise.all(transactions.map(serializeTransactionRecord)),
+      getSharedPartyNames(),
+    ]);
 
     res.status(200).json({
       success: true,
       data: serializedTransactions,
       pagination: { total, page: parseInt(page), limit: parseInt(limit) },
+      meta: { partyNames },
     });
   } catch (error) {
     console.error("Error fetching transactions:", error);
