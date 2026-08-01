@@ -89,6 +89,10 @@ const TeacherPayrollSchema = new mongoose.Schema(
       enum: ["unpaid", "partial", "paid"],
       default: "unpaid",
     },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+    },
     paymentEntries: [
       {
         paymentDate: {

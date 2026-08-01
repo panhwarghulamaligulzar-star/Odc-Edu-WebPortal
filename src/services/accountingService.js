@@ -298,6 +298,18 @@ export const payTeacherPayroll = async (teacherId, data) => {
   }
 };
 
+export const deleteTeacherPayroll = async (payrollId, payload = {}) => {
+  try {
+    const response = await api.delete(`/accounting/payroll/${payrollId || "by-context"}`, {
+      data: payload,
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Delete Teacher Payroll Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
 export const getSuperAdminFinanceMonitor = async (params = {}) => {
   try {
     const response = await api.get("/accounting/super-admin/monitor", {
