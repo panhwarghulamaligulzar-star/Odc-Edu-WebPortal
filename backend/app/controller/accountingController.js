@@ -2703,6 +2703,13 @@ export const exportReceiptDues = async (req, res) => {
       return acc;
     }, {});
 
+    const normalizeDueStatus = (value) => {
+      const normalized = String(value || "").trim().toLowerCase();
+      if (normalized === "paid") return "Paid";
+      if (normalized === "partial") return "Partial";
+      return "Pending";
+    };
+
     const mappedRows = filteredFeeStructures.flatMap((item) => {
       const rowPayments = paymentsByFeeStructure[String(item._id)] || [];
       const latestPayment = rowPayments[0] || null;
@@ -2738,7 +2745,7 @@ export const exportReceiptDues = async (req, res) => {
           amount: entry.amount,
           paidAmount: entry.paidAmount,
           remainingAmount: entry.remainingAmount,
-          dueStatus: entry.status,
+          dueStatus: normalizeDueStatus(entry.status),
           feeStatus: item.feeStatus,
           installmentEnabled: !!item.installmentEnabled,
           numberOfInstallments: item.numberOfInstallments || 1,
@@ -2764,6 +2771,7 @@ export const exportReceiptDues = async (req, res) => {
     const searchValue = search.trim().toLowerCase();
     let filteredRows = mappedRows.filter((row) => {
       const normalizedStatus = String(status || "").trim().toLowerCase();
+      const rowStatus = String(row.dueStatus || "").trim().toLowerCase();
       if (normalizedStatus) {
         if (normalizedStatus === "unpaid" && row.remainingAmount <= 0) {
           return false;
@@ -2771,7 +2779,7 @@ export const exportReceiptDues = async (req, res) => {
         if (
           normalizedStatus !== "unpaid" &&
           normalizedStatus !== "all" &&
-          row.dueStatus.toLowerCase() !== normalizedStatus
+          rowStatus !== normalizedStatus
         ) {
           return false;
         }
@@ -2809,8 +2817,9 @@ export const exportReceiptDues = async (req, res) => {
 
     // Apply export type filter
     if (exportType && exportType !== "all") {
-      filteredRows = filteredRows.filter(row => 
-        row.dueStatus.toLowerCase() === exportType.toLowerCase()
+      const normalizedExportType = String(exportType).trim().toLowerCase();
+      filteredRows = filteredRows.filter(
+        (row) => String(row.dueStatus || "").trim().toLowerCase() === normalizedExportType,
       );
     }
 
@@ -2844,15 +2853,76 @@ export const exportReceiptDues = async (req, res) => {
     );
 
     const appSettings = (await AppSettings.findOne().lean()) || {};
-    const primaryColor = appSettings.pdfPrimaryColor || appSettings.themeColor || "#142D78";
-    const accentColor = appSettings.accentColor || "#f59e0b";
-    const schoolName = appSettings.schoolName || "ODYSSEY ACADEMY KHIPRO";
-    const headerText = appSettings.pdfHeaderText || "Student Receipt Dues Report";
-    const schoolAddress = appSettings.address || "Bin Muqarab Colony Main 7G Road, Khipro";
-    const schoolEmail = appSettings.email || "askodysseyacademy@gmail.com";
-    const schoolPhone = appSettings.phone || "+923492425428";
-    const fontFamily = appSettings.pdfFontFamily || "Helvetica";
-    const pageSize = appSettings.pdfPageSize || "A4";
+    const normalizePdfColor = (value, fallback) => {
+      const normalized = String(value || "").trim();
+      return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(normalized)
+        ? normalized
+        : fallback;
+    };
+    const normalizePdfFont = (value) => {
+      const normalized = String(value || "").trim().toLowerCase();
+      if (!normalized) return "Helvetica";
+      const supportedFonts = {
+        helvetica: "Helvetica",
+        "times new roman": "Times-Roman",
+        "times-roman": "Times-Roman",
+        times: "Times-Roman",
+        courier: "Courier",
+      };
+      return supportedFonts[normalized] || "Helvetica";
+    };
+    const normalizePdfPageSize = (value) => {
+      const normalized = String(value || "").trim().toUpperCase();
+      if (normalized === "A4") return "A4";
+      if (normalized === "LETTER") return "LETTER";
+      if (normalized === "LEGAL") return "LEGAL";
+      return "A4";
+    };
+    const sanitizePdfText = (value, fallback = "-") => {
+      const raw = String(value ?? "").trim();
+      if (!raw) return fallback;
+      return raw
+        .normalize("NFKD")
+        .replace(/[^\x20-\x7E]/g, "")
+        .replace(/\s+/g, " ")
+        .trim() || fallback;
+    };
+    const safeCurrency = (value) =>
+      Number(value || 0).toLocaleString("en-PK");
+    const safeDate = (value) => {
+      const parsed = value ? new Date(value) : null;
+      return parsed && !Number.isNaN(parsed.getTime())
+        ? parsed.toLocaleDateString("en-GB")
+        : "-";
+    };
+
+    const primaryColor = normalizePdfColor(
+      appSettings.pdfPrimaryColor || appSettings.themeColor,
+      "#142D78",
+    );
+    const accentColor = normalizePdfColor(appSettings.accentColor, "#f59e0b");
+    const schoolName = sanitizePdfText(
+      appSettings.schoolName,
+      "ODYSSEY ACADEMY KHIPRO",
+    );
+    const headerText = sanitizePdfText(
+      appSettings.pdfHeaderText,
+      "Student Receipt Dues Report",
+    );
+    const schoolAddress = sanitizePdfText(
+      appSettings.address,
+      "Bin Muqarab Colony Main 7G Road, Khipro",
+    );
+    const schoolEmail = sanitizePdfText(
+      appSettings.email,
+      "askodysseyacademy@gmail.com",
+    );
+    const schoolPhone = sanitizePdfText(
+      appSettings.phone,
+      "+923492425428",
+    );
+    const fontFamily = normalizePdfFont(appSettings.pdfFontFamily);
+    const pageSize = normalizePdfPageSize(appSettings.pdfPageSize);
     const lightGray = "#f8fafc";
     const headerCard = "#eaf2fb";
     const borderColor = "#dbe5f1";
@@ -2860,27 +2930,39 @@ export const exportReceiptDues = async (req, res) => {
 
     const resolveAssetPath = (relativePath = "") => {
       if (!relativePath) return null;
-      const cleanPath = String(relativePath).split("?")[0].replace(/^\/+/, "");
-      const absolutePath = path.resolve(process.cwd(), "backend", cleanPath);
-      return fs.existsSync(absolutePath) ? absolutePath : null;
+      const rawPath = String(relativePath).trim();
+      if (!rawPath || /^https?:\/\//i.test(rawPath)) return null;
+
+      const cleanPath = rawPath.split("?")[0].replace(/^\/+/, "");
+      const candidatePaths = [
+        path.resolve(process.cwd(), cleanPath),
+        path.resolve(process.cwd(), "backend", cleanPath),
+        path.resolve(process.cwd(), "public", cleanPath.replace(/^public[\\/]/, "")),
+      ];
+
+      return candidatePaths.find((candidate) => fs.existsSync(candidate)) || null;
     };
 
     const logoPath =
       resolveAssetPath(appSettings.pdfLogo) ||
       resolveAssetPath(appSettings.logo) ||
-      path.resolve(process.cwd(), "backend", "public", "assets", "LOGO-gGjlK6W5.png");
+      resolveAssetPath("public/assets/LOGO-gGjlK6W5.png");
 
     const doc = new PDFKit({ margin: 40, size: pageSize });
     const chunks = [];
     doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("error", (pdfError) => {
+      console.error("Receipt PDF stream error:", pdfError);
+    });
 
-    const generatedLabel = new Date().toLocaleDateString("en-GB", {
+    const generatedLabel = sanitizePdfText(new Date().toLocaleString("en-GB", {
       year: "numeric",
       month: "long",
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-    });
+      hour12: false,
+    }), "Generated");
 
     const drawHeader = (pageNum = 1) => {
       const cardX = 40;
@@ -3028,9 +3110,23 @@ export const exportReceiptDues = async (req, res) => {
     // Filters info
     doc.fillColor(darkGray).font(fontFamily).fontSize(8);
     let filterY = boxTop + 70;
-    doc.text(`Filter: ${status || "All Status"} | Course: ${courseId || "All"} | Export: ${exportType}`, 50, filterY);
+    doc.text(
+      sanitizePdfText(
+        `Filter: ${status || "All Status"} | Course: ${courseId || "All"} | Export: ${exportType}`,
+        "Filter: All",
+      ),
+      50,
+      filterY,
+    );
     if (dueDateFrom && dueDateTo) {
-      doc.text(`Date Range: ${new Date(dueDateFrom).toLocaleDateString("en-GB")} - ${new Date(dueDateTo).toLocaleDateString("en-GB")}`, 300, filterY);
+      doc.text(
+        sanitizePdfText(
+          `Date Range: ${safeDate(dueDateFrom)} - ${safeDate(dueDateTo)}`,
+          "Date Range",
+        ),
+        300,
+        filterY,
+      );
     }
 
     contentTop = boxTop + 112;
@@ -3055,66 +3151,83 @@ export const exportReceiptDues = async (req, res) => {
     const pageHeight = doc.page.height - 40;
     let pageNum = 1;
 
+    const skippedRows = [];
+
     filteredRows.forEach((row, index) => {
+      try {
       // Check if we need a new page
-      if (rowY + rowHeight > pageHeight) {
-        doc.addPage();
-        pageNum++;
+        if (rowY + rowHeight > pageHeight) {
+          doc.addPage();
+          pageNum++;
 
-        contentTop = drawHeader(pageNum);
-        drawTableHeader(contentTop);
-        rowY = contentTop + 28;
-      }
+          contentTop = drawHeader(pageNum);
+          drawTableHeader(contentTop);
+          rowY = contentTop + 28;
+        }
 
-      if (index % 2 === 0) {
-        doc.rect(40, rowY, doc.page.width - 80, rowHeight).fill("#f8fafc");
-      }
+        if (index % 2 === 0) {
+          doc.rect(40, rowY, doc.page.width - 80, rowHeight).fill("#f8fafc");
+        }
 
-      doc.strokeColor(borderColor)
-        .lineWidth(0.4)
-        .moveTo(40, rowY + rowHeight)
-        .lineTo(doc.page.width - 40, rowY + rowHeight)
-        .stroke();
+        doc.strokeColor(borderColor)
+          .lineWidth(0.4)
+          .moveTo(40, rowY + rowHeight)
+          .lineTo(doc.page.width - 40, rowY + rowHeight)
+          .stroke();
 
-      doc.fillColor(darkGray).fontSize(8).font(fontFamily);
-      let dataX = 47;
-      const rowData = [
-        String(index + 1),
-        row.student?.registrationNo || "-",
-        (row.student?.studentName || "-").substring(0, 18),
-        (row.course?.courseName || "-").substring(0, 14),
-        (row.amount || 0).toLocaleString("en-PK"),
-        (row.paidAmount || 0).toLocaleString("en-PK"),
-        (row.remainingAmount || 0).toLocaleString("en-PK"),
-        row.dueStatus || "-",
-      ];
+        doc.fillColor(darkGray).fontSize(8).font(fontFamily);
+        let dataX = 47;
+        const normalizedRowStatus = normalizeDueStatus(row.dueStatus);
+        const rowData = [
+          String(index + 1),
+          sanitizePdfText(row.student?.registrationNo, "-"),
+          sanitizePdfText(row.student?.studentName, "-").substring(0, 18),
+          sanitizePdfText(row.course?.courseName, "-").substring(0, 14),
+          safeCurrency(row.amount || 0),
+          safeCurrency(row.paidAmount || 0),
+          safeCurrency(row.remainingAmount || 0),
+          normalizedRowStatus,
+        ];
 
-      tableHeaders.forEach((h, i) => {
-        const value = rowData[i];
-        doc.fillColor(darkGray);
-        doc.text(value, dataX, rowY + 5, {
-          width: h.width - 6,
-          align: h.align === "right" ? "right" : "left",
+        tableHeaders.forEach((h, i) => {
+          const value = rowData[i];
+          doc.fillColor(darkGray);
+          doc.text(value, dataX, rowY + 5, {
+            width: h.width - 6,
+            align: h.align === "right" ? "right" : "left",
+            lineBreak: false,
+          });
+          dataX += h.width;
+        });
+
+        if (normalizedRowStatus === "Paid") {
+          doc.fillColor("#059669");
+        } else if (normalizedRowStatus === "Partial") {
+          doc.fillColor("#2563eb");
+        } else {
+          doc.fillColor("#d97706");
+        }
+        doc.font("Helvetica-Bold").text(normalizedRowStatus, dataX - 50, rowY + 5, {
+          width: 44,
           lineBreak: false,
         });
-        dataX += h.width;
-      });
+        doc.font(fontFamily);
 
-      if (row.dueStatus === "Paid") {
-        doc.fillColor("#059669");
-      } else if (row.dueStatus === "Partial") {
-        doc.fillColor("#2563eb");
-      } else if (row.dueStatus === "Pending") {
-        doc.fillColor("#d97706");
+        rowY += rowHeight;
+      } catch (rowError) {
+        skippedRows.push({
+          index,
+          feeStructureId: String(row.feeStructureId || ""),
+          student: row.student?.studentName || "",
+          course: row.course?.courseName || "",
+          message: rowError.message,
+        });
       }
-      doc.font("Helvetica-Bold").text(row.dueStatus || "-", dataX - 50, rowY + 5, {
-        width: 44,
-        lineBreak: false,
-      });
-      doc.font(fontFamily);
-
-      rowY += rowHeight;
     });
+
+    if (skippedRows.length) {
+      console.error("Skipped receipt export rows:", skippedRows.slice(0, 10));
+    }
 
     if (rowY + 20 > pageHeight) {
       doc.addPage();
@@ -3127,17 +3240,17 @@ export const exportReceiptDues = async (req, res) => {
     doc.roundedRect(40, rowY, doc.page.width - 80, 22, 4).fill(primaryColor);
     doc.fillColor("#ffffff").fontSize(9).font("Helvetica-Bold");
     doc.text("TOTAL", 47, rowY + 6, { width: 170, lineBreak: false });
-    doc.text(summary.totalDues.toLocaleString("en-PK"), 269, rowY + 6, {
+    doc.text(safeCurrency(summary.totalDues), 269, rowY + 6, {
       width: 55,
       align: "right",
       lineBreak: false,
     });
-    doc.text(summary.collected.toLocaleString("en-PK"), 329, rowY + 6, {
+    doc.text(safeCurrency(summary.collected), 329, rowY + 6, {
       width: 55,
       align: "right",
       lineBreak: false,
     });
-    doc.text(summary.remaining.toLocaleString("en-PK"), 394, rowY + 6, {
+    doc.text(safeCurrency(summary.remaining), 394, rowY + 6, {
       width: 60,
       align: "right",
       lineBreak: false,
@@ -3151,10 +3264,14 @@ export const exportReceiptDues = async (req, res) => {
     const result = Buffer.concat(chunks);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename=receipt-dues-${exportType}-${new Date().toISOString().split("T")[0]}.pdf`);
+    res.setHeader("X-Receipt-Export-Skipped-Rows", String(skippedRows.length));
     return res.send(result);
   } catch (error) {
     console.error("Error exporting receipt dues:", error);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    res.status(500).json({
+      success: false,
+      message: error?.message || "Internal server error",
+    });
   }
 };
 
