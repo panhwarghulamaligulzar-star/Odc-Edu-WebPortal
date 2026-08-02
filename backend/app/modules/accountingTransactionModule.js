@@ -4,6 +4,11 @@ import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const AccountingTransactionSchema = new mongoose.Schema(
   {
+    _id: {
+      type: String,
+      default: () => new mongoose.Types.ObjectId().toString(),
+    },
+
     transactionNo: {
       type: String,
       required: true,
@@ -22,12 +27,12 @@ const AccountingTransactionSchema = new mongoose.Schema(
       trim: true,
     },
     head: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "HeadOfAccount",
       required: true,
     },
     paymentMethod: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "PaymentMethod",
       required: true,
     },
@@ -52,7 +57,7 @@ const AccountingTransactionSchema = new mongoose.Schema(
       default: "",
     },
     createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "User",
     },
   },

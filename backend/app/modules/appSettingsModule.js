@@ -2,6 +2,10 @@ import mongoose from "mongoose";
 
 const appSettingsSchema = new mongoose.Schema(
   {
+    _id: {
+      type: String,
+      default: () => new mongoose.Types.ObjectId().toString(),
+    },
     schoolName: { type: String, default: "School Management System" },
     tagline: { type: String, default: "" },
     logo: { type: String, default: "" },
@@ -21,7 +25,7 @@ const appSettingsSchema = new mongoose.Schema(
     website: { type: String, default: "" },
     maintenanceMode: { type: Boolean, default: false },
     showAccountingBalancesToUsers: { type: Boolean, default: false },
-    updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    updatedBy: { type: String, ref: "User" },
   },
   { timestamps: true },
 );

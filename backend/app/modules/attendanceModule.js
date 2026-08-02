@@ -3,8 +3,13 @@ import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const AttendanceSchema = new mongoose.Schema(
   {
+    _id: {
+      type: String,
+      default: () => new mongoose.Types.ObjectId().toString(),
+    },
+
     batch: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "Batch",
       required: true,
     },
@@ -17,7 +22,7 @@ const AttendanceSchema = new mongoose.Schema(
 
     // polymorphic ref: person can be a student (Admission) or teacher (Teacher)
     person: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       required: true,
       refPath: "personModel",
     },
@@ -47,8 +52,8 @@ const AttendanceSchema = new mongoose.Schema(
     },
 
     markedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "UserAuth",
+      type: String,
+      ref: "User",
     },
   },
   {

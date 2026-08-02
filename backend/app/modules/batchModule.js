@@ -4,6 +4,11 @@ import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const BatchSchema = new mongoose.Schema(
   {
+    _id: {
+      type: String,
+      default: () => new mongoose.Types.ObjectId().toString(),
+    },
+
     batchName: {
       type: String,
       required: true,
