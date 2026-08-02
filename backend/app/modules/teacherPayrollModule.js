@@ -2,8 +2,13 @@ import mongoose from "mongoose";
 
 const TeacherPayrollSchema = new mongoose.Schema(
   {
+    _id: {
+      type: String,
+      default: () => new mongoose.Types.ObjectId().toString(),
+    },
+
     teacher: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "Teacher",
       required: true,
     },
@@ -100,7 +105,7 @@ const TeacherPayrollSchema = new mongoose.Schema(
           required: true,
         },
         paymentMethod: {
-          type: mongoose.Schema.Types.ObjectId,
+          type: String,
           ref: "PaymentMethod",
           required: true,
         },
@@ -115,7 +120,7 @@ const TeacherPayrollSchema = new mongoose.Schema(
           min: 0,
         },
         transactionId: {
-          type: mongoose.Schema.Types.ObjectId,
+          type: String,
           ref: "AccountingTransaction",
         },
         details: {
@@ -128,7 +133,7 @@ const TeacherPayrollSchema = new mongoose.Schema(
     studentAdjustments: [
       {
         studentId: {
-          type: mongoose.Schema.Types.ObjectId,
+          type: String,
           ref: "Student",
           required: true,
         },

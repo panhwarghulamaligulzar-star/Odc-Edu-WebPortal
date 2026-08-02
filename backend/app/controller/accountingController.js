@@ -3562,17 +3562,23 @@ export const createTransaction = async (req, res) => {
       });
     }
 
-    const method = await PaymentMethod.findById(paymentMethod);
+    const method = await findPaymentMethodByAnyId(paymentMethod);
     if (!method)
       return res
         .status(404)
         .json({ success: false, message: "Payment method not found" });
 
-    const txnType = await AccountingType.findById(type);
+    const txnType = await findAccountingTypeByAnyId(type);
     if (!txnType)
       return res
         .status(404)
         .json({ success: false, message: "Accounting type not found" });
+
+    const resolvedHead = await findHeadOfAccountByAnyId(head);
+    if (!resolvedHead)
+      return res
+        .status(404)
+        .json({ success: false, message: "Head of account not found" });
 
     const transactionNo = await generateTransactionNo();
     const direction = txnType.name === "Income" ? 1 : -1;
@@ -3580,18 +3586,18 @@ export const createTransaction = async (req, res) => {
     const txn = new AccountingTransaction({
       transactionNo,
       name: name.trim(),
-      type,
-      head,
-      paymentMethod,
+      type: String(txnType._id),
+      head: String(resolvedHead._id),
+      paymentMethod: String(method._id),
       paymentDate: new Date(paymentDate),
       amount: Number(amount),
       billReference: billReference?.trim() || "",
       details: details?.trim() || "",
-      createdBy: req.user?._id,
+      createdBy: req.user?._id ? String(req.user._id) : undefined,
     });
 
     await txn.save();
-    await adjustBalance(paymentMethod, Number(amount), direction);
+    await adjustBalance(method._id, Number(amount), direction);
     await txn.populate([
       "type",
       "head",
@@ -3635,11 +3641,42 @@ export const updateTransaction = async (req, res) => {
     const oldDirection = oldType?.name === "Income" ? 1 : -1;
     await adjustBalance(txn.paymentMethod, txn.amount, -oldDirection);
 
+    let resolvedType = null;
+    let resolvedHead = null;
+    let resolvedMethod = null;
+
+    if (type) {
+      resolvedType = await findAccountingTypeByAnyId(type);
+      if (!resolvedType) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Accounting type not found" });
+      }
+    }
+
+    if (head) {
+      resolvedHead = await findHeadOfAccountByAnyId(head);
+      if (!resolvedHead) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Head of account not found" });
+      }
+    }
+
+    if (paymentMethod) {
+      resolvedMethod = await findPaymentMethodByAnyId(paymentMethod);
+      if (!resolvedMethod) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Payment method not found" });
+      }
+    }
+
     // Apply updates
     if (name) txn.name = name.trim();
-    if (type) txn.type = type;
-    if (head) txn.head = head;
-    if (paymentMethod) txn.paymentMethod = paymentMethod;
+    if (resolvedType) txn.type = String(resolvedType._id);
+    if (resolvedHead) txn.head = String(resolvedHead._id);
+    if (resolvedMethod) txn.paymentMethod = String(resolvedMethod._id);
     if (paymentDate) txn.paymentDate = new Date(paymentDate);
     if (amount !== undefined) txn.amount = Number(amount);
     if (billReference !== undefined) txn.billReference = billReference.trim();

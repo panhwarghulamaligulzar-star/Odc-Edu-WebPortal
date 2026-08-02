@@ -4,8 +4,13 @@ import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const EnrollmentSchema = new mongoose.Schema(
   {
+    _id: {
+      type: String,
+      default: () => new mongoose.Types.ObjectId().toString(),
+    },
+
     student: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "Admission",
       required: true,
     },
@@ -17,7 +22,7 @@ const EnrollmentSchema = new mongoose.Schema(
     },
 
     batch: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "Batch",
     },
 

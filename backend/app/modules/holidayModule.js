@@ -3,6 +3,11 @@ import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const HolidaySchema = new mongoose.Schema(
   {
+    _id: {
+      type: String,
+      default: () => new mongoose.Types.ObjectId().toString(),
+    },
+
     date: {
       type: Date,
       required: true,
@@ -43,15 +48,15 @@ const HolidaySchema = new mongoose.Schema(
     // Which batches are affected — empty array means ALL batches
     affectedBatches: [
       {
-        type: mongoose.Schema.Types.ObjectId,
+        type: String,
         ref: "Batch",
       },
     ],
 
     // Who created/modified this holiday
     createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "UserAuth",
+      type: String,
+      ref: "User",
     },
 
     isActive: {

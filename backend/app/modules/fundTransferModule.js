@@ -4,18 +4,23 @@ import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const fundTransferSchema = new mongoose.Schema(
   {
+    _id: {
+      type: String,
+      default: () => new mongoose.Types.ObjectId().toString(),
+    },
+
     transferNo: {
       type: String,
       unique: true,
       trim: true,
     },
     fromMethod: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "PaymentMethod",
       required: [true, "Source account is required"],
     },
     toMethod: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "PaymentMethod",
       required: [true, "Destination account is required"],
     },
@@ -36,7 +41,7 @@ const fundTransferSchema = new mongoose.Schema(
       maxlength: 300,
     },
     createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "User",
     },
   },

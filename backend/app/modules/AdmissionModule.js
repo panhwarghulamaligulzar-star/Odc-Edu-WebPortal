@@ -4,6 +4,11 @@ import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const AdmissionSchema = new mongoose.Schema(
   {
+    _id: {
+      type: String,
+      default: () => new mongoose.Types.ObjectId().toString(),
+    },
+
     registrationNo: {
       type: String,
       unique: true,

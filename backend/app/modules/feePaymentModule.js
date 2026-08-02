@@ -4,6 +4,11 @@ import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const FeePaymentSchema = new mongoose.Schema(
   {
+    _id: {
+      type: String,
+      default: () => new mongoose.Types.ObjectId().toString(),
+    },
+
     receiptNo: {
       type: String,
       required: true,
@@ -17,7 +22,7 @@ const FeePaymentSchema = new mongoose.Schema(
     },
 
     student: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "Admission",
       required: true,
     },
@@ -29,7 +34,7 @@ const FeePaymentSchema = new mongoose.Schema(
     },
 
     feeStructure: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "FeeStructure",
       required: true,
     },
@@ -61,7 +66,7 @@ const FeePaymentSchema = new mongoose.Schema(
     // Reference to the accounting PaymentMethod (bank/cash account) used
     // for automatic balance tracking in the accounting module.
     accountingPaymentMethodId: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "PaymentMethod",
       default: null,
     },
@@ -87,7 +92,7 @@ const FeePaymentSchema = new mongoose.Schema(
     },
 
     receivedBy: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "User",
     },
 
@@ -119,7 +124,7 @@ const FeePaymentSchema = new mongoose.Schema(
         trim: true,
       },
       refundedBy: {
-        type: mongoose.Schema.Types.ObjectId,
+        type: String,
         ref: "User",
       },
     },

@@ -3,6 +3,11 @@ import { normalizeDateOnly } from "../utils/dateOnly.js";
 
 const ExpenseHeadEntrySchema = new mongoose.Schema(
   {
+    _id: {
+      type: String,
+      default: () => new mongoose.Types.ObjectId().toString(),
+    },
+
     voucherNo: {
       type: String,
       required: true,
@@ -24,12 +29,12 @@ const ExpenseHeadEntrySchema = new mongoose.Schema(
       trim: true,
     },
     expenseCategory: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "HeadOfAccount",
       required: true,
     },
     paymentMethod: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "PaymentMethod",
       required: true,
     },
@@ -54,12 +59,12 @@ const ExpenseHeadEntrySchema = new mongoose.Schema(
       default: "",
     },
     transactionId: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "AccountingTransaction",
       default: null,
     },
     createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       ref: "User",
       default: null,
     },
