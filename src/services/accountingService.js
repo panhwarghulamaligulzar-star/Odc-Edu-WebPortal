@@ -356,7 +356,18 @@ export const exportReceiptDues = async (filters = {}) => {
     });
     return response.data;
   } catch (error) {
-    console.error("Export Receipt Dues Error:", error.response?.data);
-    throw error.response?.data || { message: "Something went wrong" };
+    let parsedError = error.response?.data;
+
+    if (parsedError instanceof Blob) {
+      try {
+        const text = await parsedError.text();
+        parsedError = text ? JSON.parse(text) : null;
+      } catch {
+        parsedError = null;
+      }
+    }
+
+    console.error("Export Receipt Dues Error:", parsedError || error.response?.data);
+    throw parsedError || { message: "Failed to export report" };
   }
 };

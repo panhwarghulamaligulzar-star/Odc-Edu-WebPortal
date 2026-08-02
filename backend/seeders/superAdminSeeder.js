@@ -12,20 +12,29 @@ const createSuperAdmin = async () => {
   try {
     await connectDB();
 
+    const targetEmail =
+      process.env.SUPER_ADMIN_EMAIL || "superadmin@gmail.com";
+    const targetPassword =
+      process.env.SUPER_ADMIN_PASSWORD || "Admin@123";
+    const hashed = await bcrypt.hash(targetPassword, 10);
+
     const existing = await UserAuth.findOne({ isSuperAdmin: true });
     if (!existing) {
-      const hashed = await bcrypt.hash(
-        process.env.SUPER_ADMIN_PASSWORD || "Admin@123",
-        10,
-      );
-
       await UserAuth.create({
         name: "Super Admin",
-        email: process.env.SUPER_ADMIN_EMAIL || "superadmin@school.com",
+        email: targetEmail,
         password: hashed,
         isSuperAdmin: true,
         isActive: true,
+        failedLoginAttempts: 0,
       });
+    } else {
+      existing.email = existing.email || targetEmail;
+      existing.password = hashed;
+      existing.isSuperAdmin = true;
+      existing.isActive = true;
+      existing.failedLoginAttempts = 0;
+      await existing.save();
     }
 
     const defaultRoles = [
@@ -90,6 +99,8 @@ const createSuperAdmin = async () => {
     }
 
     console.log("Super admin + default roles + settings created.");
+    console.log(`Login Email: ${targetEmail}`);
+    console.log(`Login Password: ${targetPassword}`);
   } catch (error) {
     console.error("Seeder failed:", error.message);
   } finally {
