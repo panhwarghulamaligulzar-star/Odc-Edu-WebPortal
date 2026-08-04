@@ -148,10 +148,15 @@ export const calculateInstallmentPlan = (feeConfig) => {
  * Generate receipt number
  * @param {String} prefix - Receipt prefix (e.g., 'RCP')
  * @param {Number} sequenceNumber - Sequence number
+ * @param {Date} [paymentDate] - Receipt date used for year/month prefix
  * @returns {String} Receipt number
  */
-export const generateReceiptNumber = (prefix = "RCP", sequenceNumber) => {
-  const date = new Date();
+export const generateReceiptNumber = (
+  prefix = "RCP",
+  sequenceNumber,
+  paymentDate = new Date(),
+) => {
+  const date = new Date(paymentDate);
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const seq = String(sequenceNumber).padStart(4, "0");
