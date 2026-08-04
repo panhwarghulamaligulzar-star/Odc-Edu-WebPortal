@@ -2,6 +2,12 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import LoaderSpnar from "../../components/loader/loaderSpnar";
 import {
+  EnvironmentOutlined,
+  PhoneOutlined,
+  PrinterOutlined,
+  GlobalOutlined,
+} from "@ant-design/icons";
+import {
   Card,
   Button,
   Collapse,
@@ -25,6 +31,7 @@ import {
   Col,
   Tabs,
   Grid,
+  QRCode,
 } from "antd";
 import CourseAssignmentForm from "../../components/forms/CourseAssignmentForm";
 import StudentFeeProfile from "./StudentFeeProfile";
@@ -53,6 +60,7 @@ import {
   FaChalkboardTeacher,
   FaFileImport,
   FaFileExcel,
+  FaPrint,
 } from "react-icons/fa";
 import api from "../../api/axiosInstance";
 import dayjs from "dayjs";
@@ -62,6 +70,7 @@ import * as XLSX from "xlsx";
 import { MdPeople } from "react-icons/md";
 import academyConfig from "../../config/academyConfig";
 import odysseyLogo from "../../assets/images/logos/LOGO.png";
+import sidebarLogo from "../../assets/images/logos/ODC-PNG.jpg";
 import { useModulePermissions } from "../../hooks/usePermissions";
 import { updateEnrollmentStatus } from "../../services/feeService";
 
@@ -111,6 +120,31 @@ const normalizeEnrollmentStatus = (status) =>
     .toLowerCase();
 
 const ACTIVE_ENROLLMENT_STATUS_SET = new Set(["active", "enrolled"]);
+
+const fmtIdDate = (value) =>
+  value ? dayjs(value).format("DD/MM/YYYY") : "N/A";
+
+const getActiveEnrollments = (student) =>
+  (Array.isArray(student?.enrollments) ? student.enrollments : []).filter(
+    (enrollment) =>
+      ACTIVE_ENROLLMENT_STATUS_SET.has(
+        normalizeEnrollmentStatus(enrollment?.status),
+      ),
+  );
+
+const getPrimaryActiveEnrollment = (student, preferredCourseId = "all") => {
+  const activeEnrollments = getActiveEnrollments(student);
+
+  if (preferredCourseId !== "all") {
+    const matchedEnrollment = activeEnrollments.find(
+      (enrollment) =>
+        String(enrollment?.course?._id || "") === String(preferredCourseId),
+    );
+    if (matchedEnrollment) return matchedEnrollment;
+  }
+
+  return activeEnrollments[0] || null;
+};
 
 const STUDENT_STATUS_OPTIONS = [
   {
@@ -480,6 +514,12 @@ const Students = () => {
   const [tablePage, setTablePage] = useState(1);
   const [activeStudentCategory, setActiveStudentCategory] = useState("all");
   const [expandedEnrollmentRows, setExpandedEnrollmentRows] = useState({});
+  const [studentsViewMode, setStudentsViewMode] = useState("table");
+  const [idCardCourseFilter, setIdCardCourseFilter] = useState("all");
+  const [flippedCardIds, setFlippedCardIds] = useState([]);
+  const [showAllCardBacks, setShowAllCardBacks] = useState(false);
+  const [selectedIdCardIds, setSelectedIdCardIds] = useState([]);
+  const [printCardStudentIds, setPrintCardStudentIds] = useState([]);
   const currentStudentStepIndex = Math.max(
     0,
     STUDENT_FORM_STEPS.findIndex((step) => step.key === studentFormTab),
@@ -501,6 +541,55 @@ const Students = () => {
     }),
     [students],
   );
+
+  const idCardCourseOptions = useMemo(() => {
+    const mappedCourses = new Map();
+
+    students.forEach((student) => {
+      getActiveEnrollments(student).forEach((enrollment) => {
+        const courseId = String(enrollment?.course?._id || "");
+        if (!courseId || mappedCourses.has(courseId)) return;
+        mappedCourses.set(courseId, {
+          value: courseId,
+          label: enrollment?.course?.courseName || "Course",
+        });
+      });
+    });
+
+    return Array.from(mappedCourses.values());
+  }, [students]);
+
+  const activeIdCardStudents = useMemo(() => {
+    let nextStudents = students.filter((student) => getActiveEnrollments(student).length > 0);
+
+    if (searchText) {
+      const needle = searchText.toLowerCase();
+      nextStudents = nextStudents.filter(
+        (student) =>
+          student.studentName?.toLowerCase().includes(needle) ||
+          getVisibleRegistrationNo(student)?.toLowerCase().includes(needle) ||
+          student.fatherName?.toLowerCase().includes(needle) ||
+          student.cnicOrBForm?.includes(searchText),
+      );
+    }
+
+    if (genderFilter !== "all") {
+      nextStudents = nextStudents.filter(
+        (student) => student.gender?.toLowerCase() === genderFilter.toLowerCase(),
+      );
+    }
+
+    if (idCardCourseFilter !== "all") {
+      nextStudents = nextStudents.filter((student) =>
+        getActiveEnrollments(student).some(
+          (enrollment) =>
+            String(enrollment?.course?._id || "") === String(idCardCourseFilter),
+        ),
+      );
+    }
+
+    return nextStudents;
+  }, [students, searchText, genderFilter, idCardCourseFilter]);
 
   useEffect(() => {
     fetchStudents();
@@ -601,6 +690,28 @@ const Students = () => {
     );
   }, [bulkDeleteMode, filteredStudents]);
 
+  useEffect(() => {
+    const visibleCardIds = new Set(
+      activeIdCardStudents.map((student) => String(student?._id || "")).filter(Boolean),
+    );
+
+    setSelectedIdCardIds((prev) =>
+      prev.filter((studentId) => visibleCardIds.has(String(studentId))),
+    );
+    setFlippedCardIds((prev) =>
+      prev.filter((studentId) => visibleCardIds.has(String(studentId))),
+    );
+  }, [activeIdCardStudents]);
+
+  useEffect(() => {
+    if (showAllCardBacks) {
+      setFlippedCardIds(activeIdCardStudents.map((student) => student._id));
+      return;
+    }
+
+    setFlippedCardIds([]);
+  }, [showAllCardBacks, activeIdCardStudents]);
+
   const fetchStudents = async () => {
     setLoading(true);
     try {
@@ -668,6 +779,211 @@ const Students = () => {
 
   const getTargetEnrollmentsForStatusChange = (student, sourceCategory) => {
     return getEnrollmentsForCategory(student, sourceCategory);
+  };
+
+  const toggleSingleCardFlip = (studentId) => {
+    setShowAllCardBacks(false);
+    setFlippedCardIds((prev) =>
+      prev.includes(studentId)
+        ? prev.filter((id) => id !== studentId)
+        : [...prev, studentId],
+    );
+  };
+
+  const toggleCardSelection = (studentId) => {
+    setSelectedIdCardIds((prev) =>
+      prev.includes(studentId)
+        ? prev.filter((id) => id !== studentId)
+        : [...prev, studentId],
+    );
+  };
+
+  const handlePrintIdCards = (studentIds = []) => {
+    const targetIds = studentIds.length
+      ? studentIds
+      : selectedIdCardIds.length
+        ? selectedIdCardIds
+        : activeIdCardStudents.map((student) => student._id);
+
+    if (!targetIds.length) {
+      message.info("No active student ID cards available to print.");
+      return;
+    }
+
+    setPrintCardStudentIds(targetIds);
+    window.setTimeout(() => {
+      window.print();
+      window.setTimeout(() => setPrintCardStudentIds([]), 300);
+    }, 120);
+  };
+
+  const renderStudentIdFront = (student, preferredCourseId = "all") => {
+    const primaryEnrollment = getPrimaryActiveEnrollment(student, preferredCourseId);
+    const courseName =
+      primaryEnrollment?.course?.courseName ||
+      student?.lastClassAttended ||
+      "Student";
+    const studentCode = student?.registrationNo || "N/A";
+    const admissionNo = student?.admissionNo || studentCode || student?._id || "N/A";
+    const rollNo =
+      student?.rollNo || student?.studentRollNo || student?.registrationNo || "N/A";
+    const joinDate = fmtIdDate(student?.registrationDate || student?.createdAt);
+    const guardianName = student?.fatherName || student?.guardianName || "N/A";
+    const qrValue = JSON.stringify({
+      type: "student_id_card",
+      studentId: student?._id || "",
+      studentCode,
+      studentName: student?.studentName || "",
+    });
+
+    return (
+      <div className="bulk-id-card bulk-id-card-front">
+        <div className="bulk-id-lanyard-slot" />
+        <div className="bulk-id-front-top-navy" />
+        <div className="bulk-id-front-top-gold" />
+        <div className="bulk-id-front-top-white" />
+        <div className="bulk-id-front-pattern" />
+        <div className="bulk-id-front-bottom-gold" />
+        <div className="bulk-id-front-bottom-navy" />
+
+        <div className="bulk-id-front-header">
+          <div className="bulk-id-front-brand-main !text-[30px]">ODYSSEY</div>
+          <div className="bulk-id-front-brand-sub">ACADEMY KHIPRO</div>
+          <div className="bulk-id-front-brand-tagline">
+            <span />
+            <em>Where Success Begins.</em>
+            <span />
+          </div>
+        </div>
+
+        <div className="bulk-id-photo-frame !h-[150px]">
+          {student?.profilePicture ? (
+            <img
+              src={student.profilePicture}
+              alt={student.studentName}
+              className="bulk-id-photo"
+            />
+          ) : (
+            <div className="bulk-id-photo bulk-id-photo-fallback">
+              <FaUser size={72} color="#a3a3a3" />
+            </div>
+          )}
+        </div>
+
+        <div className="bulk-id-nameplate !text-[13px]">
+          {student?.studentName || "STUDENT NAME"}
+        </div>
+
+        <div className="bulk-id-detail-lines">
+          <div className="bulk-id-detail-row">
+            <span>FATHER&apos;S NAME</span>
+            <strong>{guardianName}</strong>
+          </div>
+          <div className="bulk-id-detail-row">
+            <span>CLASS</span>
+            <strong>{courseName}</strong>
+          </div>
+          <div className="bulk-id-detail-row">
+            <span>ROLL NO.</span>
+            <strong>{rollNo}</strong>
+          </div>
+          <div className="bulk-id-detail-row">
+            <span>ADMISSION NO.</span>
+            <strong>{admissionNo}</strong>
+          </div>
+          <div className="bulk-id-detail-row">
+            <span>DATE OF BIRTH</span>
+            <strong>{fmtIdDate(student?.dateOfBirth)}</strong>
+          </div>
+        </div>
+
+        <div className="bulk-id-qr-block">
+          <div className="bulk-id-qr-shell">
+            <QRCode
+              value={qrValue}
+              size={72}
+              bordered={false}
+              color="#152b57"
+              bgColor="#ffffff"
+            />
+          </div>
+        </div>
+
+        <div className="bulk-id-signature">
+          <div className="bulk-id-signature-text">Authorized Signature</div>
+          <div className="bulk-id-signature-line" />
+          <div className="bulk-id-join-date">{joinDate}</div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderStudentIdBack = (student) => {
+    const expiryDate = fmtIdDate(
+      dayjs(student?.registrationDate || student?.createdAt || new Date())
+        .add(1, "year")
+        .toDate(),
+    );
+    const contactNumber =
+      student?.mobileNumber ||
+      student?.whatsappNumber ||
+      student?.emergencyContactNumber ||
+      academyConfig.phone;
+
+    return (
+      <div className="bulk-id-card bulk-id-card-back">
+        <div className="bulk-id-lanyard-slot bulk-id-lanyard-slot-back" />
+        <div className="bulk-id-back-top-navy" />
+        <div className="bulk-id-back-top-gold" />
+        <div className="bulk-id-back-top-white" />
+        <div className="bulk-id-back-footer" />
+
+        <div className="bulk-id-back-logo-wrap">
+          <div className="bulk-id-back-logo-ring ">
+            <img
+              src={sidebarLogo}
+              alt="Odyssey Academy"
+              className="bulk-id-back-logo rounded-full"
+            />
+          </div>
+        </div>
+
+        <div className="bulk-id-back-title">
+          <span />
+          <strong>INSTRUCTIONS</strong>
+          <span />
+        </div>
+
+        <div className="bulk-id-back-points">
+          <div>This ID Card is the property of Odyssey Academy Khipro.</div>
+          <div>This ID Card is non-transferable.</div>
+          <div>Student must carry this ID Card during class hours.</div>
+          <div>This ID Card must be shown on demand.</div>
+          <div>Loss of this card must be reported immediately.</div>
+        </div>
+
+        <div className="bulk-id-back-divider" />
+
+        <div className="bulk-id-back-contact">
+          <div className="bulk-id-back-contact-row">
+            <EnvironmentOutlined />
+            <span>{academyConfig.address}</span>
+          </div>
+          <div className="bulk-id-back-contact-row">
+            <PhoneOutlined />
+            <span>{contactNumber}</span>
+          </div>
+          <div className="bulk-id-back-contact-row">
+            <FaGraduationCap />
+            <span>{academyConfig.website}</span>
+          </div>
+          <div className="bulk-id-back-dates">
+            <span>Join: {fmtIdDate(student?.registrationDate || student?.createdAt)}</span>
+            <span>Expire: {expiryDate}</span>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const getAvailableStatusOptions = (sourceCategory) => {
@@ -2281,7 +2597,23 @@ const Students = () => {
           </div>
         </div>
 
-        {/* Students Table */}
+        <Tabs
+          activeKey={studentsViewMode}
+          onChange={setStudentsViewMode}
+          items={[
+            {
+              key: "table",
+              label: `Students Table (${filteredStudents.length})`,
+            },
+            {
+              key: "id-cards",
+              label: `Active ID Cards (${activeIdCardStudents.length})`,
+            },
+          ]}
+          style={{ marginBottom: "16px" }}
+        />
+
+        {studentsViewMode === "table" ? (
         <Card
           style={{
             borderRadius: "5px",
@@ -3076,6 +3408,776 @@ const Students = () => {
             </div>
           )}
         </Card>
+        ) : (
+          <Card
+            style={{
+              borderRadius: "5px",
+              border: "none",
+            }}
+          >
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <Select
+                  value={idCardCourseFilter}
+                  onChange={setIdCardCourseFilter}
+                  size="large"
+                  style={{ width: isMobile ? "100%" : 240 }}
+                  options={[
+                    { value: "all", label: "All Active Courses" },
+                    ...idCardCourseOptions,
+                  ]}
+                />
+                <Button
+                  onClick={() => setShowAllCardBacks((prev) => !prev)}
+                  style={{
+                    borderRadius: "10px",
+                    borderColor: "#01134C",
+                    color: "#01134C",
+                    fontWeight: 600,
+                  }}
+                >
+                  {showAllCardBacks ? "View All Front Side" : "View All Back Side"}
+                </Button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Tag color="blue" style={{ margin: 0 }}>
+                  Visible: {activeIdCardStudents.length}
+                </Tag>
+                <Tag color="purple" style={{ margin: 0 }}>
+                  Selected: {selectedIdCardIds.length}
+                </Tag>
+                <Button
+                  icon={<FaPrint />}
+                  onClick={() => handlePrintIdCards()}
+                  style={{
+                    background: "#01134C",
+                    borderColor: "#01134C",
+                    color: "#E8FC0A",
+                    borderRadius: "10px",
+                    fontWeight: 700,
+                  }}
+                >
+                  {selectedIdCardIds.length ? "Print Selected Cards" : "Print Visible Cards"}
+                </Button>
+              </div>
+            </div>
+
+            {activeIdCardStudents.length === 0 ? (
+              <Empty
+                description="No active student ID cards match the current filters"
+                style={{ padding: "60px 0" }}
+              />
+            ) : (
+              <div className="bulk-id-cards-grid">
+                {activeIdCardStudents.map((student) => {
+                  const isFlipped =
+                    showAllCardBacks || flippedCardIds.includes(student._id);
+                  const isSelected = selectedIdCardIds.includes(student._id);
+                  const primaryEnrollment = getPrimaryActiveEnrollment(
+                    student,
+                    idCardCourseFilter,
+                  );
+
+                  return (
+                    <div key={student._id} className="bulk-id-card-shell">
+                      <div className="bulk-id-card-toolbar">
+                        <label className="bulk-id-card-check">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleCardSelection(student._id)}
+                          />
+                          <span>Select</span>
+                        </label>
+                        <div className="bulk-id-card-toolbar-actions">
+                          <Button
+                            size="small"
+                            onClick={() => toggleSingleCardFlip(student._id)}
+                            style={{
+                              borderRadius: "999px",
+                              borderColor: "#01134C",
+                              color: "#01134C",
+                              fontWeight: 600,
+                            }}
+                          >
+                            {isFlipped ? "View Front" : "Flip Card"}
+                          </Button>
+                          <Button
+                            size="small"
+                            icon={<FaPrint />}
+                            onClick={() => handlePrintIdCards([student._id])}
+                            style={{
+                              borderRadius: "999px",
+                              background: "#01134C",
+                              borderColor: "#01134C",
+                              color: "#E8FC0A",
+                              fontWeight: 700,
+                            }}
+                          >
+                            Print
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className={`bulk-id-flip-scene ${isFlipped ? "is-flipped" : ""}`}>
+                        <div className="bulk-id-flip-inner">
+                          <div className="bulk-id-flip-face bulk-id-flip-front">
+                            {renderStudentIdFront(student, idCardCourseFilter)}
+                          </div>
+                          <div className="bulk-id-flip-face bulk-id-flip-back">
+                            {renderStudentIdBack(student)}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="bulk-id-card-meta">
+                        <div className="bulk-id-card-meta-title">
+                          {student.studentName}
+                        </div>
+                        <div className="bulk-id-card-meta-subtitle">
+                          {primaryEnrollment?.course?.courseName || "Active Course"}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+        )}
+
+        {printCardStudentIds.length > 0 && (
+          <div className="bulk-id-print-sheet">
+            {students
+              .filter((student) => printCardStudentIds.includes(student._id))
+              .map((student) => (
+                <div key={`print-${student._id}`} className="bulk-id-print-pair">
+                  <div className="bulk-id-print-card-frame">
+                    <div className="bulk-id-print-card-scale">
+                      {renderStudentIdFront(student, idCardCourseFilter)}
+                    </div>
+                  </div>
+                  <div className="bulk-id-print-card-frame">
+                    <div className="bulk-id-print-card-scale">
+                      {renderStudentIdBack(student)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+          </div>
+        )}
+
+        <style>{`
+          /* Bulk ID card view uses the same production card proportions for
+             preview and print so admins see nearly the same design in both. */
+          .bulk-id-cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+            gap: 24px;
+          }
+          .bulk-id-card-shell {
+            border: 1px solid #e2e8f0;
+            border-radius: 24px;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+            padding: 16px;
+          }
+          .bulk-id-card-toolbar {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
+          }
+          .bulk-id-card-check {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #334155;
+            font-size: 13px;
+            font-weight: 600;
+          }
+          .bulk-id-card-toolbar-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+          }
+          .bulk-id-flip-scene {
+            perspective: 1600px;
+          }
+          .bulk-id-flip-inner {
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.65s ease;
+            min-height: 690px;
+          }
+          .bulk-id-flip-scene.is-flipped .bulk-id-flip-inner {
+            transform: rotateY(180deg);
+          }
+          .bulk-id-flip-face {
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+          }
+          .bulk-id-flip-front,
+          .bulk-id-flip-back {
+            position: relative;
+          }
+          .bulk-id-flip-back {
+            position: absolute;
+            inset: 0;
+            transform: rotateY(180deg);
+          }
+          .bulk-id-card-meta {
+            text-align: center;
+            margin-top: 14px;
+          }
+          .bulk-id-card-meta-title {
+            color: #0f172a;
+            font-size: 15px;
+            font-weight: 800;
+          }
+          .bulk-id-card-meta-subtitle {
+            color: #64748b;
+            font-size: 12px;
+            margin-top: 4px;
+          }
+          .bulk-id-card {
+            position: relative;
+            width: 100%;
+            min-height: 690px;
+            border-radius: 26px;
+            overflow: hidden;
+            box-shadow: 0 24px 55px rgba(15, 23, 42, 0.2);
+            border: 1px solid rgba(15, 23, 42, 0.1);
+            background: #ffffff;
+          }
+          .bulk-id-card-front {
+            background:
+              radial-gradient(circle at 15% 22%, rgba(212, 175, 55, 0.08) 0, rgba(212, 175, 55, 0) 18%),
+              repeating-radial-gradient(circle at 50% 44%, rgba(20, 45, 120, 0.03) 0 2px, rgba(255,255,255,0.95) 2px 8px),
+              linear-gradient(180deg, #ffffff 0%, #fffef8 100%);
+          }
+          .bulk-id-card-back {
+            background: #ffffff;
+          }
+          .bulk-id-lanyard-slot,
+          .bulk-id-front-top-navy,
+          .bulk-id-front-top-gold,
+          .bulk-id-front-top-white,
+          .bulk-id-front-pattern,
+          .bulk-id-front-bottom-gold,
+          .bulk-id-front-bottom-navy,
+          .bulk-id-back-top-navy,
+          .bulk-id-back-top-gold,
+          .bulk-id-back-top-white,
+          .bulk-id-back-footer {
+            position: absolute;
+            pointer-events: none;
+          }
+          .bulk-id-lanyard-slot {
+            top: 28px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 92px;
+            height: 20px;
+            border-radius: 999px;
+            background: #ffffff;
+            z-index: 5;
+            box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08), 0 3px 8px rgba(15, 23, 42, 0.1);
+          }
+          .bulk-id-lanyard-slot-back {
+            background: #f8fafc;
+          }
+          .bulk-id-front-top-navy,
+          .bulk-id-back-top-navy {
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 144px;
+            background: #112d68;
+          }
+          .bulk-id-front-top-navy {
+            clip-path: ellipse(128% 100% at 50% 0%);
+          }
+          .bulk-id-front-top-gold {
+            top: 28px;
+            left: -28px;
+            right: -28px;
+            height: 122px;
+            background: linear-gradient(90deg, #c58b11 0%, #f0c75a 48%, #c58b11 100%);
+            clip-path: ellipse(118% 100% at 50% 0%);
+          }
+          .bulk-id-front-top-white {
+            top: 33px;
+            left: 6px;
+            right: 6px;
+            height: 120px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(255,255,255,1) 100%);
+            clip-path: ellipse(120% 100% at 50% 0%);
+          }
+          .bulk-id-front-pattern {
+            left: 0;
+            right: 0;
+            bottom: 176px;
+            height: 220px;
+            background:
+              linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.85) 70%, #fff 100%),
+              url("${odysseyLogo}") center 60% / 170px auto no-repeat;
+            opacity: 0.08;
+          }
+          .bulk-id-front-bottom-gold {
+            left: -36px;
+            right: -36px;
+            bottom: 90px;
+            height: 172px;
+            background: linear-gradient(90deg, #e4af17 0%, #c99011 100%);
+            border-top-left-radius: 58% 100%;
+            border-top-right-radius: 58% 100%;
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
+          }
+          .bulk-id-front-bottom-navy,
+          .bulk-id-back-footer {
+            left: 0;
+            right: 0;
+            bottom: 0;
+            height: 88px;
+            background: #112d68;
+          }
+          .bulk-id-front-header {
+            position: relative;
+            z-index: 2;
+            text-align: center;
+            padding-top: 78px;
+            color: #142d78;
+          }
+          .bulk-id-front-brand-main {
+            color: #112d68;
+            font-family: Georgia, "Times New Roman", serif;
+            font-size: 60px;
+            line-height: 0.95;
+            font-weight: 900;
+            letter-spacing: 0.03em;
+          }
+          .bulk-id-front-brand-sub {
+            margin-top: 2px;
+            color: #d1a12a;
+            font-size: 22px;
+            line-height: 1.1;
+            font-weight: 900;
+            letter-spacing: 0.06em;
+          }
+          .bulk-id-front-brand-tagline {
+            margin-top: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            color: #1f2a56;
+          }
+          .bulk-id-front-brand-tagline span {
+            width: 42px;
+            height: 2px;
+            border-radius: 999px;
+            background: #d1a12a;
+          }
+          .bulk-id-front-brand-tagline em {
+            font-size: 16px;
+            font-style: italic;
+            font-family: Georgia, "Times New Roman", serif;
+            font-weight: 700;
+            white-space: nowrap;
+          }
+          .bulk-id-photo-frame {
+            position: relative;
+            z-index: 2;
+            width: 146px;
+            height: 176px;
+            margin: 14px auto 10px;
+            border-radius: 16px;
+            background: #f8fafc;
+            border: 3px solid #20396f;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+            overflow: hidden;
+          }
+          .bulk-id-photo {
+            width: 100%;
+            height: 100%;
+            border-radius: 13px;
+            object-fit: cover;
+            background: #f8fafc;
+          }
+          .bulk-id-photo-fallback {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(180deg, #fafafa 0%, #ececec 100%);
+          }
+          .bulk-id-nameplate {
+            position: relative;
+            z-index: 2;
+            text-align: center;
+            width: fit-content;
+            max-width: calc(100% - 60px);
+            margin: 0 auto 18px;
+            background: #112d68;
+            color: #ffffff;
+            padding: 7px 20px 8px;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 900;
+            line-height: 1.1;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            box-shadow: 0 12px 22px rgba(17, 45, 104, 0.18);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .bulk-id-detail-lines {
+            position: absolute;
+            z-index: 2;
+            left: 38px;
+            right: 38px;
+            top: 382px;
+            display: grid;
+            gap: 7px;
+          }
+          .bulk-id-detail-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 14px;
+            align-items: baseline;
+            border-bottom: 1px solid rgba(17, 45, 104, 0.22);
+            padding-bottom: 3px;
+            width: 100%;
+          }
+          .bulk-id-detail-row span {
+            min-width: 108px;
+            font-size: 11px;
+            color: #112d68;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            flex-shrink: 0;
+          }
+          .bulk-id-detail-row strong {
+            flex: 1;
+            font-size: 12px;
+            color: #1f2937;
+            font-weight: 700;
+            word-break: break-word;
+            text-align: left;
+          }
+          .bulk-id-qr-block {
+            position: absolute;
+            left: 24px;
+            bottom: 18px;
+            z-index: 2;
+            display: flex;
+            justify-content: flex-start;
+          }
+          .bulk-id-qr-shell {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 7px;
+            background: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+            border: 2px solid rgba(17, 45, 104, 0.18);
+          }
+          .bulk-id-signature {
+            position: absolute;
+            right: 22px;
+            bottom: 28px;
+            z-index: 2;
+            width: 126px;
+            text-align: center;
+          }
+          .bulk-id-signature-text {
+            color: #ffffff;
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+          }
+          .bulk-id-signature-line {
+            width: 100%;
+            height: 2px;
+            background: #d1a12a;
+            margin-top: 10px;
+            border-radius: 999px;
+          }
+          .bulk-id-join-date {
+            display: none;
+          }
+          .bulk-id-back-top-navy {
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 250px;
+            background: #112d68;
+          }
+          .bulk-id-back-top-gold {
+            top: 136px;
+            left: -34px;
+            right: -34px;
+            height: 92px;
+            background: linear-gradient(90deg, #c58b11 0%, #f0c75a 48%, #c58b11 100%);
+            border-top-left-radius: 58% 100%;
+            border-top-right-radius: 58% 100%;
+          }
+          .bulk-id-back-top-white {
+            top: 154px;
+            left: 0;
+            right: 0;
+            bottom: 150px;
+            background: #ffffff;
+            border-top-left-radius: 58% 14%;
+            border-top-right-radius: 58% 14%;
+          }
+          .bulk-id-back-footer {
+            height: 172px;
+          }
+          .bulk-id-back-logo-wrap {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            justify-content: center;
+            padding-top: 82px;
+          }
+          .bulk-id-back-logo-ring {
+            width: 208px;
+            height: 208px;
+            border-radius: 999px;
+            background: #112d68;
+            border: 6px solid #ffffff;
+            box-shadow: 0 14px 28px rgba(17, 45, 104, 0.22);
+            padding: 16px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+          .bulk-id-back-logo {
+            width: 100%;
+            height: 100%;
+            max-width: 100%;
+            max-height: 100%;
+            aspect-ratio: 1 / 1;
+            object-fit: contain;
+            display: block;
+          }
+          .bulk-id-back-title {
+            position: relative;
+            z-index: 2;
+            margin: 38px 36px 18px;
+            color: #112d68;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+          }
+          .bulk-id-back-title span {
+            width: 42px;
+            height: 2px;
+            border-radius: 999px;
+            background: #d1a12a;
+          }
+          .bulk-id-back-title strong {
+            font-size: 18px;
+            font-weight: 900;
+            letter-spacing: 0.03em;
+          }
+          .bulk-id-back-points {
+            position: relative;
+            z-index: 2;
+            display: grid;
+            gap: 8px;
+            margin-bottom: 18px;
+            padding: 0 38px;
+          }
+          .bulk-id-back-points div {
+            position: relative;
+            padding-left: 20px;
+            color: #1f2937;
+            font-size: 11px;
+            line-height: 1.38;
+            text-align: left;
+            font-weight: 700;
+          }
+          .bulk-id-back-points div::before {
+            content: "★";
+            position: absolute;
+            left: 0;
+            top: 0;
+            color: #d1a12a;
+            font-size: 12px;
+          }
+          .bulk-id-back-divider {
+            position: relative;
+            z-index: 2;
+            width: 128px;
+            height: 2px;
+            margin: 0 auto 18px;
+            background: rgba(17, 45, 104, 0.65);
+          }
+          .bulk-id-back-contact {
+            position: absolute;
+            left: 34px;
+            right: 34px;
+            bottom: 28px;
+            z-index: 2;
+            color: rgba(255,255,255,0.85);
+            display: grid;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 700;
+          }
+          .bulk-id-back-contact-row {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            justify-content: flex-start;
+          }
+          .bulk-id-back-contact-row .anticon,
+          .bulk-id-back-contact-row svg {
+            color: #e7b11e;
+            font-size: 16px;
+            flex-shrink: 0;
+            margin-top: 1px;
+          }
+          .bulk-id-back-contact-row span {
+            flex: 0 1 auto;
+            text-align: left;
+            line-height: 1.35;
+          }
+          .bulk-id-back-dates {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            padding-top: 4px;
+            color: #f3f4f6;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+          }
+          .bulk-id-print-sheet {
+            display: none;
+          }
+          @media (max-width: 768px) {
+            .bulk-id-flip-inner {
+              min-height: 640px;
+            }
+            .bulk-id-card {
+              min-height: 640px;
+            }
+            .bulk-id-front-brand-main {
+              font-size: 52px;
+            }
+            .bulk-id-front-brand-sub {
+              font-size: 18px;
+            }
+            .bulk-id-front-brand-tagline em {
+              font-size: 14px;
+            }
+            .bulk-id-photo-frame {
+              width: 136px;
+              height: 166px;
+            }
+            .bulk-id-detail-lines {
+              left: 28px;
+              right: 28px;
+              top: 358px;
+            }
+            .bulk-id-back-logo-ring {
+              width: 184px;
+              height: 184px;
+            }
+            .bulk-id-back-contact {
+              left: 24px;
+              right: 24px;
+              bottom: 24px;
+              font-size: 11px;
+            }
+            .bulk-id-back-contact-row .anticon,
+            .bulk-id-back-contact-row svg {
+              font-size: 15px;
+            }
+          }
+          @media print {
+            @page {
+              size: A4 portrait;
+              margin: 8mm;
+            }
+            body * {
+              visibility: hidden !important;
+            }
+            html,
+            body {
+              width: 210mm;
+              height: 297mm;
+              margin: 0 !important;
+              padding: 0 !important;
+              background: #ffffff !important;
+            }
+            .bulk-id-print-sheet,
+            .bulk-id-print-sheet * {
+              visibility: visible !important;
+            }
+            .bulk-id-print-sheet {
+              display: grid !important;
+              position: fixed !important;
+              left: 0 !important;
+              top: 0 !important;
+              right: 0 !important;
+              width: 100% !important;
+              gap: 8mm !important;
+              padding: 8mm !important;
+              background: #ffffff !important;
+              z-index: 999999 !important;
+              align-content: start !important;
+            }
+            .bulk-id-print-pair {
+              display: grid !important;
+              grid-template-columns: repeat(2, 86mm) !important;
+              justify-content: center !important;
+              align-items: start !important;
+              gap: 8mm !important;
+              break-inside: avoid;
+              page-break-inside: avoid;
+              margin: 0 !important;
+            }
+            .bulk-id-print-card-frame {
+              width: 86mm !important;
+              height: 160mm !important;
+              overflow: hidden !important;
+              position: relative !important;
+            }
+            .bulk-id-print-card-scale {
+              width: 370px !important;
+              height: 690px !important;
+              transform: scale(0.872) !important;
+              transform-origin: top left !important;
+            }
+            .bulk-id-print-card-scale .bulk-id-card {
+              width: 370px !important;
+              min-height: 690px !important;
+              max-height: 690px !important;
+              border-radius: 26px !important;
+              border: 1px solid rgba(15, 23, 42, 0.1) !important;
+              box-shadow: none !important;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+              color-adjust: exact;
+              margin: 0 !important;
+              overflow: hidden !important;
+            }
+          }
+        `}</style>
       </div>
 
       <Modal
