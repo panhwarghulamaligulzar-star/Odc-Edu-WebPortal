@@ -14,6 +14,7 @@ import {
   Statistic,
   Table,
   Tag,
+  Tabs,
   Typography,
   message,
 } from "antd";
@@ -32,18 +33,123 @@ import {
 } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { MdReceiptLong } from "react-icons/md";
+import { useNavigate } from "react-router-dom";
 import { getReceiptDuesOverview, exportReceiptDues } from "../../../services/accountingService";
 import academyConfig from "../../../config/academyConfig";
 import {
   getCourses,
   getPaymentReceipt,
   getStudentPaymentHistory,
+  getStudentFeeStructures,
 } from "../../../services/feeService";
 import PaymentReceipt from "../../../components/forms/PaymentReceipt";
 import FeePaymentFormEnhanced from "../../../components/forms/FeePaymentFormEnhanced";
 
 const { Text } = Typography;
 const { RangePicker } = DatePicker;
+
+const buildStudentInstallmentRows = (feeStructures = [], payments = []) => {
+  const paymentMap = new Map();
+
+  payments.forEach((payment) => {
+    const feeStructureId = String(
+      payment?.feeStructure?._id || payment?.feeStructure || "",
+    );
+    const installmentKey = payment?.installmentNumber
+      ? `inst:${payment.installmentNumber}`
+      : "full";
+    const mapKey = `${feeStructureId}:${installmentKey}`;
+    const existing = paymentMap.get(mapKey);
+    const paymentTime = new Date(
+      payment?.paymentDate || payment?.createdAt || 0,
+    ).getTime();
+    const existingTime = existing
+      ? new Date(existing?.paymentDate || existing?.createdAt || 0).getTime()
+      : 0;
+
+    if (!existing || paymentTime >= existingTime) {
+      paymentMap.set(mapKey, payment);
+    }
+  });
+
+  return feeStructures.flatMap((feeStructure) => {
+    const course = feeStructure?.course || {};
+    const courseId = String(course?._id || feeStructure?.course || "");
+    const baseRow = {
+      feeStructureId: feeStructure?._id,
+      courseId,
+      courseName: course?.courseName || "Course",
+      courseCode: course?.courseId || "",
+      feeStructure,
+    };
+
+    if (Array.isArray(feeStructure?.installments) && feeStructure.installments.length) {
+      return feeStructure.installments.map((installment) => {
+        const paidAmount = Number(installment?.paidAmount || 0);
+        const amount = Number(installment?.amount || 0);
+        const remainingAmount = Math.max(0, amount - paidAmount);
+        const mapKey = `${feeStructure?._id}:inst:${installment.installmentNumber}`;
+        const linkedPayment = paymentMap.get(mapKey) || null;
+
+        return {
+          _id: `${feeStructure?._id}:${installment.installmentNumber}`,
+          ...baseRow,
+          description:
+            installment?.description || `Installment #${installment.installmentNumber}`,
+          installmentNumber: installment?.installmentNumber,
+          dueDate: installment?.dueDate || null,
+          amount,
+          paidAmount,
+          remainingAmount,
+          status:
+            remainingAmount <= 0
+              ? "Paid"
+              : paidAmount > 0
+                ? "Partial"
+                : installment?.status || "Pending",
+          receiptNo:
+            installment?.receiptNumber || linkedPayment?.receiptNo || null,
+          voucherNo: installment?.voucherNo || linkedPayment?.voucherNo || null,
+          paymentId: linkedPayment?._id || null,
+          linkedPayment,
+          selectedInstallment: installment,
+        };
+      });
+    }
+
+    const totalFee = Number(feeStructure?.totalFee || 0);
+    const paidAmount = Number(feeStructure?.paidAmount || 0);
+    const remainingAmount = Math.max(0, totalFee - paidAmount);
+    const mapKey = `${feeStructure?._id}:full`;
+    const linkedPayment = paymentMap.get(mapKey) || null;
+
+    return [
+      {
+        _id: `${feeStructure?._id}:full`,
+        ...baseRow,
+        description: "Full Payment",
+        installmentNumber: null,
+        dueDate: feeStructure?.createdAt || null,
+        amount: totalFee,
+        paidAmount,
+        remainingAmount,
+        status:
+          remainingAmount <= 0
+            ? "Paid"
+            : paidAmount > 0
+              ? "Partial"
+              : feeStructure?.feeStatus === "Overdue"
+                ? "Pending"
+                : feeStructure?.feeStatus || "Pending",
+        receiptNo: linkedPayment?.receiptNo || null,
+        voucherNo: linkedPayment?.voucherNo || null,
+        paymentId: linkedPayment?._id || null,
+        linkedPayment,
+        selectedInstallment: null,
+      },
+    ];
+  });
+};
 
 const formatCurrency = (value) =>
   `Rs ${Math.round(value || 0).toLocaleString("en-PK")}`;
@@ -141,6 +247,7 @@ const entryCards = [
 ];
 
 export default function Receipt() {
+  const navigate = useNavigate();
   const dueDatePresets = {
     this_month: [dayjs().startOf("month"), dayjs().endOf("month")],
     last_month: [
@@ -191,6 +298,10 @@ export default function Receipt() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRows, setHistoryRows] = useState([]);
   const [historyContext, setHistoryContext] = useState(null);
+  const [historyFeeStructures, setHistoryFeeStructures] = useState([]);
+  const [historyPayments, setHistoryPayments] = useState([]);
+  const [historyStatusTab, setHistoryStatusTab] = useState("all");
+  const [historyCourseFilter, setHistoryCourseFilter] = useState("all");
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [receiptData, setReceiptData] = useState(null);
   const [activeReceiptId, setActiveReceiptId] = useState(null);
@@ -198,6 +309,7 @@ export default function Receipt() {
   const [selectedFeeStructure, setSelectedFeeStructure] = useState(null);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [selectedInstallment, setSelectedInstallment] = useState(null);
+  const [selectedHistoryInstallments, setSelectedHistoryInstallments] = useState([]);
 
   useEffect(() => {
     fetchCourses();
@@ -331,25 +443,10 @@ export default function Receipt() {
     }
   };
 
-  const openHistory = async (row) => {
-    setHistoryLoading(true);
-    try {
-      const response = await getStudentPaymentHistory(
-        row.student?._id,
-        row.course?._id,
-      );
-      if (response?.success) {
-        setHistoryContext(row);
-        setHistoryRows(response.data?.payments || []);
-        setHistoryOpen(true);
-      } else {
-        message.error(response?.message || "Failed to load payment history");
-      }
-    } catch (error) {
-      message.error(error.message || "Failed to load payment history");
-    } finally {
-      setHistoryLoading(false);
-    }
+  const openHistory = (row) => {
+    navigate(`/dashboard/accounting/receipt/history/${row.student?._id}`, {
+      state: { studentRow: row },
+    });
   };
 
   const openPayment = (row) => {
@@ -366,6 +463,92 @@ export default function Receipt() {
     setSelectedStudent(row.student);
     setSelectedInstallment(row.selectedInstallment || null);
     setPaymentOpen(true);
+  };
+
+  const historyCourseOptions = Array.from(
+    new Map(
+      historyFeeStructures.map((item) => [
+        String(item?.course?._id || item?.course || ""),
+        {
+          label: item?.course?.courseName || "Course",
+          value: String(item?.course?._id || item?.course || ""),
+        },
+      ]),
+    ).values(),
+  );
+
+  const filteredHistoryRows = historyRows.filter((item) => {
+    if (historyStatusTab !== "all" && item.status !== historyStatusTab) {
+      return false;
+    }
+
+    if (
+      historyCourseFilter !== "all" &&
+      String(item.courseId || "") !== String(historyCourseFilter)
+    ) {
+      return false;
+    }
+
+    return true;
+  });
+
+  const selectableHistoryRows = filteredHistoryRows.filter(
+    (item) => item.status !== "Paid" && item.installmentNumber,
+  );
+
+  const selectedHistoryInstallmentRows = filteredHistoryRows.filter((item) =>
+    selectedHistoryInstallments.includes(item._id),
+  );
+
+  const selectedHistoryCourseId =
+    selectedHistoryInstallmentRows.length > 0
+      ? selectedHistoryInstallmentRows[0].courseId
+      : null;
+
+  const canPaySelectedInstallments =
+    selectedHistoryInstallmentRows.length > 0 &&
+    selectedHistoryInstallmentRows.every(
+      (item) => String(item.courseId || "") === String(selectedHistoryCourseId || ""),
+    );
+
+  const selectedHistoryFeeStructure =
+    historyCourseFilter !== "all"
+      ? historyFeeStructures.find(
+          (item) =>
+            String(item?.course?._id || item?.course || "") ===
+            String(historyCourseFilter),
+        ) || null
+      : null;
+
+  const historyRowSelection = {
+    selectedRowKeys: selectedHistoryInstallments,
+    onChange: (selectedRowKeys, selectedRows) => {
+      const validRows = selectedRows.filter(
+        (row) => row.status !== "Paid" && row.installmentNumber,
+      );
+      const firstCourseId = validRows[0]?.courseId || null;
+      const sameCourseRows = firstCourseId
+        ? validRows.filter(
+            (row) => String(row.courseId || "") === String(firstCourseId),
+          )
+        : [];
+
+      setSelectedHistoryInstallments(sameCourseRows.map((row) => row._id));
+
+      if (
+        validRows.length > 1 &&
+        sameCourseRows.length !== validRows.length
+      ) {
+        message.info("Please select installments from the same course only.");
+      }
+    },
+    getCheckboxProps: (record) => ({
+      disabled:
+        record.status === "Paid" ||
+        !record.installmentNumber ||
+        (selectedHistoryCourseId &&
+          String(record.courseId || "") !== String(selectedHistoryCourseId)),
+    }),
   };
 
   const columns = [
@@ -467,6 +650,11 @@ export default function Receipt() {
         <Space>
           <Button
             type="primary"
+            style={{
+              background: "var(--primary-color, #142d78)",
+              borderColor: "var(--primary-color, #142d78)",
+              color: "#ffffff",
+            }}
             onClick={() => openPayment(record)}
             disabled={record.dueStatus === "Paid"}
           >
@@ -474,12 +662,24 @@ export default function Receipt() {
           </Button>
           <Button
             icon={<EyeOutlined />}
+            style={{
+              borderColor: "var(--primary-color, #142d78)",
+              color: "var(--primary-color, #142d78)",
+            }}
             onClick={() => openReceipt(record.paymentId, record)}
             loading={receiptLoading && activeReceiptId === record.paymentId}
           >
             View Receipt
           </Button>
-          <Button onClick={() => openHistory(record)}>History</Button>
+          <Button
+            style={{
+              borderColor: "var(--primary-color, #142d78)",
+              color: "var(--primary-color, #142d78)",
+            }}
+            onClick={() => openHistory(record)}
+          >
+            History
+          </Button>
         </Space>
       ),
     },
@@ -487,16 +687,31 @@ export default function Receipt() {
 
   const historyColumns = [
     {
-      title: "Receipt",
-      dataIndex: "receiptNo",
-      key: "receiptNo",
-      render: (value) => <span className="font-mono text-xs">{value}</span>,
+      title: "Course",
+      dataIndex: "courseName",
+      key: "courseName",
+      render: (_, record) => (
+        <div>
+          <div className="font-semibold text-[#111827]">{record.courseName}</div>
+          <div className="text-xs text-gray-500">
+            {record.installmentNumber
+              ? `Inst #${record.installmentNumber}`
+              : "Full payment row"}
+          </div>
+        </div>
+      ),
     },
     {
-      title: "Date",
-      dataIndex: "paymentDate",
-      key: "paymentDate",
-      render: (value) => new Date(value).toLocaleDateString("en-GB"),
+      title: "Description",
+      dataIndex: "description",
+      key: "description",
+    },
+    {
+      title: "Due Date",
+      dataIndex: "dueDate",
+      key: "dueDate",
+      render: (value) =>
+        value ? dayjs(value).format("DD MMM YYYY") : <Text type="secondary">-</Text>,
     },
     {
       title: "Amount",
@@ -506,27 +721,65 @@ export default function Receipt() {
       render: (value) => formatCurrency(value),
     },
     {
-      title: "Method",
-      dataIndex: "paymentMethod",
-      key: "paymentMethod",
-      render: (value) => <Tag>{value}</Tag>,
+      title: "Paid",
+      dataIndex: "paidAmount",
+      key: "paidAmount",
+      align: "right",
+      render: (value) => (
+        <span className="font-semibold text-emerald-700">
+          {formatCurrency(value)}
+        </span>
+      ),
     },
     {
-      title: "Type",
-      dataIndex: "paymentType",
-      key: "paymentType",
-      render: (value) => <Tag color="cyan">{value}</Tag>,
+      title: "Remaining",
+      dataIndex: "remainingAmount",
+      key: "remainingAmount",
+      align: "right",
+      render: (value) => (
+        <span className="font-semibold text-amber-700">
+          {formatCurrency(value)}
+        </span>
+      ),
+    },
+    {
+      title: "Status",
+      dataIndex: "status",
+      key: "status",
+      render: (value) => <Tag color={statusConfig[value]?.color}>{value}</Tag>,
+    },
+    {
+      title: "Receipt",
+      dataIndex: "receiptNo",
+      key: "receiptNo",
+      render: (value) =>
+        value ? (
+          <span className="font-mono text-xs">{value}</span>
+        ) : (
+          <Text type="secondary">-</Text>
+        ),
     },
     {
       title: "Action",
       key: "action",
       render: (_, record) => (
-        <Button
-          size="small"
-          onClick={() => openReceipt(record._id, historyContext)}
-        >
-          Open Receipt
-        </Button>
+        <Space>
+          <Button
+            type="primary"
+            size="small"
+            disabled={record.status === "Paid"}
+            onClick={() => openPayment(record)}
+          >
+            Pay
+          </Button>
+          <Button
+            size="small"
+            onClick={() => openReceipt(record.paymentId, record)}
+            disabled={!record.paymentId}
+          >
+            View Receipt
+          </Button>
+        </Space>
       ),
     },
   ];
@@ -754,7 +1007,7 @@ export default function Receipt() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
           <Input
             allowClear
-            placeholder="Search student, reg no, course or receipt"
+            placeholder="Search student name, student ID, reg no, enrollment ID, course or receipt"
             prefix={<SearchOutlined />}
             className="!h-11 !rounded-xl"
             value={filters.search}
@@ -915,25 +1168,91 @@ export default function Receipt() {
         onCancel={() => {
           setHistoryOpen(false);
           setHistoryRows([]);
+          setHistoryFeeStructures([]);
+          setHistoryPayments([]);
           setHistoryContext(null);
+          setHistoryStatusTab("all");
+          setHistoryCourseFilter("all");
+          setSelectedHistoryInstallments([]);
         }}
         footer={null}
-        width={920}
+        width={1240}
         title={
           historyContext
-            ? `${historyContext.student?.studentName} - ${historyContext.course?.courseName} payment history`
-            : "Payment history"
+            ? `${historyContext.student?.studentName} installment history`
+            : "Installment history"
         }
       >
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="text-sm text-slate-500">
+            View all assigned-course installments for this student, filter by
+            status or course, and pay multiple pending installments for one selected course.
+          </div>
+          <Space wrap>
+            <Select
+              value={historyCourseFilter}
+              onChange={(value) => setHistoryCourseFilter(value)}
+              style={{ minWidth: 240 }}
+              options={[
+                { label: "All assigned courses", value: "all" },
+                ...historyCourseOptions,
+              ]}
+            />
+            <Button
+              type="primary"
+              disabled={!canPaySelectedInstallments}
+              onClick={() => {
+                if (!canPaySelectedInstallments || !historyContext?.student) return;
+                const targetFeeStructure =
+                  historyFeeStructures.find(
+                    (item) =>
+                      String(item?._id || "") ===
+                      String(selectedHistoryInstallmentRows[0]?.feeStructureId || ""),
+                  ) || null;
+                if (!targetFeeStructure) return;
+
+                setSelectedFeeStructure(targetFeeStructure);
+                setSelectedStudent(historyContext.student);
+                setSelectedInstallment(null);
+                setPaymentOpen(true);
+              }}
+            >
+              Pay Selected Installments
+            </Button>
+          </Space>
+        </div>
+
+        <Tabs
+          activeKey={historyStatusTab}
+          onChange={setHistoryStatusTab}
+          items={[
+            { key: "all", label: `All (${historyRows.length})` },
+            {
+              key: "Pending",
+              label: `Pending (${historyRows.filter((item) => item.status === "Pending").length})`,
+            },
+            {
+              key: "Partial",
+              label: `Partial (${historyRows.filter((item) => item.status === "Partial").length})`,
+            },
+            {
+              key: "Paid",
+              label: `Paid (${historyRows.filter((item) => item.status === "Paid").length})`,
+            },
+          ]}
+        />
+
         <Table
           rowKey="_id"
+          rowSelection={historyRowSelection}
           columns={historyColumns}
-          dataSource={historyRows}
+          dataSource={filteredHistoryRows}
           loading={historyLoading}
-          pagination={{ pageSize: 6 }}
+          pagination={{ pageSize: 8 }}
           locale={{
-            emptyText: <Empty description="No payment history available" />,
+            emptyText: <Empty description="No installment history available" />,
           }}
+          scroll={{ x: 1100 }}
         />
       </Modal>
 
@@ -959,17 +1278,25 @@ export default function Receipt() {
           setSelectedFeeStructure(null);
           setSelectedStudent(null);
           setSelectedInstallment(null);
+          setSelectedHistoryInstallments([]);
         }}
         onPaymentSuccess={() => {
           setPaymentOpen(false);
           setSelectedFeeStructure(null);
           setSelectedStudent(null);
           setSelectedInstallment(null);
+          setSelectedHistoryInstallments([]);
           fetchReceiptOverview();
+          if (historyOpen && historyContext?.student?._id) {
+            openHistory(historyContext);
+          }
         }}
         feeStructure={selectedFeeStructure}
         studentInfo={selectedStudent}
         selectedInstallment={selectedInstallment}
+        initialSelectedInstallments={selectedHistoryInstallmentRows.map(
+          (item) => item.installmentNumber,
+        )}
       />
     </div>
   );

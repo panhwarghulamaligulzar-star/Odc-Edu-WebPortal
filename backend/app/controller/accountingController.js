@@ -2543,8 +2543,10 @@ export const getReceiptDuesOverview = async (req, res) => {
 
       return [
         row.student?.studentName,
+        row.student?._id,
         row.student?.registrationNo,
         row.student?.mobileNumber,
+        row.enrollment?._id,
         row.course?.courseName,
         row.course?.courseId,
         row.description,
