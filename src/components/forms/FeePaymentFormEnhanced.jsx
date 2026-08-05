@@ -181,6 +181,7 @@ const FeePaymentFormEnhanced = ({
             chequeNo: values.chequeNo,
             bankName: values.bankName,
             voucherNo: voucherNum,
+            remarks: values.remarks,
             installmentNumber: row.installmentNumber,
             paymentType: "Installment",
           };
@@ -244,6 +245,7 @@ const FeePaymentFormEnhanced = ({
             chequeNo: values.chequeNo,
             bankName: values.bankName,
             voucherNo: voucherNum,
+            remarks: values.remarks,
             installmentNumber: instNum,
             paymentType: "Installment",
           };
@@ -294,6 +296,7 @@ const FeePaymentFormEnhanced = ({
         chequeNo: values.chequeNo,
         bankName: values.bankName,
         voucherNo: voucherNum,
+        remarks: values.remarks,
         installmentNumber: selectedInstallment?.installmentNumber || null,
         paymentType: selectedInstallment
           ? "Installment"
@@ -852,6 +855,18 @@ const FeePaymentFormEnhanced = ({
               placeholder="Auto-generated"
               disabled
               className="bg-gray-100"
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="remarks"
+            label="Admin Note"
+          >
+            <TextArea
+              rows={4}
+              placeholder="Enter admin note for this installment payment"
+              maxLength={500}
+              showCount
             />
           </Form.Item>
         </Form>

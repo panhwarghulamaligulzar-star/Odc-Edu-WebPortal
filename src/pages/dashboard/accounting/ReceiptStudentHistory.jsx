@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   Button,
   Card,
+  DatePicker,
   Empty,
   Select,
   Space,
@@ -63,6 +64,7 @@ export default function ReceiptStudentHistory() {
   const [payments, setPayments] = useState([]);
   const [historyStatusTab, setHistoryStatusTab] = useState("all");
   const [historyCourseFilter, setHistoryCourseFilter] = useState("all");
+  const [historyMonthFilter, setHistoryMonthFilter] = useState(null);
   const [selectedHistoryInstallments, setSelectedHistoryInstallments] = useState([]);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [selectedFeeStructure, setSelectedFeeStructure] = useState(null);
@@ -132,10 +134,23 @@ export default function ReceiptStudentHistory() {
     );
   }, [historyRows, historyCourseFilter]);
 
+  const monthScopedRows = useMemo(() => {
+    if (!historyMonthFilter) return courseScopedRows;
+
+    return courseScopedRows.filter((item) => {
+      if (!item.dueDate) return false;
+      const dueDate = dayjs(item.dueDate);
+      return (
+        dueDate.isValid() &&
+        dueDate.month() === historyMonthFilter.month()
+      );
+    });
+  }, [courseScopedRows, historyMonthFilter]);
+
   const filteredHistoryRows = useMemo(() => {
-    if (historyStatusTab === "all") return courseScopedRows;
-    return courseScopedRows.filter((item) => item.status === historyStatusTab);
-  }, [courseScopedRows, historyStatusTab]);
+    if (historyStatusTab === "all") return monthScopedRows;
+    return monthScopedRows.filter((item) => item.status === historyStatusTab);
+  }, [monthScopedRows, historyStatusTab]);
 
   const filteredSummary = useMemo(
     () =>
@@ -367,7 +382,7 @@ export default function ReceiptStudentHistory() {
               {selectedStudent?.studentName || "Student"} Installment History
             </h2>
             <p className="module-subtitle !mb-0">
-              View all assigned-course installments, filter by status or course, and record payments in your existing receipt flow.
+              View all assigned-course installments, filter by course, month, or status, and record payments in your existing receipt flow.
             </p>
           </div>
           <div className="text-sm text-slate-500">
@@ -433,6 +448,18 @@ export default function ReceiptStudentHistory() {
                 ...historyCourseOptions,
               ]}
             />
+            <DatePicker
+              picker="month"
+              allowClear
+              value={historyMonthFilter}
+              onChange={(value) => {
+                setHistoryMonthFilter(value);
+                setSelectedHistoryInstallments([]);
+              }}
+              placeholder="Filter by month"
+              style={{ minWidth: 180 }}
+              format="MMMM YYYY"
+            />
             <Button
               type="primary"
               disabled={!canPaySelectedInstallments}
@@ -459,18 +486,18 @@ export default function ReceiptStudentHistory() {
             setSelectedHistoryInstallments([]);
           }}
           items={[
-            { key: "all", label: `All (${courseScopedRows.length})` },
+            { key: "all", label: `All (${monthScopedRows.length})` },
             {
               key: "Pending",
-              label: `Pending (${courseScopedRows.filter((item) => item.status === "Pending").length})`,
+              label: `Pending (${monthScopedRows.filter((item) => item.status === "Pending").length})`,
             },
             {
               key: "Partial",
-              label: `Partial (${courseScopedRows.filter((item) => item.status === "Partial").length})`,
+              label: `Partial (${monthScopedRows.filter((item) => item.status === "Partial").length})`,
             },
             {
               key: "Paid",
-              label: `Paid (${courseScopedRows.filter((item) => item.status === "Paid").length})`,
+              label: `Paid (${monthScopedRows.filter((item) => item.status === "Paid").length})`,
             },
           ]}
         />
