@@ -47,6 +47,8 @@ const FeePaymentFormEnhanced = ({
   feeStructure,
   studentInfo,
   selectedInstallment = null,
+  initialSelectedInstallments = [],
+  initialSelectedPaymentRows = [],
 }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
@@ -57,6 +59,7 @@ const FeePaymentFormEnhanced = ({
   const [payMultiple, setPayMultiple] = useState(false);
   const [accountingMethods, setAccountingMethods] = useState([]);
   const [methodsLoading, setMethodsLoading] = useState(false);
+  const hasMixedCourseSelection = initialSelectedPaymentRows.length > 0;
 
   // Fetch real accounting payment methods on mount
   useEffect(() => {
@@ -142,6 +145,82 @@ const FeePaymentFormEnhanced = ({
     try {
       let paymentPayload;
 
+      if (hasMixedCourseSelection) {
+        const payableRows = initialSelectedPaymentRows.filter(
+          (row) =>
+            row.installmentNumber &&
+            row.status !== "Paid" &&
+            Number(row.remainingAmount || 0) > 0,
+        );
+
+        if (payableRows.length === 0) {
+          message.warning("No pending installments selected for payment.");
+          return;
+        }
+
+        const results = [];
+        for (const row of payableRows) {
+          const voucherResponse = await getNextVoucherNumber();
+          const voucherNum = voucherResponse.success
+            ? voucherResponse.data.voucherNo
+            : String(results.length + 1).padStart(3, "0");
+
+          const rowPayload = {
+            studentId:
+              row.studentId ||
+              feeStructure?.student?._id ||
+              feeStructure?.student ||
+              studentInfo?._id,
+            courseId: row.courseId,
+            feeStructureId: row.feeStructureId,
+            amount: Number(row.remainingAmount || 0),
+            paymentDate: values.paymentDate.toDate(),
+            paymentMethod: getMethodName(values.accountingPaymentMethodId),
+            accountingPaymentMethodId: values.accountingPaymentMethodId || null,
+            transactionId: values.transactionId,
+            chequeNo: values.chequeNo,
+            bankName: values.bankName,
+            voucherNo: voucherNum,
+            remarks: values.remarks,
+            installmentNumber: row.installmentNumber,
+            paymentType: "Installment",
+          };
+
+          const response = await recordFeePayment(rowPayload);
+          if (response.success) {
+            results.push(response.data);
+          }
+        }
+
+        if (results.length > 0) {
+          const totalPaid = payableRows.reduce(
+            (sum, row) => sum + Number(row.remainingAmount || 0),
+            0,
+          );
+          message.success(
+            `Successfully paid ${results.length} installment(s) for ${formatCurrency(totalPaid)}.`,
+          );
+
+          const lastPayment = results[results.length - 1];
+          const enrichedPaymentData = {
+            ...lastPayment.payment,
+            student: {
+              ...lastPayment.payment.student,
+              ...studentInfo,
+            },
+            feeStructure: lastPayment.feeStructure,
+          };
+          setPaymentData(enrichedPaymentData);
+          setReceiptVisible(true);
+          form.resetFields();
+          setSelectedInstallments([]);
+          if (onPaymentSuccess) {
+            onPaymentSuccess(lastPayment);
+          }
+        }
+        return;
+      }
+
       if (payMultiple && selectedInstallments.length > 0) {
         // Pay multiple installments
         const results = [];
@@ -166,6 +245,7 @@ const FeePaymentFormEnhanced = ({
             chequeNo: values.chequeNo,
             bankName: values.bankName,
             voucherNo: voucherNum,
+            remarks: values.remarks,
             installmentNumber: instNum,
             paymentType: "Installment",
           };
@@ -216,6 +296,7 @@ const FeePaymentFormEnhanced = ({
         chequeNo: values.chequeNo,
         bankName: values.bankName,
         voucherNo: voucherNum,
+        remarks: values.remarks,
         installmentNumber: selectedInstallment?.installmentNumber || null,
         paymentType: selectedInstallment
           ? "Installment"
@@ -271,12 +352,56 @@ const FeePaymentFormEnhanced = ({
   useEffect(() => {
     if (visible) {
       form.resetFields();
-      setSelectedInstallments([]);
-      setPayMultiple(false);
+      setSelectedInstallments(initialSelectedInstallments);
+      setPayMultiple(
+        hasMixedCourseSelection || initialSelectedInstallments.length > 0,
+      );
     }
-  }, [visible, form]);
+  }, [
+    visible,
+    form,
+    hasMixedCourseSelection,
+    initialSelectedInstallments,
+  ]);
+
+  useEffect(() => {
+    if (!visible) return;
+
+    if (hasMixedCourseSelection) {
+      const totalAmount = initialSelectedPaymentRows.reduce(
+        (sum, row) => sum + Number(row.remainingAmount || 0),
+        0,
+      );
+      form.setFieldsValue({ amount: totalAmount });
+      return;
+    }
+
+    if (initialSelectedInstallments.length > 0) {
+      const totalAmount = initialSelectedInstallments.reduce((sum, instNum) => {
+        const inst = feeStructure?.installments?.find(
+          (item) => item.installmentNumber === instNum,
+        );
+        return sum + (inst ? inst.amount - (inst.paidAmount || 0) : 0);
+      }, 0);
+
+      form.setFieldsValue({ amount: totalAmount });
+    }
+  }, [
+    visible,
+    hasMixedCourseSelection,
+    initialSelectedInstallments,
+    initialSelectedPaymentRows,
+    feeStructure,
+    form,
+  ]);
 
   const getDefaultAmount = () => {
+    if (hasMixedCourseSelection) {
+      return initialSelectedPaymentRows.reduce(
+        (sum, row) => sum + Number(row.remainingAmount || 0),
+        0,
+      );
+    }
     if (selectedInstallment) {
       return selectedInstallment.amount - (selectedInstallment.paidAmount || 0);
     }
@@ -287,6 +412,12 @@ const FeePaymentFormEnhanced = ({
   };
 
   const getMaxAmount = () => {
+    if (hasMixedCourseSelection) {
+      return initialSelectedPaymentRows.reduce(
+        (sum, row) => sum + Number(row.remainingAmount || 0),
+        0,
+      );
+    }
     if (selectedInstallment) {
       return selectedInstallment.amount - (selectedInstallment.paidAmount || 0);
     }
@@ -335,19 +466,23 @@ const FeePaymentFormEnhanced = ({
               {studentInfo?.registrationNo || "N/A"}
             </Descriptions.Item>
             <Descriptions.Item label="Course">
-              {feeStructure?.course?.courseName || "N/A"}
+              {hasMixedCourseSelection
+                ? `${new Set(initialSelectedPaymentRows.map((item) => item.courseName).filter(Boolean)).size} course(s) selected`
+                : feeStructure?.course?.courseName || "N/A"}
             </Descriptions.Item>
             <Descriptions.Item label="Fee Status">
               <Tag
                 color={
-                  feeStructure?.feeStatus === "Paid"
+                  hasMixedCourseSelection
+                    ? "blue"
+                    : feeStructure?.feeStatus === "Paid"
                     ? "green"
                     : feeStructure?.feeStatus === "Partial"
                       ? "orange"
                       : "red"
                 }
               >
-                {feeStructure?.feeStatus || "N/A"}
+                {hasMixedCourseSelection ? "Batch Payment" : feeStructure?.feeStatus || "N/A"}
               </Tag>
             </Descriptions.Item>
           </Descriptions>
@@ -360,7 +495,14 @@ const FeePaymentFormEnhanced = ({
                 Total Fee
               </Text>
               <div className="text-lg font-bold">
-                {formatCurrency(feeStructure?.totalFee)}
+                {formatCurrency(
+                  hasMixedCourseSelection
+                    ? initialSelectedPaymentRows.reduce(
+                        (sum, row) => sum + Number(row.amount || 0),
+                        0,
+                      )
+                    : feeStructure?.totalFee,
+                )}
               </div>
             </div>
             <div className="text-center">
@@ -368,7 +510,14 @@ const FeePaymentFormEnhanced = ({
                 Paid Amount
               </Text>
               <div className="text-lg font-bold text-green-600">
-                {formatCurrency(feeStructure?.paidAmount)}
+                {formatCurrency(
+                  hasMixedCourseSelection
+                    ? initialSelectedPaymentRows.reduce(
+                        (sum, row) => sum + Number(row.paidAmount || 0),
+                        0,
+                      )
+                    : feeStructure?.paidAmount,
+                )}
               </div>
             </div>
             <div className="text-center">
@@ -376,17 +525,65 @@ const FeePaymentFormEnhanced = ({
                 Remaining
               </Text>
               <div className="text-lg font-bold text-red-600">
-                {formatCurrency(feeStructure?.remainingAmount)}
+                {formatCurrency(
+                  hasMixedCourseSelection
+                    ? initialSelectedPaymentRows.reduce(
+                        (sum, row) => sum + Number(row.remainingAmount || 0),
+                        0,
+                      )
+                    : feeStructure?.remainingAmount,
+                )}
               </div>
             </div>
           </div>
         </Card>
 
+        {hasMixedCourseSelection && (
+          <Card
+            size="small"
+            className="mb-4 border border-gray-200"
+            title={
+              <span className="text-sm font-semibold text-gray-700">
+                Selected Installments
+              </span>
+            }
+          >
+            <div className="space-y-3">
+              {initialSelectedPaymentRows.map((row) => (
+                <div
+                  key={row.rowId}
+                  className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="font-medium text-slate-800">
+                        {row.courseName || "Course"} - Installment #{row.installmentNumber}
+                      </div>
+                      <div className="text-sm text-slate-500">
+                        {row.description || "Installment payment"}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-semibold text-red-600">
+                        {formatCurrency(row.remainingAmount)}
+                      </div>
+                      <div className="text-xs text-slate-500">
+                        Due {row.dueDate ? dayjs(row.dueDate).format("DD MMM YYYY") : "-"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
         {/* Pay Multiple Installments Option */}
-        {!selectedInstallment && payableInstallments.length > 0 && (
+        {!hasMixedCourseSelection && !selectedInstallment && payableInstallments.length > 0 && (
           <Card size="small" className="mb-4">
             <Checkbox
               checked={payMultiple}
+              disabled={initialSelectedInstallments.length > 0}
               onChange={(e) => setPayMultiple(e.target.checked)}
             >
               <Text strong>Pay Multiple Installments at Once</Text>
@@ -567,7 +764,10 @@ const FeePaymentFormEnhanced = ({
                 `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
               }
               parser={(value) => value.replace(/\$\s?|(,*)/g, "")}
-              disabled={payMultiple && selectedInstallments.length > 0}
+              disabled={
+                hasMixedCourseSelection ||
+                (payMultiple && selectedInstallments.length > 0)
+              }
             />
           </Form.Item>
 
@@ -655,6 +855,18 @@ const FeePaymentFormEnhanced = ({
               placeholder="Auto-generated"
               disabled
               className="bg-gray-100"
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="remarks"
+            label="Admin Note"
+          >
+            <TextArea
+              rows={4}
+              placeholder="Enter admin note for this installment payment"
+              maxLength={500}
+              showCount
             />
           </Form.Item>
         </Form>

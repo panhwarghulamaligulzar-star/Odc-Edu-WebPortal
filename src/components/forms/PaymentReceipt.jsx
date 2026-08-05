@@ -289,6 +289,11 @@ const PaymentReceipt = ({ visible, onClose, paymentData, institutionInfo }) => {
                 {paymentData.voucherNo}
               </Descriptions.Item>
             )}
+            {paymentData.remarks && (
+              <Descriptions.Item label="Admin Note">
+                {paymentData.remarks}
+              </Descriptions.Item>
+            )}
           </Descriptions>
         </Card>
 

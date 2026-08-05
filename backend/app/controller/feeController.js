@@ -89,7 +89,7 @@ const getNextReceiptNumber = async (prefix = "RCP", paymentDate = new Date()) =>
     ? Number(latestSequenceMatch[1]) + 1
     : 1;
 
-  return generateReceiptNumber(prefix, nextSequence);
+  return generateReceiptNumber(prefix, nextSequence, date);
 };
 
 // Create or Update Fee Structure
@@ -312,6 +312,40 @@ export const getStudentFeeStructures = async (req, res) => {
   }
 };
 
+const inferPreferredIncomeHeadName = (feeStructure, installmentNumber) => {
+  const normalizedInstallmentNumber = Number(installmentNumber || 0);
+  const targetInstallment = Array.isArray(feeStructure?.installments)
+    ? feeStructure.installments.find(
+        (item) => Number(item?.installmentNumber) === normalizedInstallmentNumber,
+      )
+    : null;
+
+  const feeComponents = targetInstallment?.feeComponents || {};
+  const headCandidates = [
+    { key: "admissionFee", label: "Admission Fee" },
+    { key: "courseFee", label: "Course Fees" },
+    { key: "certificateFee", label: "Certificate Fee" },
+    { key: "examFee", label: "Exam Fee" },
+    { key: "registrationFee", label: "Registration Fee" },
+    { key: "practicalFee", label: "Practical Fee" },
+    { key: "otherFee", label: "Other Fee" },
+  ].filter((item) => Number(feeComponents?.[item.key] || 0) > 0);
+
+  if (headCandidates.length === 1) {
+    return headCandidates[0].label;
+  }
+
+  const description = String(targetInstallment?.description || "").toLowerCase();
+  if (description.includes("admission")) return "Admission Fee";
+  if (description.includes("certificate")) return "Certificate Fee";
+  if (description.includes("exam")) return "Exam Fee";
+  if (description.includes("registration")) return "Registration Fee";
+  if (description.includes("practical")) return "Practical Fee";
+  if (description.includes("other")) return "Other Fee";
+
+  return "Course Fees";
+};
+
 // Record a fee payment
 export const recordFeePayment = async (req, res) => {
   try {
@@ -455,9 +489,12 @@ export const recordFeePayment = async (req, res) => {
     };
 
     // ── Auto accounting entry (non-blocking) ───────────────
-    createAutoAccountingEntry({
+    await createAutoAccountingEntry({
       entryType: "Income",
-      preferredHeadName: "Course Fees",
+      preferredHeadName: inferPreferredIncomeHeadName(
+        feeStructure,
+        installmentNumber,
+      ),
       amount: normalizedAmount,
       paymentDate: resolvedPaymentDate,
       studentName: populatedPayment?.student?.studentName || "Student",

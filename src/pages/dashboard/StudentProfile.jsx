@@ -35,6 +35,7 @@ import {
   CalendarOutlined,
   ReloadOutlined,
   PrinterOutlined,
+  GlobalOutlined,
 } from "@ant-design/icons";
 import {
   FaUser,
@@ -61,6 +62,8 @@ import StudentFeeProfile from "./StudentFeeProfile";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
 import odysseyLogo from "../../assets/images/logos/LOGO.png";
+import sidebarLogo from "../../assets/images/logos/ODC-PNG.jpg";
+import academyConfig from "../../config/academyConfig";
 
 const THEME = "#01134C";
 const ACCENT = "#E8FC0A";
@@ -1125,6 +1128,11 @@ const StudentProfile = () => {
       "N/A";
     const emailAddress = student?.emailAddress || "N/A";
     const guardianName = student?.fatherName || student?.guardianName || "N/A";
+    const admissionNo =
+      student?.admissionNo || student?.registrationNo || student?._id || "N/A";
+    const rollNo =
+      student?.rollNo || student?.studentRollNo || student?.registrationNo || "N/A";
+    const dob = fmtIdDate(student?.dateOfBirth);
     const attendanceQrValue = JSON.stringify({
       type: "student_attendance",
       studentId: student?._id || student?.id || "",
@@ -1160,12 +1168,25 @@ const StudentProfile = () => {
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 id-card-grid">
           <div className="id-card-shell">
             <div className="student-id-card student-id-front">
-              <div className="id-front-side-navy" />
-              <div className="id-front-side-gold" />
-              <div className="id-front-bottom-gold" />
+              <div className="id-card-lanyard-slot" />
+              <div className="id-front-top-navy" />
+              <div className="id-front-top-gold" />
+              <div className="id-front-top-white-swoosh" />
+              <div className="id-front-campus-fade" />
+              <div className="id-front-bottom-gold-wave" />
               <div className="id-front-bottom-navy-band" />
 
-              <div className="id-card-photo-wrap">
+              <div className="id-front-header">
+                <div className="id-front-title-main !text-[30px]">ODYSSEY</div>
+                <div className="id-front-title-sub">ACADEMY KHIPRO</div>
+                <div className="id-front-title-rule">
+                  <span />
+                  <em>Where Success Begins.</em>
+                  <span />
+                </div>
+              </div>
+
+              <div className="id-card-photo-frame !h-[130px]">
                 {student?.profilePicture ? (
                   <img
                     src={student.profilePicture}
@@ -1174,66 +1195,108 @@ const StudentProfile = () => {
                   />
                 ) : (
                   <div className="id-card-photo id-card-photo-fallback">
-                    <FaUser size={74} color="#94A3B8" />
+                    <FaUser size={94} color="#a3a3a3" />
                   </div>
                 )}
               </div>
 
-              <div className="id-card-brand-simple">
-                <div className="id-card-brand-simple-title">
-                  {student?.studentName || "Student Name"}
-                </div>
-                <div className="id-card-brand-simple-subtitle">{courseName}</div>
+              <div className="id-card-nameplate !text-[14px]">
+                {student?.studentName || "STUDENT NAME"}
               </div>
 
-              <div className="id-card-details">
-                <div><span>ID</span><strong>{studentCode}</strong></div>
-                <div><span>DOB</span><strong>{fmtIdDate(student?.dateOfBirth)}</strong></div>
-                <div><span>Phone</span><strong>{contactNumber}</strong></div>
-                <div><span>Join</span><strong>{joinDate}</strong></div>
-                <div><span>Email</span><strong>{emailAddress}</strong></div>
+              <div className="id-card-detail-lines">
+                <div className="id-card-detail-row">
+                  <span>FATHER&apos;S NAME</span>
+                  <strong>{guardianName}</strong>
+                </div>
+                <div className="id-card-detail-row">
+                  <span>CLASS</span>
+                  <strong>{courseName}</strong>
+                </div>
+                <div className="id-card-detail-row">
+                  <span>ROLL NO.</span>
+                  <strong>{rollNo}</strong>
+                </div>
+                <div className="id-card-detail-row">
+                  <span>ADMISSION NO.</span>
+                  <strong>{admissionNo}</strong>
+                </div>
+                <div className="id-card-detail-row">
+                  <span>DATE OF BIRTH</span>
+                  <strong>{dob}</strong>
+                </div>
               </div>
 
               <div className="id-front-qr-block">
                 <div className="id-front-qr-shell">
                   <QRCode
                     value={attendanceQrValue}
-                    size={72}
+                    size={82}
                     bordered={false}
                     color="#152b57"
                     bgColor="#ffffff"
                   />
                 </div>
               </div>
+
+              <div className="id-front-signature-block">
+                <div className="id-front-signature-mark">Authorized Signature</div>
+                <div className="id-front-signature-line" />
+              </div>
             </div>
           </div>
 
           <div className="id-card-shell">
             <div className="student-id-card student-id-back">
-              <div className="id-back-main">
-                <div className="id-back-logo-badge">
-                  <img src={odysseyLogo} alt="Odyssey Academy" className="id-back-logo-large" />
+              <div className="id-card-lanyard-slot id-card-lanyard-slot-back" />
+              <div className="id-back-top-navy" />
+              <div className="id-back-top-gold" />
+              <div className="id-back-top-white-body" />
+              <div className="id-back-bottom-navy-block" />
+
+              <div className="id-back-logo-wrap">
+                <div className="id-back-logo-ring">
+                  <img
+                    src={sidebarLogo}
+                    alt="Odyssey Academy"
+                    className="id-back-logo-large"
+                  />
                 </div>
-                <div className="id-back-logo-title">ODYSSEY ACADEMY</div>
-                <div className="id-back-logo-subtitle">Student Identity Card</div>
               </div>
 
-              <div className="id-card-back-title">Terms & Conditions</div>
+              <div className="id-card-back-title">
+                <span />
+                <strong>INSTRUCTIONS</strong>
+                <span />
+              </div>
 
               <div className="id-card-back-points">
-                <div>This card is valid only for the enrolled active student.</div>
-                <div>Carry this card during classes, exams and campus visits.</div>
-                <div>Report loss of this card to the academy immediately.</div>
+                <div>This ID Card is the property of Odyssey Academy Khipro.</div>
+                <div>This ID Card is non-transferable.</div>
+                <div>Student must carry this ID Card during class hours.</div>
+                <div>This ID Card must be shown on demand.</div>
+                <div>Loss of this card must be reported immediately.</div>
               </div>
 
-              <div className="id-back-dates">
-                <div>JOIN DATE : {joinDate}</div>
-                <div>EXPIRE DATE : {expiryDate}</div>
-              </div>
+              <div className="id-back-divider" />
 
-              <div className="id-back-bottom-gold" />
-              <div className="id-back-bottom-navy-band">
-                <div className="id-back-bottom-text">odysseyacademy.edu.pk</div>
+              <div className="id-back-contact-block">
+                <div className="id-back-contact-row">
+                  <EnvironmentOutlined />
+                  <span>{academyConfig.address}</span>
+                </div>
+                <div className="id-back-contact-row">
+                  <PhoneOutlined />
+                  <span>{contactNumber !== "N/A" ? contactNumber : academyConfig.phone}</span>
+                </div>
+                <div className="id-back-contact-row">
+                  <GlobalOutlined />
+                  <span>{academyConfig.website}</span>
+                </div>
+                <div className="id-back-date-row">
+                  <span>Join: {joinDate}</span>
+                  <span>Expire: {expiryDate}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -1317,7 +1380,7 @@ const StudentProfile = () => {
         >
           Students
         </Button>
-        <Divider type="vertical" />
+        <div className="h-6 w-px bg-gray-200" />
         <div className="flex items-center gap-2">
           <div
             className="w-8 h-8 rounded-lg flex items-center justify-center"
@@ -1576,13 +1639,13 @@ const StudentProfile = () => {
         }
         .student-id-card {
           position: relative;
-          width: min(100%, 392px);
-          aspect-ratio: 0.66;
+          width: min(100%, 370px);
+          min-height: 690px;
           background: #ffffff;
-          border-radius: 0;
+          border-radius: 26px;
           overflow: hidden;
-          box-shadow: 0 18px 34px rgba(15, 23, 42, 0.22);
-          border: 1px solid rgba(15, 23, 42, 0.08);
+          box-shadow: 0 24px 55px rgba(15, 23, 42, 0.2);
+          border: 1px solid rgba(15, 23, 42, 0.1);
           padding: 0;
         }
         .student-id-front,
@@ -1590,367 +1653,676 @@ const StudentProfile = () => {
           color: #0f172a;
         }
         .student-id-front {
-          background: #ffffff;
+          background:
+            radial-gradient(circle at 15% 22%, rgba(212, 175, 55, 0.08) 0, rgba(212, 175, 55, 0) 18%),
+            repeating-radial-gradient(circle at 50% 44%, rgba(20, 45, 120, 0.03) 0 2px, rgba(255, 255, 255, 0.95) 2px 8px),
+            linear-gradient(180deg, #ffffff 0%, #fffef8 100%);
         }
         .student-id-back {
-          background: #152b57;
+          background: #ffffff;
           color: #ffffff;
         }
-        .id-front-side-navy,
-        .id-front-side-gold,
-        .id-front-bottom-gold,
+        .id-card-lanyard-slot,
+        .id-front-top-navy,
+        .id-front-top-gold,
+        .id-front-top-white-swoosh,
+        .id-front-campus-fade,
+        .id-front-bottom-gold-wave,
         .id-front-bottom-navy-band,
-        .id-back-bottom-gold,
-        .id-back-bottom-navy-band {
+        .id-back-top-navy,
+        .id-back-top-gold,
+        .id-back-top-white-body,
+        .id-back-bottom-navy-block {
           position: absolute;
           pointer-events: none;
         }
-        .id-front-side-navy {
+        .id-card-lanyard-slot {
+          top: 28px;
+          left: 50%;
+          transform: translateX(-50%);
+          width: 92px;
+          height: 20px;
+          border-radius: 999px;
+          background: #ffffff;
+          z-index: 5;
+          box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08), 0 3px 8px rgba(15, 23, 42, 0.1);
+        }
+        .id-card-lanyard-slot-back {
+          background: #f8fafc;
+        }
+        .id-front-top-navy {
           top: 0;
-          right: 0;
-          width: 42px;
-          height: 100%;
-          background: #152b57;
-        }
-        .id-front-side-gold {
-          top: 158px;
-          right: 0;
-          width: 42px;
-          height: 124px;
-          background: #d79d19;
-          clip-path: polygon(0 0, 100% 30%, 100% 100%, 0 100%);
-        }
-        .id-front-bottom-gold {
           left: 0;
-          right: 42px;
-          bottom: 96px;
+          right: 0;
+          height: 144px;
+          background: #112d68;
+          clip-path: ellipse(128% 100% at 50% 0%);
+        }
+        .id-front-top-gold {
+          top: 28px;
+          left: -28px;
+          right: -28px;
+          height: 122px;
+          background: linear-gradient(90deg, #c58b11 0%, #f0c75a 48%, #c58b11 100%);
+          clip-path: ellipse(118% 100% at 50% 0%);
+        }
+        .id-front-top-white-swoosh {
+          top: 33px;
+          left: 6px;
+          right: 6px;
+          height: 120px;
+          background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(255,255,255,1) 100%);
+          clip-path: ellipse(120% 100% at 50% 0%);
+        }
+        .id-front-campus-fade {
+          left: 0;
+          right: 0;
+          bottom: 176px;
           height: 220px;
-          background: #d79d19;
-          clip-path: ellipse(112% 100% at 0% 100%);
+          background:
+            linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.85) 70%, #fff 100%),
+            url("${odysseyLogo}") center 60% / 170px auto no-repeat;
+          opacity: 0.08;
+        }
+        .id-front-bottom-gold-wave {
+          left: -36px;
+          right: -36px;
+          bottom: 90px;
+          height: 172px;
+          background: linear-gradient(90deg, #e4af17 0%, #c99011 100%);
+          border-top-left-radius: 58% 100%;
+          border-top-right-radius: 58% 100%;
+          border-bottom-left-radius: 0;
+          border-bottom-right-radius: 0;
         }
         .id-front-bottom-navy-band {
           left: 0;
           right: 0;
           bottom: 0;
-          height: 96px;
-          background: #152b57;
+          height: 88px;
+          background: #112d68;
         }
-        .id-back-bottom-gold {
+        .id-back-top-navy {
+          top: 0;
           left: 0;
           right: 0;
-          bottom: 96px;
-          height: 196px;
-          background: #d79d19;
-          clip-path: ellipse(128% 100% at 100% 100%);
+          height: 250px;
+          background: #112d68;
         }
-        .id-back-bottom-navy-band {
+        .id-back-top-gold {
+          top: 136px;
+          left: -34px;
+          right: -34px;
+          height: 92px;
+          background: linear-gradient(90deg, #c58b11 0%, #f0c75a 48%, #c58b11 100%);
+          border-top-left-radius: 58% 100%;
+          border-top-right-radius: 58% 100%;
+        }
+        .id-back-top-white-body {
+          top: 154px;
+          left: 0;
+          right: 0;
+          bottom: 150px;
+          background: #ffffff;
+          border-top-left-radius: 58% 14%;
+          border-top-right-radius: 58% 14%;
+        }
+        .id-back-bottom-navy-block {
           left: 0;
           right: 0;
           bottom: 0;
-          height: 96px;
-          background: #102244;
+          height: 172px;
+          background: #112d68;
         }
-        .id-card-brand {
-          display: none;
-        }
-        .id-card-logo {
-          width: 94px;
-          height: 94px;
-          object-fit: contain;
-          border-radius: 999px;
-          background: #ffffff;
-          padding: 8px;
-          box-shadow: 0 10px 25px rgba(15, 23, 42, 0.12);
-          border: 4px solid #d79d19;
-        }
-        .id-card-photo-wrap {
+        .id-front-header {
           position: relative;
           z-index: 2;
+          text-align: center;
+          padding-top: 78px;
+          color: #142d78;
+        }
+        .id-front-title-main {
+          font-size: 60px;
+          line-height: 0.95;
+          font-weight: 900;
+          letter-spacing: 0.03em;
+          color: #112d68;
+          font-family: Georgia, "Times New Roman", serif;
+        }
+        .id-front-title-sub {
+          margin-top: 2px;
+          font-size: 22px;
+          line-height: 1.1;
+          font-weight: 900;
+          letter-spacing: 0.06em;
+          color: #d1a12a;
+        }
+        .id-front-title-rule {
+          margin-top: 6px;
           display: flex;
+          align-items: center;
           justify-content: center;
-          margin: 30px 0 10px;
+          gap: 10px;
+          color: #1f2a56;
+        }
+        .id-front-title-rule span {
+          width: 44px;
+          height: 2px;
+          background: #d1a12a;
+          border-radius: 999px;
+        }
+        .id-front-title-rule em {
+          font-size: 16px;
+          font-style: italic;
+          font-weight: 700;
+          white-space: nowrap;
+          font-family: Georgia, "Times New Roman", serif;
+        }
+        .id-card-photo-frame {
+          position: relative;
+          z-index: 2;
+          width: 146px;
+          height: 176px;
+          margin: 14px auto 10px;
+          border-radius: 16px;
+          background: #f8fafc;
+          border: 3px solid #20396f;
+          box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+          overflow: hidden;
         }
         .id-card-photo {
-          width: 168px;
-          height: 168px;
-          border-radius: 999px;
+          width: 100%;
+          height: 100%;
+          border-radius: 13px;
           object-fit: cover;
-          border: 6px solid #d79d19;
-          box-shadow: 0 10px 24px rgba(15, 23, 42, 0.16);
           background: #f8fafc;
         }
         .id-card-photo-fallback {
           display: flex;
           align-items: center;
           justify-content: center;
+          background: linear-gradient(180deg, #fafafa 0%, #ececec 100%);
         }
-        .id-card-brand-simple {
+        .id-card-nameplate {
           position: relative;
           z-index: 2;
           text-align: center;
-          margin-bottom: 0;
-        }
-        .id-card-brand-simple-title {
-          color: #d79d19;
-          font-size: 19px;
+          width: fit-content;
+          max-width: calc(100% - 60px);
+          margin: 0 auto 18px;
+          background: #112d68;
+          color: #ffffff;
+          padding: 7px 20px 8px;
+          border-radius: 12px;
+          font-size: 15px;
           font-weight: 900;
           line-height: 1.1;
           text-transform: uppercase;
-          letter-spacing: 0.04em;
-        }
-        .id-card-brand-simple-subtitle {
-          color: #9ca3af;
-          font-size: 10px;
-          font-weight: 700;
-          letter-spacing: 0.12em;
-          text-transform: uppercase;
-          margin-top: 2px;
-        }
-        .id-card-details {
-          position: absolute;
-          z-index: 2;
-          left: 50%;
-          transform: translateX(-50%);
-          width: min(100%, 198px);
-          max-width: 198px;
-          top: 286px;
-          display: grid;
-          gap: 10px;
-          justify-items: center;
-        }
-        .id-card-details div,
-        .id-card-back-lines div,
-        .id-card-back-extra div {
-          display: flex;
-          justify-content: space-between;
-          gap: 16px;
-          align-items: baseline;
-          border-bottom: none;
-          padding-bottom: 0;
-          width: 100%;
-        }
-        .id-card-details span,
-        .id-card-back-lines span,
-        .id-card-back-extra span {
-          font-size: 12px;
-          color: #111827;
-          min-width: 52px;
-          flex-shrink: 0;
-          text-transform: none;
-          letter-spacing: 0;
-          font-weight: 800;
-          text-align: right;
-        }
-        .id-card-details strong,
-        .id-card-back-lines strong,
-        .id-card-back-extra strong {
-          font-size: 12px;
-          font-weight: 700;
-          color: #0f172a;
-          text-align: right;
-          word-break: break-word;
-          min-width: 122px;
-        }
-        .id-card-details div:nth-child(1) strong,
-        .id-card-details div:nth-child(2) strong,
-        .id-card-details div:nth-child(3) strong,
-        .id-card-details div:nth-child(4) strong,
-        .id-card-details div:nth-child(5) strong {
-          min-width: 0;
-        }
-        .id-card-details div:nth-child(5) strong {
-          max-width: 150px;
+          letter-spacing: 0.05em;
+          box-shadow: 0 12px 22px rgba(17, 45, 104, 0.18);
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
-        .id-back-main {
+        .id-card-detail-lines {
+          position: absolute;
+          z-index: 2;
+          left: 38px;
+          right: 38px;
+          top: 382px;
+          display: grid;
+          gap: 7px;
+        }
+        .id-card-detail-row {
+          display: flex;
+          justify-content: space-between;
+          gap: 14px;
+          align-items: baseline;
+          padding-bottom: 3px;
+          border-bottom: 1px solid rgba(17, 45, 104, 0.22);
+          width: 100%;
+        }
+        .id-card-detail-row span {
+          font-size: 11px;
+          color: #112d68;
+          min-width: 108px;
+          flex-shrink: 0;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          font-weight: 900;
+        }
+        .id-card-detail-row strong {
+          font-size: 12px;
+          font-weight: 700;
+          color: #1f2937;
+          text-align: left;
+          word-break: break-word;
+          flex: 1;
+        }
+        .id-back-logo-wrap {
           position: relative;
           z-index: 2;
           display: flex;
-          flex-direction: column;
-          align-items: center;
-          text-align: center;
-          color: #ffffff;
-          margin-top: 54px;
+          justify-content: center;
+          padding-top: 82px;
         }
-        .id-back-logo-badge {
-          width: 96px;
-          height: 96px;
+        .id-back-logo-ring {
+          width: 208px;
+          height: 208px;
           border-radius: 999px;
-          background: #d79d19;
+          background: #112d68;
+          border: 6px solid #ffffff;
+          box-shadow: 0 14px 28px rgba(17, 45, 104, 0.22);
+          padding: 16px;
+          overflow: hidden;
           display: flex;
           align-items: center;
           justify-content: center;
-          margin-bottom: 14px;
-          box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
         }
+        /* Keep the academy logo perfectly square so its intrinsic aspect ratio
+           is preserved inside the circular badge without stretching. */
         .id-back-logo-large {
-          width: 80px;
-          height: 80px;
+          width: 100%;
+          height: 100%;
+          max-width: 100%;
+          max-height: 100%;
+          aspect-ratio: 1 / 1;
           object-fit: contain;
-          background: #ffffff;
           border-radius: 999px;
-          padding: 7px;
           display: block;
-        }
-        .id-back-logo-title {
-          font-size: 16px;
-          font-weight: 800;
-          line-height: 1.1;
-          letter-spacing: 0.08em;
-        }
-        .id-back-logo-subtitle {
-          font-size: 10px;
-          font-weight: 700;
-          letter-spacing: 0.12em;
-          margin-top: 3px;
-          text-transform: uppercase;
         }
         .id-card-back-title {
           position: relative;
           z-index: 2;
-          text-align: center;
-          font-size: 14px;
-          font-weight: 800;
-          margin: 104px 0 10px;
-          color: #ffffff;
-          text-transform: uppercase;
+          margin: 38px 36px 18px;
+          color: #112d68;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 14px;
         }
-        .id-card-back-lines {
-          display: none;
+        .id-card-back-title span {
+          width: 42px;
+          height: 2px;
+          border-radius: 999px;
+          background: #d1a12a;
+        }
+        .id-card-back-title strong {
+          font-size: 18px;
+          font-weight: 900;
+          letter-spacing: 0.03em;
         }
         .id-card-back-points {
           position: relative;
           z-index: 2;
           display: grid;
-          gap: 6px;
-          margin-bottom: 28px;
-          padding: 0 42px;
+          gap: 8px;
+          margin-bottom: 18px;
+          padding: 0 38px;
         }
         .id-card-back-points div {
           position: relative;
-          padding-left: 0;
-          color: rgba(229, 231, 235, 0.9);
-          font-size: 9px;
-          line-height: 1.45;
-          text-align: center;
-          font-weight: 600;
+          padding-left: 20px;
+          color: #1f2937;
+          font-size: 11px;
+          line-height: 1.38;
+          text-align: left;
+          font-weight: 700;
         }
         .id-card-back-points div::before {
-          display: none;
-        }
-        .id-back-dates {
-          position: relative;
-          z-index: 2;
-          text-align: center;
-          color: #ffffff;
-          font-size: 11px;
-          font-weight: 800;
-          letter-spacing: 0.08em;
-          display: grid;
-          gap: 5px;
-          margin-bottom: 110px;
-        }
-        .id-back-bottom-text {
+          content: "★";
           position: absolute;
           left: 0;
-          right: 0;
-          top: 34px;
-          text-align: center;
-          font-size: 10px;
-          color: #ffffff;
-          font-weight: 700;
-          letter-spacing: 0.42em;
-          text-transform: uppercase;
+          top: 0;
+          color: #d1a12a;
+          font-size: 12px;
+        }
+        .id-back-divider {
+          position: relative;
+          z-index: 2;
+          width: 128px;
+          height: 2px;
+          margin: 0 auto 18px;
+          background: rgba(17, 45, 104, 0.65);
         }
         .id-front-qr-block {
           position: absolute;
-          left: 0;
-          right: 0;
-          bottom: 10px;
+          left: 24px;
+          bottom: 18px;
           z-index: 2;
           display: flex;
-          justify-content: center;
+          justify-content: flex-start;
         }
         .id-front-qr-shell {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          padding: 6px;
+          padding: 7px;
           background: #ffffff;
-          border-radius: 6px;
-          box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
+          border-radius: 8px;
+          box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+          border: 2px solid rgba(17, 45, 104, 0.18);
         }
         .id-front-qr-shell canvas,
         .id-front-qr-shell svg {
           display: block;
         }
+        .id-front-signature-block {
+          position: absolute;
+          right: 22px;
+          bottom: 28px;
+          z-index: 2;
+          width: 126px;
+          text-align: center;
+        }
+        .id-front-signature-mark {
+          color: #ffffff;
+          font-size: 11px;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+        }
+        .id-front-signature-line {
+          width: 100%;
+          height: 2px;
+          background: #d1a12a;
+          margin-top: 10px;
+          border-radius: 999px;
+        }
+        .id-back-contact-block {
+          position: absolute;
+          left: 34px;
+          right: 34px;
+          bottom: 28px;
+          z-index: 2;
+          color: #ffffff;
+          display: grid;
+          gap: 8px;
+          font-size: 12px;
+          line-height: 1.45;
+          font-weight: 700;
+        }
+        .id-back-contact-row {
+          display: flex;
+          align-items: flex-start;
+          justify-content: flex-start;
+          gap: 10px;
+        }
+        .id-back-contact-row .anticon {
+          color: #e7b11e;
+          font-size: 16px;
+          margin-top: 1px;
+          flex-shrink: 0;
+        }
+        .id-back-contact-row span {
+          flex: 0 1 auto;
+          text-align: left;
+          line-height: 1.35;
+        }
+        .id-back-date-row {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          padding-top: 4px;
+          color: #f3f4f6;
+          font-size: 11px;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+        }
         @media (max-width: 768px) {
           .student-id-card {
-            width: min(100%, 352px);
+            width: min(100%, 344px);
+            min-height: 640px;
           }
-          .id-card-logo {
-            width: 86px;
-            height: 86px;
+          .id-front-title-main {
+            font-size: 52px;
           }
-          .id-card-photo {
-            width: 154px;
-            height: 154px;
+          .id-front-title-sub {
+            font-size: 19px;
           }
-          .id-card-details {
-            left: 50%;
-            transform: translateX(-50%);
-            width: min(100%, 184px);
-            max-width: 184px;
-            top: 274px;
+          .id-front-title-rule em {
+            font-size: 14px;
           }
-          .id-card-details strong {
-            min-width: 106px;
+          .id-card-photo-frame {
+            width: 136px;
+            height: 166px;
           }
-          .id-back-logo-title {
-            font-size: 15px;
+          .id-card-nameplate {
+            max-width: calc(100% - 42px);
+          }
+          .id-card-detail-lines {
+            left: 28px;
+            right: 28px;
+            top: 358px;
+          }
+          .id-card-detail-row span {
+            min-width: 94px;
+            font-size: 10px;
+          }
+          .id-card-detail-row strong {
+            font-size: 11px;
+          }
+          .id-back-logo-ring {
+            width: 184px;
+            height: 184px;
           }
           .id-card-back-points {
             padding: 0 28px;
           }
           .id-card-back-points div {
-            font-size: 8.5px;
+            font-size: 10.5px;
           }
-          .id-back-logo-badge {
-            width: 90px;
-            height: 90px;
+          .id-back-contact-block {
+            left: 24px;
+            right: 24px;
+            bottom: 24px;
+            font-size: 11px;
           }
-          .id-back-logo-large {
-            width: 76px;
-            height: 76px;
-          }
-          .id-front-qr-shell {
-            padding: 5px;
+          .id-back-contact-row .anticon {
+            font-size: 15px;
           }
         }
         @media print {
+          @page {
+            size: A4 portrait;
+            margin: 8mm;
+          }
           body * {
             visibility: hidden !important;
+          }
+          html,
+          body {
+            width: 210mm;
+            height: 297mm;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
           }
           .student-id-print-area,
           .student-id-print-area * {
             visibility: visible !important;
           }
           .student-id-print-area {
-            position: absolute !important;
-            inset: 0 !important;
-            padding: 24px !important;
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            padding: 6mm !important;
             background: #ffffff !important;
+            width: 100% !important;
+            min-height: auto !important;
+            overflow: hidden !important;
+            z-index: 999999 !important;
+          }
+          .student-id-print-area > :not(.id-card-grid) {
+            display: none !important;
           }
           .id-card-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            display: grid !important;
+            grid-template-columns: repeat(2, 86mm) !important;
+            justify-content: center !important;
+            align-items: start !important;
+            gap: 8mm !important;
+            width: 100% !important;
+            margin: 0 !important;
+          }
+          .id-card-shell {
+            display: flex !important;
+            justify-content: center !important;
+            align-items: flex-start !important;
+            width: 86mm !important;
           }
           .student-id-card {
+            width: 86mm !important;
+            min-height: 160mm !important;
+            max-height: 160mm !important;
+            border-radius: 7mm !important;
+            border: 0.35mm solid rgba(15, 23, 42, 0.12) !important;
             box-shadow: none !important;
             break-inside: avoid;
+            page-break-inside: avoid;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
+            color-adjust: exact;
+            transform: none !important;
+            margin: 0 !important;
+            overflow: hidden !important;
+          }
+          .student-id-front {
+            background:
+              radial-gradient(circle at 15% 22%, rgba(212, 175, 55, 0.08) 0, rgba(212, 175, 55, 0) 18%),
+              repeating-radial-gradient(circle at 50% 44%, rgba(20, 45, 120, 0.03) 0 2px, rgba(255, 255, 255, 0.95) 2px 8px),
+              linear-gradient(180deg, #ffffff 0%, #fffef8 100%) !important;
+            background-size: auto, auto, auto !important;
+            background-repeat: no-repeat, repeat, no-repeat !important;
+          }
+          .id-front-campus-fade {
+            opacity: 0.06 !important;
+          }
+          .id-card-photo-frame {
+            width: 33mm !important;
+            height: 40mm !important;
+            margin: 4mm auto 2mm !important;
+          }
+          .id-card-nameplate {
+            margin: 0 auto 4.5mm !important;
+            font-size: 10.5pt !important;
+            max-width: calc(100% - 14mm) !important;
+          }
+          .id-card-detail-lines {
+            left: 8mm !important;
+            right: 8mm !important;
+            top: 99mm !important;
+            gap: 1.2mm !important;
+          }
+          .id-card-detail-row span {
+            min-width: 22mm !important;
+            font-size: 6.8pt !important;
+          }
+          .id-card-detail-row strong {
+            font-size: 7.1pt !important;
+          }
+          .id-front-bottom-gold-wave {
+            bottom: 22mm !important;
+            left: -8mm !important;
+            right: -8mm !important;
+            height: 36mm !important;
+            border-top-left-radius: 58% 100% !important;
+            border-top-right-radius: 58% 100% !important;
+            border-bottom-left-radius: 0 !important;
+            border-bottom-right-radius: 0 !important;
+          }
+          .id-front-bottom-navy-band {
+            height: 22mm !important;
+          }
+          .id-front-qr-block {
+            left: 6mm !important;
+            bottom: 4mm !important;
+          }
+          .id-front-qr-shell {
+            padding: 1.2mm !important;
+          }
+          .id-front-signature-block {
+            right: 6mm !important;
+            bottom: 5mm !important;
+            width: 32mm !important;
+          }
+          .id-front-signature-mark {
+            font-size: 6.8pt !important;
+          }
+          .id-back-logo-wrap {
+            padding-top: 21mm !important;
+          }
+          .id-back-top-gold {
+            top: 36mm !important;
+            left: -8mm !important;
+            right: -8mm !important;
+            height: 22mm !important;
+            border-top-left-radius: 58% 100% !important;
+            border-top-right-radius: 58% 100% !important;
+          }
+          .id-back-top-white-body {
+            top: 41mm !important;
+            border-top-left-radius: 58% 14% !important;
+            border-top-right-radius: 58% 14% !important;
+          }
+          .id-back-logo-ring {
+            width: 47mm !important;
+            height: 47mm !important;
+          }
+          .id-card-back-title {
+            margin: 7mm 8mm 3mm !important;
+          }
+          .id-card-back-title strong {
+            font-size: 11pt !important;
+          }
+          .id-card-back-points {
+            padding: 0 8mm !important;
+            gap: 1.5mm !important;
+            margin-bottom: 3mm !important;
+          }
+          .id-card-back-points div {
+            font-size: 6.7pt !important;
+            line-height: 1.3 !important;
+            padding-left: 4.5mm !important;
+          }
+          .id-card-back-points div::before {
+            font-size: 7pt !important;
+          }
+          .id-back-divider {
+            margin: 0 auto 3mm !important;
+          }
+          .id-back-bottom-navy-block {
+            height: 34mm !important;
+          }
+          .id-back-contact-block {
+            left: 8mm !important;
+            right: 8mm !important;
+            bottom: 5mm !important;
+            gap: 1.8mm !important;
+            font-size: 6.8pt !important;
+          }
+          .id-back-contact-row .anticon {
+            font-size: 8pt !important;
+          }
+          .id-back-date-row {
+            font-size: 6.6pt !important;
+            padding-top: 1mm !important;
+          }
+          .student-profile-tabs .ant-tabs-nav,
+          .student-profile-tabs .ant-tabs-tabpane-hidden,
+          .student-profile-tabs .ant-tabs-ink-bar,
+          .student-profile-tabs .ant-tabs-extra-content,
+          .student-profile-tabs .ant-tabs-tab,
+          .student-profile-tabs .ant-tabs-nav-operations,
+          .student-profile-tabs .ant-tabs-content-holder > :not(.ant-tabs-content) {
+            display: none !important;
+          }
+          .student-profile-tabs .ant-tabs-content,
+          .student-profile-tabs .ant-tabs-tabpane,
+          .student-profile-tabs .ant-tabs-tabpane-active {
+            display: block !important;
+            overflow: visible !important;
           }
           .ant-btn {
             display: none !important;

@@ -46,11 +46,19 @@ import {
   getPaymentMethods,
   getTransactions,
   getTransactionSummary,
+  getReceiptDuesOverview,
+  getExpenseHeadEntries,
+  getTeacherPayroll,
   createTransaction,
+  payTeacherPayroll,
   updateTransaction,
   deleteTransaction,
   revertTransactionById,
 } from "../../../services/accountingService";
+import {
+  recordFeePayment,
+  getNextVoucherNumber,
+} from "../../../services/feeService";
 import useZustandStore from "../../../stores/zustandStore";
 import { canViewAccountingBalances } from "../../../utils/accountingAccess";
 
@@ -64,6 +72,36 @@ const formatCurrency = (v) =>
     currency: "PKR",
     minimumFractionDigits: 0,
   }).format(v || 0);
+
+const getSinglePositiveFeeHeadName = (feeComponents = {}) => {
+  const headCandidates = [
+    { key: "admissionFee", label: "Admission Fee" },
+    { key: "courseFee", label: "Course Fees" },
+    { key: "certificateFee", label: "Certificate Fee" },
+    { key: "examFee", label: "Exam Fee" },
+    { key: "registrationFee", label: "Registration Fee" },
+    { key: "practicalFee", label: "Practical Fee" },
+    { key: "otherFee", label: "Other Fee" },
+  ].filter((item) => Number(feeComponents?.[item.key] || 0) > 0);
+
+  return headCandidates.length === 1 ? headCandidates[0].label : null;
+};
+
+const inferIncomeHeadName = (dueRow) => {
+  const componentHead = getSinglePositiveFeeHeadName(
+    dueRow?.selectedInstallment?.feeComponents,
+  );
+  if (componentHead) return componentHead;
+
+  const description = String(dueRow?.description || "").toLowerCase();
+  if (description.includes("admission")) return "Admission Fee";
+  if (description.includes("certificate")) return "Certificate Fee";
+  if (description.includes("exam")) return "Exam Fee";
+  if (description.includes("registration")) return "Registration Fee";
+  if (description.includes("practical")) return "Practical Fee";
+  if (description.includes("other")) return "Other Fee";
+  return "Course Fees";
+};
 
 const Transactions = () => {
   // ── State ──────────────────────────────────────────────────
@@ -90,7 +128,9 @@ const Transactions = () => {
   const [types, setTypes] = useState([]);
   const [heads, setHeads] = useState([]);
   const [methods, setMethods] = useState([]);
-  const [partyNames, setPartyNames] = useState([]);
+  const [incomePartyOptions, setIncomePartyOptions] = useState([]);
+  const [expensePartyOptions, setExpensePartyOptions] = useState([]);
+  const [selectedPartyMeta, setSelectedPartyMeta] = useState(null);
 
   // Modal state
   const [modalVisible, setModalVisible] = useState(false);
@@ -99,6 +139,8 @@ const Transactions = () => {
   const [formHeads, setFormHeads] = useState([]); // heads filtered by selected type in form
 
   const [form] = Form.useForm();
+  const watchedFormType = Form.useWatch("type", form);
+  const watchedFormName = Form.useWatch("name", form);
 
   // Detail modal state
   const [detailVisible, setDetailVisible] = useState(false);
@@ -116,6 +158,230 @@ const Transactions = () => {
     adminInfo,
   });
 
+  const getTypeNameById = useCallback(
+    (typeId) =>
+      types.find((item) => String(item._id) === String(typeId || ""))?.name || "",
+    [types],
+  );
+
+  const buildPartyOptionMap = useCallback((records, config) => {
+    const map = new Map();
+
+    records.forEach((record) => {
+      const name = String(config.getName(record) || "").trim();
+      if (!name) return;
+
+      const paymentDateValue = config.getDate(record);
+      const paymentDate = paymentDateValue ? new Date(paymentDateValue) : null;
+      const nextMeta = {
+        value: name,
+        label: name,
+        amount: Number(config.getAmount(record) || 0),
+        headId: config.getHeadId(record),
+        paymentMethodId: config.getPaymentMethodId(record),
+        billReference: config.getBillReference(record),
+        details: config.getDetails(record),
+        paymentDate,
+      };
+
+      const existingMeta = map.get(name);
+      const nextTime = paymentDate?.getTime?.() || 0;
+      const existingTime = existingMeta?.paymentDate?.getTime?.() || 0;
+
+      if (!existingMeta || nextTime >= existingTime) {
+        map.set(name, nextMeta);
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, []);
+
+  const loadPartyReferenceData = useCallback(
+    async (typeList = types) => {
+      try {
+        const [incomeRes, expenseRes, payrollRes] = await Promise.all([
+          getReceiptDuesOverview({
+            status: "unpaid",
+            page: 1,
+            limit: 10000,
+            sortOrder: "asc",
+          }),
+          getExpenseHeadEntries(),
+          getTeacherPayroll({
+            page: 1,
+            limit: 1000,
+          }),
+        ]);
+
+        setIncomePartyOptions(
+          incomeRes?.success
+            ? (incomeRes.data || []).map((row) => {
+                const studentName = row?.student?.studentName || "Unknown";
+                const installmentSuffix = row?.installmentNumber
+                  ? `Inst. #${row.installmentNumber}`
+                  : row?.description || "Fee Due";
+                const courseName = row?.course?.courseName || "Course";
+                const headLabel = inferIncomeHeadName(row);
+
+                return {
+                  value: `Fee Payment — ${studentName} (${installmentSuffix})`,
+                  label: `Fee Payment — ${studentName} (${installmentSuffix})`,
+                  amount: Number(row?.remainingAmount || row?.amount || 0),
+                  headId: null,
+                  headLabel,
+                  paymentMethodId: null,
+                  billReference: row?.voucherNo || row?.receiptNo || "",
+                  details: `Student : ${studentName}${row?.student?.registrationNo ? ` (${row.student.registrationNo})` : ""}${row?.student?.mobileNumber ? ` | Mobile: ${row.student.mobileNumber}` : ""}\nCourse  : ${courseName}\nDue Item: ${row?.description || installmentSuffix}`,
+                  paymentDate: row?.dueDate || null,
+                  sourceType: "fee_due",
+                  feeStructureId: row?.feeStructureId,
+                  studentId: row?.student?._id,
+                  courseId: row?.course?._id,
+                  installmentNumber: row?.installmentNumber || null,
+                  paymentType: row?.installmentNumber ? "Installment" : "Partial",
+                  dueRow: row,
+                };
+              })
+            : [],
+        );
+
+        setExpensePartyOptions(
+          [
+            ...((expenseRes?.success ? expenseRes.data || [] : []).map((record) => {
+              const payeeName = String(record?.payeeName || "").trim();
+              const expenseHead =
+                record?.expenseCategoryLabel ||
+                record?.expenseCategory?.name ||
+                "Expense";
+
+              return {
+                value: `${payeeName} — ${expenseHead}`,
+                label: `${payeeName} — ${expenseHead}`,
+                amount: Number(record?.amount || 0),
+                headId: record?.expenseCategory?._id || record?.expenseCategory,
+                headLabel: expenseHead,
+                paymentMethodId:
+                  record?.paymentMethod?._id || record?.paymentMethod || null,
+                billReference: record?.voucherNo || "",
+                details:
+                  record?.description || record?.paymentPurpose || "",
+                paymentDate: record?.date || null,
+                sourceType: "expense_entry",
+                expenseEntryId: record?._id,
+              };
+            })),
+            ...((payrollRes?.success ? payrollRes.data || [] : [])
+              .filter((item) => Number(item?.payroll?.remainingAmount || 0) > 0)
+              .map((item) => ({
+                value: `Teacher Salary — ${item?.teacher?.fullName || "Teacher"} (${item?.month?.displayLabel || `${item?.month?.month}/${item?.month?.year}`})`,
+                label: `Teacher Salary — ${item?.teacher?.fullName || "Teacher"} (${item?.month?.displayLabel || `${item?.month?.month}/${item?.month?.year}`})`,
+                amount: Number(item?.payroll?.remainingAmount || 0),
+                headId: null,
+                headLabel: "Salary",
+                paymentMethodId: null,
+                billReference: "",
+                details: `Salary payout for ${item?.month?.displayLabel || "selected month"}`,
+                paymentDate: new Date(),
+                sourceType: "teacher_payroll",
+                teacherId: item?.teacher?._id,
+                year: item?.month?.year,
+                month: item?.month?.month,
+              }))),
+          ],
+        );
+      } catch (error) {
+        console.error("Failed to load transaction party references:", error);
+      }
+    },
+    [types, buildPartyOptionMap],
+  );
+
+  const getPartyOptionsForType = useCallback(
+    (typeId) => {
+      const typeName = getTypeNameById(typeId);
+      if (typeName === "Income") return incomePartyOptions;
+      if (typeName === "Expense") return expensePartyOptions;
+      return [];
+    },
+    [getTypeNameById, incomePartyOptions, expensePartyOptions],
+  );
+
+  const getDefaultCashMethodId = useCallback(() => {
+    const preferredCashMethod = methods.find((method) =>
+      String(method?.name || "").trim().toLowerCase().includes("cash"),
+    );
+
+    return (
+      preferredCashMethod?._id ||
+      methods.find((method) => method.isDefault)?._id ||
+      methods[0]?._id ||
+      undefined
+    );
+  }, [methods]);
+
+  const resolveHeadIdForMeta = useCallback(
+    (partyMeta, typeId) => {
+      if (partyMeta?.headId) return partyMeta.headId;
+
+      const targetHeadLabel = String(partyMeta?.headLabel || "").trim().toLowerCase();
+      if (!targetHeadLabel) return undefined;
+
+      return heads.find((head) => {
+        const sameType =
+          String(head?.type?._id || head?.type || "") === String(typeId || "");
+        const sameName =
+          String(head?.name || "").trim().toLowerCase() === targetHeadLabel;
+        return sameType && sameName;
+      })?._id;
+    },
+    [heads],
+  );
+
+  const applyPartySelection = useCallback(
+    (partyMeta) => {
+      if (!partyMeta) return;
+
+      const currentTypeId = form.getFieldValue("type");
+      const resolvedHeadId = resolveHeadIdForMeta(partyMeta, currentTypeId);
+
+      const nextFields = {
+        name: partyMeta.value,
+        amount: partyMeta.amount,
+        paymentMethod: getDefaultCashMethodId() || partyMeta.paymentMethodId,
+        paymentDate: partyMeta.paymentDate ? dayjs(partyMeta.paymentDate) : dayjs(),
+      };
+
+      if (resolvedHeadId) {
+        nextFields.head = resolvedHeadId;
+      }
+
+      if (partyMeta.billReference && !editingTxn) {
+        nextFields.billReference = partyMeta.billReference;
+      }
+
+      if (partyMeta.details && !editingTxn) {
+        nextFields.details = partyMeta.details;
+      }
+
+      setSelectedPartyMeta(partyMeta);
+      form.setFieldsValue(nextFields);
+    },
+    [form, editingTxn, getDefaultCashMethodId, resolveHeadIdForMeta],
+  );
+
+  const handlePartySelection = useCallback(
+    (selectedName) => {
+      const matchedParty = getPartyOptionsForType(form.getFieldValue("type")).find(
+        (item) => item.value === selectedName,
+      );
+
+      if (matchedParty) {
+        applyPartySelection(matchedParty);
+      }
+    },
+    [form, getPartyOptionsForType, applyPartySelection],
+  );
+
   // ── Load reference data on mount ──────────────────────────
   useEffect(() => {
     Promise.all([
@@ -127,9 +393,10 @@ const Transactions = () => {
         if (t?.success) setTypes(t.data);
         if (h?.success) setHeads(h.data);
         if (m?.success) setMethods(m.data);
+        if (t?.success) loadPartyReferenceData(t.data || []);
       })
       .catch(console.error);
-  }, []);
+  }, [loadPartyReferenceData]);
 
   // ── Fetch transactions ─────────────────────────────────────
   const fetchTransactions = useCallback(
@@ -162,7 +429,6 @@ const Transactions = () => {
 
         if (txnRes?.success) {
           setTransactions(txnRes.data);
-          setPartyNames(txnRes.meta?.partyNames || []);
           setPagination((p) => ({
             ...p,
             current: page,
@@ -186,7 +452,14 @@ const Transactions = () => {
 
   // ── Form type change → filter heads ───────────────────────
   const handleFormTypeChange = (typeId) => {
-    form.setFieldValue("head", undefined);
+    setSelectedPartyMeta(null);
+    form.setFieldsValue({
+      name: undefined,
+      head: undefined,
+      amount: undefined,
+      billReference: undefined,
+      details: undefined,
+    });
     const filtered = heads.filter(
       (h) => h.type?._id === typeId || h.type === typeId,
     );
@@ -197,12 +470,18 @@ const Transactions = () => {
   const openCreateModal = () => {
     setEditingTxn(null);
     setFormHeads([]);
+    setSelectedPartyMeta(null);
     form.resetFields();
+    form.setFieldsValue({
+      paymentMethod: getDefaultCashMethodId(),
+      paymentDate: dayjs(),
+    });
     setModalVisible(true);
   };
 
   const openEditModal = (record) => {
     setEditingTxn(record);
+    setSelectedPartyMeta(null);
     const typeId = record.type?._id;
     const filtered = heads.filter(
       (h) => h.type?._id === typeId || h.type === typeId,
@@ -225,14 +504,130 @@ const Transactions = () => {
     setModalVisible(false);
     setEditingTxn(null);
     setFormHeads([]);
+    setSelectedPartyMeta(null);
     form.resetFields();
   };
+
+  useEffect(() => {
+    if (!watchedFormType) {
+      setSelectedPartyMeta(null);
+      return;
+    }
+
+    const currentName = String(watchedFormName || "").trim();
+    if (!currentName) {
+      setSelectedPartyMeta(null);
+      return;
+    }
+
+    const matchedParty = getPartyOptionsForType(watchedFormType).find(
+      (item) => item.value === currentName,
+    );
+
+    setSelectedPartyMeta(matchedParty || null);
+  }, [watchedFormType, watchedFormName, getPartyOptionsForType]);
+
+  useEffect(() => {
+    if (!selectedPartyMeta) return;
+    applyPartySelection(selectedPartyMeta);
+  }, [selectedPartyMeta, applyPartySelection]);
 
   // ── Submit ─────────────────────────────────────────────────
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
       setSubmitLoading(true);
+
+      if (!editingTxn && selectedPartyMeta?.sourceType === "fee_due") {
+        const resolvedStudentId = String(
+          selectedPartyMeta.studentId ||
+            selectedPartyMeta.dueRow?.student?._id ||
+            "",
+        ).trim();
+        const resolvedCourseId = String(
+          selectedPartyMeta.courseId ||
+            selectedPartyMeta.dueRow?.course?._id ||
+            "",
+        ).trim();
+        const resolvedFeeStructureId = String(
+          selectedPartyMeta.feeStructureId ||
+            selectedPartyMeta.dueRow?.feeStructureId ||
+            "",
+        ).trim();
+
+        if (!resolvedStudentId || !resolvedCourseId || !resolvedFeeStructureId) {
+          message.error("Selected due entry is missing student/course data");
+          return;
+        }
+
+        const voucherResponse = await getNextVoucherNumber();
+        const voucherNo = voucherResponse?.success
+          ? voucherResponse.data?.voucherNo
+          : values.billReference || "";
+        const selectedMethod = methods.find(
+          (method) => String(method._id) === String(values.paymentMethod || ""),
+        );
+
+        const feePaymentPayload = {
+          studentId: resolvedStudentId,
+          courseId: resolvedCourseId,
+          feeStructureId: resolvedFeeStructureId,
+          amount: Number(values.amount || 0),
+          paymentDate: values.paymentDate?.toDate?.() || new Date(),
+          paymentMethod: selectedMethod?.name || "Cash",
+          accountingPaymentMethodId: values.paymentMethod
+            ? String(values.paymentMethod)
+            : null,
+          voucherNo,
+          installmentNumber: selectedPartyMeta.installmentNumber
+            ? Number(selectedPartyMeta.installmentNumber)
+            : null,
+          paymentType:
+            selectedPartyMeta.installmentNumber ? "Installment" : "Partial",
+          remarks: values.details || "",
+        };
+
+        const feePaymentRes = await recordFeePayment(feePaymentPayload);
+        if (feePaymentRes?.success) {
+          message.success("Fee payment recorded successfully");
+          closeModal();
+          loadPartyReferenceData();
+          fetchTransactions(1);
+        } else {
+          message.error(feePaymentRes?.message || "Fee payment failed");
+        }
+        return;
+      }
+
+      if (!editingTxn && selectedPartyMeta?.sourceType === "teacher_payroll") {
+        const resolvedTeacherId = String(selectedPartyMeta.teacherId || "").trim();
+        if (!resolvedTeacherId) {
+          message.error("Selected payroll entry is missing teacher data");
+          return;
+        }
+
+        const payrollPayload = {
+          amount: Number(values.amount || 0),
+          paymentDate: values.paymentDate?.toISOString?.() || new Date().toISOString(),
+          details: values.details || "",
+          paymentMethodId: values.paymentMethod || null,
+          head: values.head || null,
+          headId: values.head || null,
+          year: selectedPartyMeta.year,
+          month: selectedPartyMeta.month,
+        };
+
+        const payrollRes = await payTeacherPayroll(resolvedTeacherId, payrollPayload);
+        if (payrollRes?.success) {
+          message.success(payrollRes.message || "Salary payment recorded successfully");
+          closeModal();
+          loadPartyReferenceData();
+          fetchTransactions(1);
+        } else {
+          message.error(payrollRes?.message || "Salary payment failed");
+        }
+        return;
+      }
 
       const payload = {
         ...values,
@@ -244,6 +639,7 @@ const Transactions = () => {
         if (res?.success) {
           message.success("Transaction updated");
           closeModal();
+          loadPartyReferenceData();
           fetchTransactions(pagination.current);
         } else message.error(res?.message || "Update failed");
       } else {
@@ -251,11 +647,13 @@ const Transactions = () => {
         if (res?.success) {
           message.success("Transaction created");
           closeModal();
+          loadPartyReferenceData();
           fetchTransactions(1);
         } else message.error(res?.message || "Creation failed");
       }
     } catch (err) {
-      if (err?.message) message.error(err.message);
+      console.error("Transaction quick-pay error:", err);
+      message.error(err?.error || err?.message || "Payment failed");
     } finally {
       setSubmitLoading(false);
     }
@@ -267,6 +665,7 @@ const Transactions = () => {
       const res = await deleteTransaction(id);
       if (res?.success) {
         message.success("Transaction deleted and balance reversed");
+        loadPartyReferenceData();
         fetchTransactions(pagination.current);
       } else message.error(res?.message || "Delete failed");
     } catch (err) {
@@ -279,6 +678,7 @@ const Transactions = () => {
       const res = await revertTransactionById(id);
       if (res?.success) {
         message.success(res.message || "Transaction reverted successfully");
+        loadPartyReferenceData();
         fetchTransactions(pagination.current);
       } else {
         message.error(res?.message || "Revert failed");
@@ -990,10 +1390,19 @@ const Transactions = () => {
           >
             <AutoComplete
               placeholder="e.g. Ahmed Khan - Tuition Fee"
-              options={partyNames.map((name) => ({
-                value: name,
-                label: name,
+              options={getPartyOptionsForType(watchedFormType).map((option) => ({
+                value: option.value,
+                label: option.label,
+                headId: option.headId,
+                amount: option.amount,
               }))}
+              disabled={!watchedFormType}
+              onSelect={handlePartySelection}
+              onChange={(value) => {
+                if (!value) {
+                  setSelectedPartyMeta(null);
+                }
+              }}
               filterOption={(inputValue, option) =>
                 String(option?.value || "")
                   .toLowerCase()
