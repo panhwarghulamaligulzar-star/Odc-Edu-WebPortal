@@ -31,6 +31,7 @@ import { getPaymentMethods } from "../../services/accountingService";
 import academyConfig from "../../config/academyConfig";
 import PaymentReceipt from "./PaymentReceipt";
 import dayjs from "dayjs";
+import { formatDateOnlyForApi } from "../../utils/date";
 
 const { TextArea } = Input;
 const { Text, Title } = Typography;
@@ -60,6 +61,39 @@ const FeePaymentFormEnhanced = ({
   const [accountingMethods, setAccountingMethods] = useState([]);
   const [methodsLoading, setMethodsLoading] = useState(false);
   const hasMixedCourseSelection = initialSelectedPaymentRows.length > 0;
+
+  const getInstallmentRemaining = (installment) =>
+    Math.max(
+      0,
+      Number(installment?.amount || 0) - Number(installment?.paidAmount || 0),
+    );
+
+  const getOverallRemaining = () =>
+    Math.max(0, Number(feeStructure?.remainingAmount || 0));
+
+  const getSelectedInstallmentDueDate = () => {
+    if (selectedInstallment?.dueDate) {
+      return dayjs(selectedInstallment.dueDate);
+    }
+
+    if (hasMixedCourseSelection && initialSelectedPaymentRows.length > 0) {
+      const firstDueDate = initialSelectedPaymentRows.find(
+        (item) => item?.dueDate,
+      )?.dueDate;
+      return firstDueDate ? dayjs(firstDueDate) : dayjs();
+    }
+
+    if (initialSelectedInstallments.length > 0 && feeStructure?.installments) {
+      const firstInstallment = feeStructure.installments.find((item) =>
+        initialSelectedInstallments.includes(item.installmentNumber),
+      );
+      if (firstInstallment?.dueDate) {
+        return dayjs(firstInstallment.dueDate);
+      }
+    }
+
+    return dayjs();
+  };
 
   // Fetch real accounting payment methods on mount
   useEffect(() => {
@@ -108,30 +142,24 @@ const FeePaymentFormEnhanced = ({
   // Handle installment checkbox change
   const handleInstallmentChange = (checkedValues) => {
     setSelectedInstallments(checkedValues);
-    // Calculate total amount for selected installments
-    const totalAmount = checkedValues.reduce((sum, instNum) => {
-      const inst = feeStructure.installments.find(
-        (i) => i.installmentNumber === instNum,
-      );
-      if (inst) {
-        return sum + (inst.amount - (inst.paidAmount || 0));
-      }
-      return sum;
-    }, 0);
+    const totalAmount = calculateInstallmentsPayableTotal(checkedValues);
     form.setFieldsValue({ amount: totalAmount });
   };
 
   // Calculate total for selected installments
-  const calculateSelectedTotal = () => {
-    return selectedInstallments.reduce((sum, instNum) => {
-      const inst = feeStructure.installments.find(
-        (i) => i.installmentNumber === instNum,
+  const calculateInstallmentsPayableTotal = (installmentNumbers = []) => {
+    const rawTotal = installmentNumbers.reduce((sum, instNum) => {
+      const inst = feeStructure?.installments?.find(
+        (item) => item.installmentNumber === instNum,
       );
-      if (inst) {
-        return sum + (inst.amount - (inst.paidAmount || 0));
-      }
-      return sum;
+      return sum + getInstallmentRemaining(inst);
     }, 0);
+
+    return Math.min(rawTotal, getOverallRemaining() || rawTotal);
+  };
+
+  const calculateSelectedTotal = () => {
+    return calculateInstallmentsPayableTotal(selectedInstallments);
   };
 
   // Helper — get the method name string from selected method _id
@@ -144,6 +172,9 @@ const FeePaymentFormEnhanced = ({
     setLoading(true);
     try {
       let paymentPayload;
+      const normalizedPaymentDate =
+        formatDateOnlyForApi(values.paymentDate) ||
+        formatDateOnlyForApi(dayjs());
 
       if (hasMixedCourseSelection) {
         const payableRows = initialSelectedPaymentRows.filter(
@@ -174,7 +205,7 @@ const FeePaymentFormEnhanced = ({
             courseId: row.courseId,
             feeStructureId: row.feeStructureId,
             amount: Number(row.remainingAmount || 0),
-            paymentDate: values.paymentDate.toDate(),
+            paymentDate: normalizedPaymentDate,
             paymentMethod: getMethodName(values.accountingPaymentMethodId),
             accountingPaymentMethodId: values.accountingPaymentMethodId || null,
             transactionId: values.transactionId,
@@ -215,7 +246,7 @@ const FeePaymentFormEnhanced = ({
           form.resetFields();
           setSelectedInstallments([]);
           if (onPaymentSuccess) {
-            onPaymentSuccess(lastPayment);
+            await Promise.resolve(onPaymentSuccess(lastPayment));
           }
         }
         return;
@@ -237,8 +268,11 @@ const FeePaymentFormEnhanced = ({
             studentId: feeStructure.student._id || feeStructure.student,
             courseId: feeStructure.course._id || feeStructure.course,
             feeStructureId: feeStructure._id,
-            amount: inst.amount - (inst.paidAmount || 0),
-            paymentDate: values.paymentDate.toDate(),
+            amount: Math.min(
+              getInstallmentRemaining(inst),
+              getOverallRemaining() || getInstallmentRemaining(inst),
+            ),
+            paymentDate: normalizedPaymentDate,
             paymentMethod: getMethodName(values.accountingPaymentMethodId),
             accountingPaymentMethodId: values.accountingPaymentMethodId || null,
             transactionId: values.transactionId,
@@ -272,7 +306,7 @@ const FeePaymentFormEnhanced = ({
           form.resetFields();
           setSelectedInstallments([]);
           if (onPaymentSuccess) {
-            onPaymentSuccess(lastPayment);
+            await Promise.resolve(onPaymentSuccess(lastPayment));
           }
         }
         return;
@@ -289,7 +323,7 @@ const FeePaymentFormEnhanced = ({
         courseId: feeStructure.course._id || feeStructure.course,
         feeStructureId: feeStructure._id,
         amount: values.amount,
-        paymentDate: values.paymentDate.toDate(),
+        paymentDate: normalizedPaymentDate,
         paymentMethod: getMethodName(values.accountingPaymentMethodId),
         accountingPaymentMethodId: values.accountingPaymentMethodId || null,
         transactionId: values.transactionId,
@@ -321,7 +355,7 @@ const FeePaymentFormEnhanced = ({
         setReceiptVisible(true);
         form.resetFields();
         if (onPaymentSuccess) {
-          onPaymentSuccess(response.data);
+          await Promise.resolve(onPaymentSuccess(response.data));
         }
       }
     } catch (error) {
@@ -356,12 +390,19 @@ const FeePaymentFormEnhanced = ({
       setPayMultiple(
         hasMixedCourseSelection || initialSelectedInstallments.length > 0,
       );
+      form.setFieldsValue({
+        amount: getDefaultAmount(),
+        paymentDate: getSelectedInstallmentDueDate(),
+      });
     }
   }, [
     visible,
     form,
     hasMixedCourseSelection,
     initialSelectedInstallments,
+    initialSelectedPaymentRows,
+    selectedInstallment,
+    feeStructure,
   ]);
 
   useEffect(() => {
@@ -381,11 +422,20 @@ const FeePaymentFormEnhanced = ({
         const inst = feeStructure?.installments?.find(
           (item) => item.installmentNumber === instNum,
         );
-        return sum + (inst ? inst.amount - (inst.paidAmount || 0) : 0);
+        return sum + getInstallmentRemaining(inst);
       }, 0);
 
-      form.setFieldsValue({ amount: totalAmount });
+      form.setFieldsValue({
+        amount: Math.min(totalAmount, getOverallRemaining() || totalAmount),
+        paymentDate: getSelectedInstallmentDueDate(),
+      });
+      return;
     }
+
+    form.setFieldsValue({
+      amount: getDefaultAmount(),
+      paymentDate: getSelectedInstallmentDueDate(),
+    });
   }, [
     visible,
     hasMixedCourseSelection,
@@ -403,12 +453,15 @@ const FeePaymentFormEnhanced = ({
       );
     }
     if (selectedInstallment) {
-      return selectedInstallment.amount - (selectedInstallment.paidAmount || 0);
+      return Math.min(
+        getInstallmentRemaining(selectedInstallment),
+        getOverallRemaining() || getInstallmentRemaining(selectedInstallment),
+      );
     }
     if (payMultiple && selectedInstallments.length > 0) {
       return calculateSelectedTotal();
     }
-    return feeStructure?.remainingAmount || 0;
+    return getOverallRemaining();
   };
 
   const getMaxAmount = () => {
@@ -419,12 +472,15 @@ const FeePaymentFormEnhanced = ({
       );
     }
     if (selectedInstallment) {
-      return selectedInstallment.amount - (selectedInstallment.paidAmount || 0);
+      return Math.min(
+        getInstallmentRemaining(selectedInstallment),
+        getOverallRemaining() || getInstallmentRemaining(selectedInstallment),
+      );
     }
     if (payMultiple && selectedInstallments.length > 0) {
       return calculateSelectedTotal();
     }
-    return feeStructure?.remainingAmount || 0;
+    return getOverallRemaining();
   };
 
   const payableInstallments = getPayableInstallments();

@@ -465,6 +465,29 @@ export default function Receipt() {
     setPaymentOpen(true);
   };
 
+  const getPayButtonStyle = (record) => {
+    const isPaid =
+      record?.dueStatus === "Paid" || Number(record?.remainingAmount || 0) <= 0;
+
+    if (isPaid) {
+      return {
+        background: "#dbeafe",
+        borderColor: "#bfdbfe",
+        color: "#93a3b8",
+        opacity: 0.65,
+        boxShadow: "none",
+        cursor: "not-allowed",
+      };
+    }
+
+    return {
+      background: "var(--primary-color, #142d78)",
+      borderColor: "var(--primary-color, #142d78)",
+      color: "#ffffff",
+      opacity: 1,
+    };
+  };
+
   const historyCourseOptions = Array.from(
     new Map(
       historyFeeStructures.map((item) => [
@@ -650,15 +673,17 @@ export default function Receipt() {
         <Space>
           <Button
             type="primary"
-            style={{
-              background: "var(--primary-color, #142d78)",
-              borderColor: "var(--primary-color, #142d78)",
-              color: "#ffffff",
-            }}
+            style={getPayButtonStyle(record)}
             onClick={() => openPayment(record)}
-            disabled={record.dueStatus === "Paid"}
+            disabled={
+              record.dueStatus === "Paid" ||
+              Number(record.remainingAmount || 0) <= 0
+            }
           >
-            Pay
+            {record.dueStatus === "Paid" ||
+            Number(record.remainingAmount || 0) <= 0
+              ? "Paid"
+              : "Pay"}
           </Button>
           <Button
             icon={<EyeOutlined />}

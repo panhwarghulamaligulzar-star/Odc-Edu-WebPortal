@@ -537,12 +537,12 @@ export default function ReceiptStudentHistory() {
           setSelectedInstallment(null);
           setSelectedHistoryInstallments([]);
         }}
-        onPaymentSuccess={() => {
+        onPaymentSuccess={async () => {
           setPaymentOpen(false);
           setSelectedFeeStructure(null);
           setSelectedInstallment(null);
           setSelectedHistoryInstallments([]);
-          loadHistory();
+          await loadHistory();
         }}
         feeStructure={selectedFeeStructure}
         studentInfo={selectedStudent}

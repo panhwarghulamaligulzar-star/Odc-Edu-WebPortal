@@ -71,23 +71,26 @@ const getRawStudentAndCourse = async (studentId, courseId) => {
 
 const getNextReceiptNumber = async (prefix = "RCP", paymentDate = new Date()) => {
   const date = new Date(paymentDate);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("Invalid payment date");
+  }
+
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const monthPrefix = `${prefix}-${year}${month}-`;
 
-  const latestPayment = await FeePaymentSchema.findOne({
+  const monthPayments = await FeePaymentSchema.find({
     receiptNo: { $regex: `^${monthPrefix}` },
   })
-    .sort({ receiptNo: -1 })
     .select("receiptNo")
     .lean();
 
-  const latestSequenceMatch = String(latestPayment?.receiptNo || "").match(
-    /-(\d+)$/,
-  );
-  const nextSequence = latestSequenceMatch
-    ? Number(latestSequenceMatch[1]) + 1
-    : 1;
+  const nextSequence =
+    monthPayments.reduce((maxSequence, payment) => {
+      const sequenceMatch = String(payment?.receiptNo || "").match(/-(\d+)$/);
+      const sequence = sequenceMatch ? Number(sequenceMatch[1]) : 0;
+      return Number.isFinite(sequence) ? Math.max(maxSequence, sequence) : maxSequence;
+    }, 0) + 1;
 
   return generateReceiptNumber(prefix, nextSequence, date);
 };
@@ -397,6 +400,12 @@ export const recordFeePayment = async (req, res) => {
     }
 
     const resolvedPaymentDate = paymentDate ? new Date(paymentDate) : new Date();
+    if (Number.isNaN(resolvedPaymentDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid payment date is required",
+      });
+    }
     const db = await getDb();
     let payment = null;
     let receiptNo = null;
