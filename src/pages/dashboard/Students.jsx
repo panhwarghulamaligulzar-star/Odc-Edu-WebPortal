@@ -910,7 +910,7 @@ const Students = () => {
         </div>
 
         <div className="bulk-id-signature">
-          <div className="bulk-id-signature-text">Authorized Signature</div>
+          <div className="bulk-id-signature-text">Authorized Signature </div>
           <div className="bulk-id-signature-line" />
           <div className="bulk-id-join-date">{joinDate}</div>
         </div>
