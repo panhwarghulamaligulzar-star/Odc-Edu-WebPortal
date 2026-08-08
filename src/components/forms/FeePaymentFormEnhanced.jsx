@@ -140,6 +140,60 @@ const FeePaymentFormEnhanced = ({
     return m ? m.name : methodId || "Cash";
   };
 
+  const buildCombinedReceiptData = (results = [], rows = []) => {
+    if (!results.length) return null;
+
+    const firstPayment = results[0]?.payment || {};
+    const firstFeeStructure = results[0]?.feeStructure || {};
+    const installmentItems = results.map((result, index) => {
+      const payment = result?.payment || {};
+      const sourceRow = rows[index] || null;
+      const matchingInstallment = Array.isArray(firstFeeStructure?.installments)
+        ? firstFeeStructure.installments.find(
+            (item) =>
+              Number(item?.installmentNumber) === Number(payment?.installmentNumber),
+          ) || null
+        : null;
+
+      return {
+        receiptNo: payment.receiptNo || sourceRow?.receiptNo || null,
+        voucherNo: payment.voucherNo || sourceRow?.voucherNo || null,
+        installmentNumber:
+          payment.installmentNumber || sourceRow?.installmentNumber || null,
+        description:
+          sourceRow?.description ||
+          matchingInstallment?.description ||
+          `Installment #${payment.installmentNumber || index + 1}`,
+        amount: Number(payment.amount || sourceRow?.remainingAmount || 0),
+        dueDate:
+          sourceRow?.dueDate || matchingInstallment?.dueDate || payment.paymentDate || null,
+        feeComponents:
+          result?.payment?.feeComponents ||
+          matchingInstallment?.feeComponents ||
+          null,
+      };
+    });
+
+    return {
+      ...firstPayment,
+      receiptNo: installmentItems.map((item) => item.receiptNo).filter(Boolean).join(", "),
+      voucherNo: installmentItems.map((item) => item.voucherNo).filter(Boolean).join(", "),
+      amount: installmentItems.reduce(
+        (sum, item) => sum + Number(item.amount || 0),
+        0,
+      ),
+      paymentType: "Multiple Installments",
+      installmentNumber: null,
+      installmentItems,
+      student: {
+        ...firstPayment.student,
+        ...studentInfo,
+      },
+      feeStructure: firstFeeStructure,
+      course: firstPayment.course,
+    };
+  };
+
   const handleSubmit = async (values) => {
     setLoading(true);
     try {
@@ -201,21 +255,13 @@ const FeePaymentFormEnhanced = ({
             `Successfully paid ${results.length} installment(s) for ${formatCurrency(totalPaid)}.`,
           );
 
-          const lastPayment = results[results.length - 1];
-          const enrichedPaymentData = {
-            ...lastPayment.payment,
-            student: {
-              ...lastPayment.payment.student,
-              ...studentInfo,
-            },
-            feeStructure: lastPayment.feeStructure,
-          };
+          const enrichedPaymentData = buildCombinedReceiptData(results, payableRows);
           setPaymentData(enrichedPaymentData);
           setReceiptVisible(true);
           form.resetFields();
           setSelectedInstallments([]);
           if (onPaymentSuccess) {
-            onPaymentSuccess(lastPayment);
+            onPaymentSuccess(results[results.length - 1]);
           }
         }
         return;
@@ -255,24 +301,30 @@ const FeePaymentFormEnhanced = ({
           }
         }
 
-        // Use the last payment data for receipt
         if (results.length > 0) {
           message.success(`Successfully paid ${results.length} installments!`);
-          const lastPayment = results[results.length - 1];
-          const enrichedPaymentData = {
-            ...lastPayment.payment,
-            student: {
-              ...lastPayment.payment.student,
-              ...studentInfo,
-            },
-            feeStructure: lastPayment.feeStructure,
-          };
+          const selectedRows = selectedInstallments
+            .map((instNum) =>
+              feeStructure.installments.find(
+                (item) => item.installmentNumber === instNum,
+              ),
+            )
+            .filter(Boolean)
+            .map((item) => ({
+              installmentNumber: item.installmentNumber,
+              description: item.description,
+              remainingAmount: item.amount - (item.paidAmount || 0),
+              dueDate: item.dueDate,
+              receiptNo: item.receiptNumber || null,
+              voucherNo: item.voucherNo || null,
+            }));
+          const enrichedPaymentData = buildCombinedReceiptData(results, selectedRows);
           setPaymentData(enrichedPaymentData);
           setReceiptVisible(true);
           form.resetFields();
           setSelectedInstallments([]);
           if (onPaymentSuccess) {
-            onPaymentSuccess(lastPayment);
+            onPaymentSuccess(results[results.length - 1]);
           }
         }
         return;

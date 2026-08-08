@@ -10,6 +10,7 @@ import { syncStudentRegistrationNo } from "../utils/registrationNumberSync.js";
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 const clamp = (value, min, max) =>
   Math.min(max, Math.max(min, Number(value) || min));
+const hasDefinedValue = (value) => value !== undefined && value !== null;
 
 const addMonths = (dateValue, monthsToAdd) => {
   const date = new Date(dateValue);
@@ -98,6 +99,22 @@ const rebalanceInstallmentsToTarget = (installments = [], targetTotal = 0) => {
   return normalized;
 };
 
+const getInstallmentComponentsTotal = (feeComponents = {}) =>
+  round2(
+    Number(feeComponents?.admissionFee || 0) +
+      Number(feeComponents?.courseFee || 0) +
+      Number(feeComponents?.certificateFee || 0) +
+      Number(feeComponents?.examFee || 0) +
+      Number(feeComponents?.registrationFee || 0) +
+      Number(feeComponents?.practicalFee || 0) +
+      Number(feeComponents?.otherFee || 0),
+  );
+
+const getInstallmentsTotal = (installments = []) =>
+  round2(
+    installments.reduce((sum, item) => sum + Number(item?.amount || 0), 0),
+  );
+
 const generateEqualInstallments = ({
   feeConfig,
   count,
@@ -185,7 +202,12 @@ const generateEqualInstallments = ({
   return rebalanceInstallmentsToTarget(installments, finalTarget);
 };
 
-const normalizeInstallments = ({ installments, totalAmount, startDate }) => {
+const normalizeInstallments = ({
+  installments,
+  totalAmount,
+  startDate,
+  preserveExactAmounts = false,
+}) => {
   if (!Array.isArray(installments) || installments.length === 0) {
     return [];
   }
@@ -207,13 +229,21 @@ const normalizeInstallments = ({ installments, totalAmount, startDate }) => {
       practicalFee: round2(item?.feeComponents?.practicalFee || 0),
       otherFee: round2(item?.feeComponents?.otherFee || 0),
     },
-    amount: round2(item?.amount),
+    amount: round2(
+      hasDefinedValue(item?.amount)
+        ? item.amount
+        : getInstallmentComponentsTotal(item?.feeComponents),
+    ),
     dueDate: item?.dueDate
       ? new Date(item.dueDate)
       : addMonths(startDate, index),
     status: item?.status || "Pending",
     paidAmount: round2(item?.paidAmount || 0),
   }));
+
+  if (preserveExactAmounts) {
+    return normalized;
+  }
 
   const targetTotal = round2(totalAmount);
   return rebalanceInstallmentsToTarget(normalized, targetTotal);
@@ -388,7 +418,7 @@ export const createEnrollment = async (req, res) => {
     const discountedCourseFee = round2(
       Math.max(0, selectedCourseFee - amountDiscount),
     );
-    const resolvedFinalFee = round2(
+    const calculatedFinalFee = round2(
       selectedAdmissionFee +
         discountedCourseFee +
         selectedCertificateFee +
@@ -402,9 +432,14 @@ export const createEnrollment = async (req, res) => {
 
     let resolvedInstallments = normalizeInstallments({
       installments,
-      totalAmount: resolvedFinalFee,
+      totalAmount: calculatedFinalFee,
       startDate: enrollmentStartDate,
+      preserveExactAmounts: true,
     });
+
+    const resolvedFinalFee = resolvedInstallments.length
+      ? getInstallmentsTotal(resolvedInstallments)
+      : calculatedFinalFee;
 
     if (resolvedInstallments.length === 0) {
       const fallbackCount = clamp(
@@ -461,7 +496,9 @@ export const createEnrollment = async (req, res) => {
       }
     }
 
-    const finalAmount = resolvedFinalFee;
+    const finalAmount = resolvedInstallments.length
+      ? getInstallmentsTotal(resolvedInstallments)
+      : resolvedFinalFee;
 
     const feeStructure = new FeeStructureSchema({
       student: studentId,
@@ -722,7 +759,17 @@ export const updateEnrollmentStatus = async (req, res) => {
     if (discountPercentage !== undefined) feeStructureUpdate.discountPercentage = clamp(discountPercentage, 0, 100);
     if (discountOnCourseFee !== undefined) feeStructureUpdate.discountOnCourseFee = round2(discountOnCourseFee);
 
-    const resolvedTotal = round2(finalFee ?? totalFee ?? 0);
+    const normalizedInstallments = installments?.length
+      ? normalizeInstallments({
+          installments,
+          totalAmount: finalFee ?? totalFee,
+          startDate: enrollmentDate || new Date(),
+          preserveExactAmounts: true,
+        })
+      : [];
+    const resolvedTotal = normalizedInstallments.length
+      ? getInstallmentsTotal(normalizedInstallments)
+      : round2(finalFee ?? totalFee ?? 0);
     if (finalFee !== undefined || totalFee !== undefined) {
       feeStructureUpdate.totalFee = resolvedTotal;
     }
@@ -731,12 +778,11 @@ export const updateEnrollmentStatus = async (req, res) => {
       feeStructureUpdate.numberOfInstallments = numberOfInstallments;
       feeStructureUpdate.installmentEnabled = numberOfInstallments > 1;
     }
-    if (installments && installments.length > 0) {
-      feeStructureUpdate.installments = normalizeInstallments({
-        installments,
-        totalAmount: resolvedTotal,
-        startDate: enrollmentDate || new Date(),
-      });
+    if (normalizedInstallments.length > 0) {
+      feeStructureUpdate.installments = normalizedInstallments;
+      feeStructureUpdate.numberOfInstallments = normalizedInstallments.length;
+      feeStructureUpdate.installmentEnabled = normalizedInstallments.length > 1;
+      feeStructureUpdate.totalFee = resolvedTotal;
     }
 
     if (Object.keys(feeStructureUpdate).length > 0) {

@@ -9,7 +9,8 @@
     "seed:admin": "node seeders/adminSeeder.js",
     "seed:superadmin": "node seeders/superAdminSeeder.js",
     "db:backup-live": "node seeders/backupDB.js",
-    "db:restore-local": "node seeders/restoreDB.js"
+    "db:restore-local": "node seeders/restoreDB.js",
+    "db:sync-live-to-local": "npm run db:backup-live && npm run db:restore-local"
   },
   "keywords": [],
   "author": "",
