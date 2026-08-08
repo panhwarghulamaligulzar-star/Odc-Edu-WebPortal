@@ -250,9 +250,29 @@ const buildInstallments = (
   const diff = round2(targetTotal - currentTotal);
   if (combined.length > 0 && diff !== 0) {
     const lastIndex = combined.length - 1;
+    const lastInstallment = combined[lastIndex];
+    const nextFeeComponents = {
+      ...(lastInstallment.feeComponents || {}),
+    };
+
+    if (nextFeeComponents.otherFee > 0) {
+      nextFeeComponents.otherFee = round2(nextFeeComponents.otherFee + diff);
+    } else if (nextFeeComponents.certificateFee > 0) {
+      nextFeeComponents.certificateFee = round2(
+        nextFeeComponents.certificateFee + diff,
+      );
+    } else if (nextFeeComponents.courseFee > 0) {
+      nextFeeComponents.courseFee = round2(nextFeeComponents.courseFee + diff);
+    } else {
+      nextFeeComponents.courseFee = round2(
+        Number(nextFeeComponents.courseFee || 0) + diff,
+      );
+    }
+
     combined[lastIndex] = {
-      ...combined[lastIndex],
-      amount: round2(combined[lastIndex].amount + diff),
+      ...lastInstallment,
+      amount: round2(lastInstallment.amount + diff),
+      feeComponents: nextFeeComponents,
     };
   }
 

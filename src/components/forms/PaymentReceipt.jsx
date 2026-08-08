@@ -28,6 +28,10 @@ const { Title, Text } = Typography;
  */
 const PaymentReceipt = ({ visible, onClose, paymentData, institutionInfo }) => {
   const receiptRef = useRef(null);
+  const installmentItems = Array.isArray(paymentData?.installmentItems)
+    ? paymentData.installmentItems
+    : [];
+  const isCombinedInstallmentReceipt = installmentItems.length > 0;
 
   const handlePrint = useReactToPrint({
     contentRef: receiptRef,
@@ -242,9 +246,14 @@ const PaymentReceipt = ({ visible, onClose, paymentData, institutionInfo }) => {
             <Descriptions.Item label="Course ID">
               {paymentData.course?.courseId || "N/A"}
             </Descriptions.Item>
-            {paymentData.installmentNumber && (
+            {paymentData.installmentNumber && !isCombinedInstallmentReceipt && (
               <Descriptions.Item label="Installment No">
                 #{paymentData.installmentNumber}
+              </Descriptions.Item>
+            )}
+            {isCombinedInstallmentReceipt && (
+              <Descriptions.Item label="Installments Paid">
+                {installmentItems.length} selected installment(s)
               </Descriptions.Item>
             )}
           </Descriptions>
@@ -297,8 +306,100 @@ const PaymentReceipt = ({ visible, onClose, paymentData, institutionInfo }) => {
           </Descriptions>
         </Card>
 
+        {isCombinedInstallmentReceipt && (
+          <Card size="small" className="mb-2 bg-blue-50">
+            <Title level={5} className="mb-2 text-xs">
+              Installments Included In This Payment
+            </Title>
+            <Space direction="vertical" size="small" className="w-full">
+              {installmentItems.map((item) => (
+                <div
+                  key={`${item.installmentNumber}-${item.receiptNo || item.voucherNo || item.description}`}
+                  className="rounded border border-blue-100 bg-white px-3 py-2"
+                >
+                  <div className="flex justify-between items-start gap-3">
+                    <div>
+                      <div className="font-medium text-xs text-slate-800">
+                        Installment #{item.installmentNumber}
+                      </div>
+                      <div className="text-xs text-slate-600">
+                        {item.description || "Installment payment"}
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-1">
+                        Due Date: {formatDate(item.dueDate)}
+                      </div>
+                      {item.receiptNo && (
+                        <div className="text-[11px] text-slate-500">
+                          Receipt No: {item.receiptNo}
+                        </div>
+                      )}
+                      {item.voucherNo && (
+                        <div className="text-[11px] text-slate-500">
+                          Voucher No: {item.voucherNo}
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <Text strong className="text-xs text-green-700">
+                        {formatCurrency(item.amount)}
+                      </Text>
+                    </div>
+                  </div>
+
+                  {item.feeComponents && (
+                    <div className="mt-2 space-y-1">
+                      {item.feeComponents.admissionFee > 0 && (
+                        <div className="flex justify-between text-[11px]">
+                          <span>Admission Fee</span>
+                          <span>{formatCurrency(item.feeComponents.admissionFee)}</span>
+                        </div>
+                      )}
+                      {item.feeComponents.courseFee > 0 && (
+                        <div className="flex justify-between text-[11px]">
+                          <span>Course Fee</span>
+                          <span>{formatCurrency(item.feeComponents.courseFee)}</span>
+                        </div>
+                      )}
+                      {item.feeComponents.certificateFee > 0 && (
+                        <div className="flex justify-between text-[11px]">
+                          <span>Certificate Fee</span>
+                          <span>{formatCurrency(item.feeComponents.certificateFee)}</span>
+                        </div>
+                      )}
+                      {item.feeComponents.examFee > 0 && (
+                        <div className="flex justify-between text-[11px]">
+                          <span>Exam Fee</span>
+                          <span>{formatCurrency(item.feeComponents.examFee)}</span>
+                        </div>
+                      )}
+                      {item.feeComponents.registrationFee > 0 && (
+                        <div className="flex justify-between text-[11px]">
+                          <span>Registration Fee</span>
+                          <span>{formatCurrency(item.feeComponents.registrationFee)}</span>
+                        </div>
+                      )}
+                      {item.feeComponents.practicalFee > 0 && (
+                        <div className="flex justify-between text-[11px]">
+                          <span>Practical Fee</span>
+                          <span>{formatCurrency(item.feeComponents.practicalFee)}</span>
+                        </div>
+                      )}
+                      {item.feeComponents.otherFee > 0 && (
+                        <div className="flex justify-between text-[11px]">
+                          <span>Other Fee</span>
+                          <span>{formatCurrency(item.feeComponents.otherFee)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </Space>
+          </Card>
+        )}
+
         {/* Payment Breakdown (if available) */}
-        {paymentData.installmentNumber && paymentData.feeStructure && (
+        {paymentData.installmentNumber && paymentData.feeStructure && !isCombinedInstallmentReceipt && (
           <Card size="small" className="mb-2 bg-blue-50">
             <Title level={5} className="mb-2 text-xs">
               Payment Breakdown for Installment #{paymentData.installmentNumber}

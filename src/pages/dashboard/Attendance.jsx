@@ -576,12 +576,12 @@ function MarkAttendancePanel({ batches }) {
   }, [attendanceMap, filteredTeachers]);
 
   const handleMarkAllVisibleStudentsPresent = (event) => {
-    if (!event?.target?.checked) return;
+    const shouldMarkPresent = Boolean(event?.target?.checked);
 
     setAttendanceMap((prev) => {
       const next = { ...prev };
       filteredStudents.forEach((student) => {
-        next[student._id] = "Present";
+        next[student._id] = shouldMarkPresent ? "Present" : "Absent";
       });
       return next;
     });
@@ -589,12 +589,12 @@ function MarkAttendancePanel({ batches }) {
   };
 
   const handleMarkAllVisibleTeachersPresent = (event) => {
-    if (!event?.target?.checked) return;
+    const shouldMarkPresent = Boolean(event?.target?.checked);
 
     setAttendanceMap((prev) => {
       const next = { ...prev };
       filteredTeachers.forEach((teacher) => {
-        next[teacher._id] = "Present";
+        next[teacher._id] = shouldMarkPresent ? "Present" : "Absent";
       });
       return next;
     });
