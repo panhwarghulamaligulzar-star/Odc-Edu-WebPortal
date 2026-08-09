@@ -84,6 +84,77 @@ const autoMarkAcademyHolidayAttendance = async (holiday, userId) => {
   return ops.length;
 };
 
+const restoreAttendanceAfterHolidayRemoval = async (holiday, userId) => {
+  const batchIds = await getAffectedBatchIds(holiday);
+  const dates = getHolidayDateRange(holiday);
+  const ops = [];
+
+  for (const batchId of batchIds) {
+    const batch = await BatchSchema.findById(batchId, "course").lean();
+    if (!batch) continue;
+
+    const enrollments = await EnrollmentSchema.find(
+      { batch: batchId, status: { $in: ["Active", "On Hold"] } },
+      "student"
+    ).lean();
+
+    const teachers = batch.course
+      ? await TeacherSchema.find({ courseId: batch.course }, "_id").lean()
+      : [];
+
+    for (const date of dates) {
+      for (const en of enrollments) {
+        if (!en.student) continue;
+        ops.push({
+          updateOne: {
+            filter: { batch: batchId, date, person: en.student },
+            update: {
+              $set: {
+                batch: batchId,
+                date,
+                person: en.student,
+                personModel: "Admission",
+                personType: "student",
+                status: "Present",
+                notes: "",
+                markedBy: userId,
+              },
+            },
+            upsert: true,
+          },
+        });
+      }
+
+      for (const t of teachers) {
+        ops.push({
+          updateOne: {
+            filter: { batch: batchId, date, person: t._id },
+            update: {
+              $set: {
+                batch: batchId,
+                date,
+                person: t._id,
+                personModel: "Teacher",
+                personType: "teacher",
+                status: "Present",
+                notes: "",
+                markedBy: userId,
+              },
+            },
+            upsert: true,
+          },
+        });
+      }
+    }
+  }
+
+  if (ops.length > 0) {
+    await AttendanceSchema.bulkWrite(ops, { ordered: false });
+  }
+
+  return ops.length;
+};
+
 // ─── Pakistan government holidays (fixed + variable placeholders) ─────────────
 // These are seeded once. Variable ones (Eid etc.) are updated by admin each year.
 export const PAKISTAN_GOVT_HOLIDAYS = [
@@ -115,6 +186,29 @@ const toMidnight = (d) => {
   const dt = new Date(d);
   dt.setHours(0, 0, 0, 0);
   return dt;
+};
+
+const getHolidayDateRange = (holiday) => {
+  const dates = [];
+  const startDate = new Date(holiday.date);
+  startDate.setHours(0, 0, 0, 0);
+  const endDate = holiday.endDate ? new Date(holiday.endDate) : new Date(holiday.date);
+  endDate.setHours(0, 0, 0, 0);
+  let cur = new Date(startDate);
+  while (cur <= endDate) {
+    dates.push(new Date(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return dates;
+};
+
+const getAffectedBatchIds = async (holiday) => {
+  let batchIds = (holiday.affectedBatches || []).map((id) => id.toString());
+  if (batchIds.length === 0) {
+    const allBatches = await BatchSchema.find({}, "_id").lean();
+    batchIds = allBatches.map((b) => b._id.toString());
+  }
+  return batchIds;
 };
 
 const buildHolidayOverlapFilter = (from, to) => {
@@ -257,6 +351,7 @@ export const getHolidayDates = async (req, res) => {
       let cur = new Date(start);
       while (cur <= end) {
         expanded.push({
+          _id: h._id,
           date: cur.toISOString().split("T")[0],
           name: h.name,
           type: h.type,
@@ -296,14 +391,24 @@ export const updateHoliday = async (req, res) => {
 export const deleteHoliday = async (req, res) => {
   try {
     const { id } = req.params;
-    const holiday = await HolidaySchema.findByIdAndUpdate(
-      id,
-      { isActive: false },
-      { new: true }
-    );
+    const holiday = await HolidaySchema.findById(id);
     if (!holiday) return res.status(404).json({ success: false, message: "Holiday not found" });
 
-    res.status(200).json({ success: true, message: "Holiday removed" });
+    let restoredAttendance = 0;
+    if (holiday.type === "academy") {
+      restoredAttendance = await restoreAttendanceAfterHolidayRemoval(holiday, req.user?._id);
+    }
+
+    holiday.isActive = false;
+    await holiday.save();
+
+    res.status(200).json({
+      success: true,
+      message: holiday.type === "academy"
+        ? `Holiday removed and attendance restored to Present for ${restoredAttendance} record(s)`
+        : "Holiday removed",
+      restoredAttendance,
+    });
   } catch (error) {
     console.error("deleteHoliday error:", error);
     res.status(500).json({ success: false, message: error.message });

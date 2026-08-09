@@ -22,7 +22,7 @@ import {
   getMonthCalendar,
   getPersonAttendance,
 } from "../../services/attendanceService";
-import { createHoliday, getHolidayDates } from "../../services/holidayService";
+import { createHoliday, deleteHoliday, getHolidayDates } from "../../services/holidayService";
 import MonthlyAttendanceReport from "./MonthlyAttendanceReport";
 
 // ─── PDF Design Constants (matches Students.jsx) ──────────────────────────────
@@ -172,6 +172,9 @@ const Legend = () => (
 
 // ─── StatusTag helper ─────────────────────────────────────────────────────────
 const StatusTag = ({ status }) => {
+  if (!status) {
+    return <Tag>Not Marked</Tag>;
+  }
   const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.Absent;
   return (
     <Tag color={cfg.tag} className="flex items-center gap-1 w-fit">
@@ -416,6 +419,35 @@ function MarkAttendancePanel({ batches }) {
     }
   };
 
+  const handleRemoveBatchHoliday = () => {
+    if (!selectedHoliday?._id || !selectedDate) {
+      message.warning("No holiday found for the selected date");
+      return;
+    }
+
+    Modal.confirm({
+      title: "Unmark Global Holiday",
+      content: `This will remove the academy holiday for ${selectedDate.format("DD MMM YYYY")} and restore attendance to Present for this date. Do you want to continue?`,
+      okText: "Unmark Holiday",
+      okButtonProps: { danger: true },
+      cancelText: "Cancel",
+      onOk: async () => {
+        try {
+          const res = await deleteHoliday(selectedHoliday._id);
+          message.success(res.message || "Holiday removed successfully");
+          setDirty(false);
+          await Promise.all([
+            loadHolidays(selectedBatch),
+            loadAttendance(),
+            loadCalendar(selectedBatch, selectedDate),
+          ]);
+        } catch (err) {
+          message.error(err?.response?.data?.message || "Failed to remove holiday");
+        }
+      },
+    });
+  };
+
   const handleSave = async () => {
     if (!selectedBatch || !selectedDate) { message.warning("Select a batch and date first"); return; }
     setSaving(true);
@@ -606,8 +638,16 @@ function MarkAttendancePanel({ batches }) {
     if (personTypeFilter === "teacher") return filteredTeachers;
     return activeTab === "student" ? filteredStudents : filteredTeachers;
   }, [activeTab, personTypeFilter, filteredStudents, filteredTeachers]);
+  const unmarkedCount = useMemo(
+    () => currentList.filter((p) => !attendanceMap[p._id]).length,
+    [attendanceMap, currentList],
+  );
+  const hasSavedRecordsForSelection = useMemo(
+    () => Object.keys(attendanceMap).length > 0,
+    [attendanceMap],
+  );
   const counts = [...STATUSES, "Holiday"].reduce((acc, s) => {
-    acc[s] = currentList.filter((p) => (attendanceMap[p._id] || "Absent") === s).length;
+    acc[s] = currentList.filter((p) => attendanceMap[p._id] === s).length;
     return acc;
   }, {});
 
@@ -616,12 +656,24 @@ function MarkAttendancePanel({ batches }) {
     { title: "Name", dataIndex: "name", render: (v) => <span className="font-medium">{v}</span> },
     { title: "Reg. No", dataIndex: "registrationNo" },
     { title: "Gender", dataIndex: "gender", render: (g) => <Tag color={g === "Male" ? "blue" : "pink"}>{g}</Tag> },
-    { title: "Mark Attendance", render: (_, r) => <StatusPicker disabled={isAcademyHoliday} value={attendanceMap[r._id] || "Absent"} onChange={(s) => handleStatusChange(r._id, s)} /> },
+    {
+      title: "Enrollment",
+      dataIndex: "enrollmentStatus",
+      render: (status) => {
+        const color =
+          status === "Active" ? "green" :
+          status === "On Hold" ? "orange" :
+          status === "Completed" ? "blue" :
+          status === "Dropped" ? "red" : "default";
+        return <Tag color={color}>{status || "Unknown"}</Tag>;
+      },
+    },
+    { title: "Mark Attendance", render: (_, r) => <StatusPicker disabled={isAcademyHoliday} value={attendanceMap[r._id]} onChange={(s) => handleStatusChange(r._id, s)} /> },
     {
       title: "Status", width: 130,
       render: (_, r) => (
         <div className="flex flex-col gap-1">
-          <StatusTag status={attendanceMap[r._id] || "Absent"} />
+          <StatusTag status={attendanceMap[r._id]} />
           {timeMap[r._id] && (
             <span className="text-[10px] text-gray-400">🕐 {timeMap[r._id]}</span>
           )}
@@ -636,12 +688,12 @@ function MarkAttendancePanel({ batches }) {
     { title: "ID", dataIndex: "teacherId" },
     { title: "Designation", dataIndex: "designation", render: (d) => d || "—" },
     { title: "Gender", dataIndex: "gender", render: (g) => <Tag color={g === "Male" ? "blue" : "pink"}>{g}</Tag> },
-    { title: "Mark Attendance", render: (_, r) => <StatusPicker disabled={isAcademyHoliday} value={attendanceMap[r._id] || "Absent"} onChange={(s) => handleStatusChange(r._id, s)} /> },
+    { title: "Mark Attendance", render: (_, r) => <StatusPicker disabled={isAcademyHoliday} value={attendanceMap[r._id]} onChange={(s) => handleStatusChange(r._id, s)} /> },
     {
       title: "Status", width: 130,
       render: (_, r) => (
         <div className="flex flex-col gap-1">
-          <StatusTag status={attendanceMap[r._id] || "Absent"} />
+          <StatusTag status={attendanceMap[r._id]} />
           {timeMap[r._id] && (
             <span className="text-[10px] text-gray-400">🕐 {timeMap[r._id]}</span>
           )}
@@ -803,6 +855,11 @@ function MarkAttendancePanel({ batches }) {
                 Mark This Day as Global Holiday
               </Button>
             )}
+            {isAcademyHoliday && (
+              <Button danger onClick={handleRemoveBatchHoliday}>
+                Unmark Global Holiday
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -810,6 +867,16 @@ function MarkAttendancePanel({ batches }) {
       {/* Summary counts */}
       {selectedBatch && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {unmarkedCount > 0 && (
+            <div className="rounded-xl border px-4 py-3 flex items-center gap-3 bg-gray-50 border-gray-300 text-gray-700">
+              <span className="text-2xl font-bold">{unmarkedCount}</span>
+              <div className="flex flex-col">
+                <span className="text-xs font-semibold">Not Marked</span>
+                <span className="text-[11px] opacity-70">of {currentList.length}</span>
+              </div>
+              <span className="text-lg font-semibold">?</span>
+            </div>
+          )}
           {STATUSES.map((s) => (
             <div key={s} className={`rounded-xl border px-4 py-3 flex items-center gap-3 ${STATUS_CONFIG[s].color}`}>
               <span className="text-2xl font-bold">{counts[s]}</span>
@@ -836,6 +903,11 @@ function MarkAttendancePanel({ batches }) {
       {/* Table */}
       {selectedBatch ? (
         <div className="bg-white rounded-xl shadow">
+          {!isAcademyHoliday && !hasSavedRecordsForSelection && (
+            <div className="mx-4 mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              No saved attendance record was found for {selectedDate.format("DD MMM YYYY")} in this batch yet. If you expected previous-month data here, check the backup or source database because the local <code>attendances</code> collection is currently empty.
+            </div>
+          )}
           <Tabs activeKey={activeTab}
             onChange={(k) => { setActiveTab(k); setDirty(false); }}
             className="px-4 pt-2"

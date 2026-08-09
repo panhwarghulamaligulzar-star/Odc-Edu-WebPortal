@@ -195,7 +195,6 @@ const getBatchMembers = async (req, res) => {
     // Students enrolled in this batch — include Active and On Hold
     const enrollments = await EnrollmentSchema.find({
       batch: batchId,
-      status: { $in: ["Active", "On Hold"] },
     })
       .populate("student", "studentName registrationNo gender")
       .lean();
@@ -209,6 +208,7 @@ const getBatchMembers = async (req, res) => {
         name: e.student.studentName,
         registrationNo: e.student.registrationNo,
         gender: e.student.gender,
+        enrollmentStatus: e.status,
         personType: "student",
       }));
 
