@@ -22,7 +22,7 @@ import {
   getMonthCalendar,
   getPersonAttendance,
 } from "../../services/attendanceService";
-import { createHoliday, deleteHoliday, getHolidayDates } from "../../services/holidayService";
+import { createHoliday, deleteHoliday, getHolidayDates, getHolidays } from "../../services/holidayService";
 import MonthlyAttendanceReport from "./MonthlyAttendanceReport";
 
 // ─── PDF Design Constants (matches Students.jsx) ──────────────────────────────
@@ -420,11 +420,6 @@ function MarkAttendancePanel({ batches }) {
   };
 
   const handleRemoveBatchHoliday = () => {
-    if (!selectedHoliday?._id || !selectedDate) {
-      message.warning("No holiday found for the selected date");
-      return;
-    }
-
     Modal.confirm({
       title: "Unmark Global Holiday",
       content: `This will remove the academy holiday for ${selectedDate.format("DD MMM YYYY")} and restore attendance to Present for this date. Do you want to continue?`,
@@ -433,7 +428,45 @@ function MarkAttendancePanel({ batches }) {
       cancelText: "Cancel",
       onOk: async () => {
         try {
-          const res = await deleteHoliday(selectedHoliday._id);
+          let holidayId = selectedHoliday?._id || null;
+
+          // Re-resolve the holiday from the backend so unmark still works even
+          // if the lightweight holiday-date cache missed the id for this date.
+          if (!holidayId && selectedDate && selectedBatch) {
+            const from = selectedDate.format("YYYY-MM-DD");
+            const lookup = await getHolidays({
+              from,
+              to: from,
+              batchId: selectedBatch,
+              type: "academy",
+            });
+
+            const matchedHoliday = (lookup?.data || []).find((holiday) => {
+              const holidayDate = holiday?.date
+                ? dayjs(holiday.date).format("YYYY-MM-DD")
+                : null;
+              const holidayEndDate = holiday?.endDate
+                ? dayjs(holiday.endDate).format("YYYY-MM-DD")
+                : holidayDate;
+              const targetDate = selectedDate.format("YYYY-MM-DD");
+
+              return (
+                holiday?.type === "academy" &&
+                holidayDate &&
+                holidayDate <= targetDate &&
+                holidayEndDate >= targetDate
+              );
+            });
+
+            holidayId = matchedHoliday?._id || null;
+          }
+
+          if (!holidayId) {
+            message.warning("No holiday found for the selected date");
+            return;
+          }
+
+          const res = await deleteHoliday(holidayId);
           message.success(res.message || "Holiday removed successfully");
           setDirty(false);
           await Promise.all([
