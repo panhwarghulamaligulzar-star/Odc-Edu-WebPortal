@@ -2277,8 +2277,14 @@ const getReceiptOverviewBaseData = async () => {
           remainingAmount: entry.remainingAmount,
           dueStatus: entry.status,
           feeStatus: item.feeStatus,
-          installmentEnabled: !!item.installmentEnabled,
-          numberOfInstallments: item.numberOfInstallments || 1,
+          installmentEnabled:
+            Array.isArray(item.installments) && item.installments.length
+              ? item.installments.length > 1
+              : !!item.installmentEnabled,
+          numberOfInstallments:
+            Array.isArray(item.installments) && item.installments.length
+              ? item.installments.length
+              : item.numberOfInstallments || 1,
           dueDate: entry.dueDate,
           description: entry.description,
           installmentNumber: entry.installmentNumber,
@@ -2749,8 +2755,14 @@ export const exportReceiptDues = async (req, res) => {
           remainingAmount: entry.remainingAmount,
           dueStatus: normalizeDueStatus(entry.status),
           feeStatus: item.feeStatus,
-          installmentEnabled: !!item.installmentEnabled,
-          numberOfInstallments: item.numberOfInstallments || 1,
+          installmentEnabled:
+            Array.isArray(item.installments) && item.installments.length
+              ? item.installments.length > 1
+              : !!item.installmentEnabled,
+          numberOfInstallments:
+            Array.isArray(item.installments) && item.installments.length
+              ? item.installments.length
+              : item.numberOfInstallments || 1,
           dueDate: entry.dueDate,
           description: entry.description,
           installmentNumber: entry.installmentNumber,

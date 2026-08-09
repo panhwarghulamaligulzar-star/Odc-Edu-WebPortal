@@ -23,6 +23,7 @@ import dayjs from "dayjs";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   getPaymentReceipt,
+  getStudentEnrollments,
   getStudentFeeStructures,
   getStudentPaymentHistory,
 } from "../../../services/feeService";
@@ -61,6 +62,7 @@ export default function ReceiptStudentHistory() {
 
   const [loading, setLoading] = useState(false);
   const [feeStructures, setFeeStructures] = useState([]);
+  const [enrollments, setEnrollments] = useState([]);
   const [payments, setPayments] = useState([]);
   const [historyStatusTab, setHistoryStatusTab] = useState("all");
   const [historyCourseFilter, setHistoryCourseFilter] = useState("all");
@@ -80,15 +82,18 @@ export default function ReceiptStudentHistory() {
 
     setLoading(true);
     try {
-      const [feeStructuresRes, paymentRes] = await Promise.all([
+      const [feeStructuresRes, paymentRes, enrollmentsRes] = await Promise.all([
         getStudentFeeStructures(studentId),
         getStudentPaymentHistory(studentId),
+        getStudentEnrollments(studentId),
       ]);
 
-      if (feeStructuresRes?.success && paymentRes?.success) {
+      if (feeStructuresRes?.success && paymentRes?.success && enrollmentsRes?.success) {
         const nextFeeStructures = feeStructuresRes.data || [];
         const nextPayments = paymentRes.data?.payments || [];
+        const nextEnrollments = enrollmentsRes.data || [];
         setFeeStructures(nextFeeStructures);
+        setEnrollments(nextEnrollments);
         setPayments(nextPayments);
         setSelectedStudent((prev) => prev || nextFeeStructures[0]?.student || initialContext?.student || null);
         setSelectedHistoryInstallments([]);
@@ -115,16 +120,38 @@ export default function ReceiptStudentHistory() {
     () =>
       Array.from(
         new Map(
-          feeStructures.map((item) => [
-            String(item?.course?._id || item?.course || ""),
-            {
-              label: item?.course?.courseName || "Course",
-              value: String(item?.course?._id || item?.course || ""),
-            },
-          ]),
+          enrollments
+            .map((item) => [
+              String(item?.course?._id || item?.course || ""),
+              {
+                label: item?.course?.courseName || "Course",
+                value: String(item?.course?._id || item?.course || ""),
+              },
+            ])
+            .filter(([value]) => value),
         ).values(),
       ),
-    [feeStructures],
+    [enrollments],
+  );
+
+  const normalizedHistoryCourseOptions = useMemo(
+    () =>
+      historyCourseOptions.length
+        ? historyCourseOptions
+        : Array.from(
+            new Map(
+              feeStructures
+                .map((item) => [
+                  String(item?.course?._id || item?.course || ""),
+                  {
+                    label: item?.course?.courseName || "Course",
+                    value: String(item?.course?._id || item?.course || ""),
+                  },
+                ])
+                .filter(([value]) => value),
+            ).values(),
+          ),
+    [historyCourseOptions, feeStructures],
   );
 
   const courseScopedRows = useMemo(() => {
@@ -445,7 +472,7 @@ export default function ReceiptStudentHistory() {
               style={{ minWidth: 260 }}
               options={[
                 { label: "All assigned courses", value: "all" },
-                ...historyCourseOptions,
+                ...normalizedHistoryCourseOptions,
               ]}
             />
             <DatePicker
