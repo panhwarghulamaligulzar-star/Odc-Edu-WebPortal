@@ -135,10 +135,6 @@ const DOW_MAP = {
 const isDisabledDate = (d, batchDays, holidayMap) => {
   if (!batchDays) return false;
   if (!(DOW_MAP[batchDays] || []).includes(d.day())) return true;
-  if (holidayMap) {
-    const h = holidayMap.get(d.format("YYYY-MM-DD"));
-    if (h && h.type === "academy") return true;
-  }
   return false;
 };
 
@@ -780,7 +776,7 @@ function MarkAttendancePanel({ batches }) {
             renderExtraFooter={() =>
               holidayMap.size > 0 ? (
                 <div className="text-xs text-gray-500 px-2 py-1">
-                  Academy holidays (SH) are disabled and auto-marked. Government holidays (PH) stay selectable when the academy is open.
+                  Academy holidays (SH) stay selectable so admins can unmark them. Government holidays (PH) also stay selectable when the academy is open.
                 </div>
               ) : null
             }
