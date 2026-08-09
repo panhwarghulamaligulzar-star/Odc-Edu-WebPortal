@@ -764,6 +764,23 @@ const CourseAssignmentForm = ({
     return true;
   };
 
+  const handleFormValuesChange = (changedValues) => {
+    const changedKeys = Object.keys(changedValues || {});
+    if (
+      changedKeys.some((key) =>
+        [
+          "courseId",
+          "enrollmentDate",
+          "paymentPlanType",
+          "discountPercentage",
+          "numberOfInstallments",
+        ].includes(key),
+      )
+    ) {
+      userChangedInstallmentInputsRef.current = true;
+    }
+  };
+
   const handleStepAction = async () => {
     console.log("CourseAssignmentForm: handleStepAction clicked", { isEditMode });
     if (isEditMode) {
@@ -998,6 +1015,7 @@ const CourseAssignmentForm = ({
         form={form}
         layout="vertical"
         onFinish={handleSubmit}
+        onValuesChange={handleFormValuesChange}
         onFinishFailed={(errorInfo) => console.error("CourseAssignmentForm validation failed:", errorInfo)}
       >
         <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>

@@ -838,7 +838,7 @@ const Payroll = () => {
               <Space wrap>
                 {(selectedRecord.courses || []).map((course) => (
                   <Tag key={course._id} color="blue">
-                    {course.courseName} ({course.activeStudentCount || 0} students)
+                    {course.courseName} ({course.activeStudents?.length || course.activeStudentCount || 0} students)
                   </Tag>
                 ))}
               </Space>
@@ -898,9 +898,15 @@ const Payroll = () => {
                     key: "registrationNo",
                   },
                   {
+                    title: "Attendance",
+                    key: "attendanceCounts",
+                    render: (_, student) =>
+                      `${student.presentDays || 0}P + ${student.halfDays || 0}HD / ${student.totalWorkingDays || 0}`,
+                  },
+                  {
                     title: "Attendance %",
-                    dataIndex: "attendancePercentage",
-                    key: "attendancePercentage",
+                    dataIndex: "monthlyAttendancePercentage",
+                    key: "monthlyAttendancePercentage",
                     render: (value) => `${Number(value || 0).toFixed(1)}%`,
                   },
                   {
@@ -911,8 +917,8 @@ const Payroll = () => {
                   },
                   {
                     title: "Status",
-                    dataIndex: "isEligible",
-                    key: "isEligible",
+                    dataIndex: "isSalaryEligible",
+                    key: "isSalaryEligible",
                     render: (value) => (
                       <Tag color={value ? "green" : "orange"}>
                         {value ? "Eligible" : "Not Eligible"}

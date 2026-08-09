@@ -10,6 +10,265 @@ import {
 } from "../utils/installmentCalculator.js";
 import { createAutoAccountingEntry } from "../utils/autoAccountingEntry.js";
 
+const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
+const clamp = (value, min, max) =>
+  Math.min(max, Math.max(min, Number(value) || min));
+
+const addMonths = (dateValue, monthsToAdd) => {
+  const date = new Date(dateValue);
+  date.setMonth(date.getMonth() + monthsToAdd);
+  return date;
+};
+
+const normalizeAdditionalFees = (rows = []) =>
+  (Array.isArray(rows) ? rows : [])
+    .map((row) => {
+      const amount = round2(row?.amount);
+      const feeType = ["exam", "registration", "practical", "other"].includes(
+        row?.feeType,
+      )
+        ? row.feeType
+        : "other";
+      const title = (row?.title || "").trim() || "Additional Fee";
+      const paymentMode =
+        row?.paymentMode === "two_installments"
+          ? "two_installments"
+          : "one_time";
+
+      return {
+        feeType,
+        title,
+        amount,
+        paymentMode,
+        numberOfInstallments: paymentMode === "two_installments" ? 2 : 1,
+      };
+    })
+    .filter((row) => row.amount > 0);
+
+const getInstallmentComponentsTotal = (feeComponents = {}) =>
+  round2(
+    Number(feeComponents?.admissionFee || 0) +
+      Number(feeComponents?.courseFee || 0) +
+      Number(feeComponents?.certificateFee || 0) +
+      Number(feeComponents?.examFee || 0) +
+      Number(feeComponents?.registrationFee || 0) +
+      Number(feeComponents?.practicalFee || 0) +
+      Number(feeComponents?.otherFee || 0),
+  );
+
+const rebalanceInstallmentsToTarget = (installments = [], targetTotal = 0) => {
+  const normalized = installments.map((item) => ({
+    ...item,
+    amount: round2(Math.max(0, item.amount || 0)),
+  }));
+
+  if (!normalized.length) {
+    return normalized;
+  }
+
+  const target = round2(Math.max(0, targetTotal || 0));
+  const current = round2(
+    normalized.reduce((sum, item) => sum + (item.amount || 0), 0),
+  );
+  const diff = round2(target - current);
+
+  if (diff === 0) {
+    return normalized;
+  }
+
+  const lastIndex = normalized.length - 1;
+  normalized[lastIndex].amount = round2(normalized[lastIndex].amount + diff);
+
+  return normalized;
+};
+
+const normalizeInstallments = ({
+  installments,
+  totalAmount,
+  startDate,
+  preserveExactAmounts = false,
+}) => {
+  if (!Array.isArray(installments) || installments.length === 0) {
+    return [];
+  }
+
+  const normalized = installments.map((item, index) => ({
+    installmentNumber: index + 1,
+    description: item?.description?.trim() || `Installment ${index + 1}`,
+    feeComponents: {
+      admissionFee: round2(item?.feeComponents?.admissionFee || 0),
+      courseFee: round2(item?.feeComponents?.courseFee ?? item?.amount ?? 0),
+      certificateFee: round2(item?.feeComponents?.certificateFee || 0),
+      examFee: round2(item?.feeComponents?.examFee || 0),
+      registrationFee: round2(item?.feeComponents?.registrationFee || 0),
+      practicalFee: round2(item?.feeComponents?.practicalFee || 0),
+      otherFee: round2(item?.feeComponents?.otherFee || 0),
+    },
+    amount: round2(
+      item?.amount ?? getInstallmentComponentsTotal(item?.feeComponents),
+    ),
+    dueDate: item?.dueDate ? new Date(item.dueDate) : addMonths(startDate, index),
+    status: item?.status || "Pending",
+    paidAmount: round2(item?.paidAmount || 0),
+  }));
+
+  if (preserveExactAmounts) {
+    return normalized;
+  }
+
+  return rebalanceInstallmentsToTarget(normalized, totalAmount);
+};
+
+const buildDistributedValues = (amount, count) => {
+  const safeAmount = round2(amount);
+  const safeCount = clamp(count, 1, 24);
+
+  if (safeAmount <= 0) {
+    return Array.from({ length: safeCount }, () => 0);
+  }
+
+  const base = Math.floor((safeAmount / safeCount) * 100) / 100;
+  let assigned = 0;
+
+  return Array.from({ length: safeCount }, (_, index) => {
+    const isLast = index === safeCount - 1;
+    const value = isLast ? round2(safeAmount - assigned) : round2(base);
+    assigned = round2(assigned + value);
+    return value;
+  });
+};
+
+const getFeeComponentKey = (feeType) => {
+  if (feeType === "exam") return "examFee";
+  if (feeType === "registration") return "registrationFee";
+  if (feeType === "practical") return "practicalFee";
+  return "otherFee";
+};
+
+const buildInstallments = ({
+  count,
+  startDate,
+  admissionFee,
+  courseFee,
+  certificateFee,
+  additionalFees = [],
+  finalFee,
+}) => {
+  const safeCount = clamp(count, 1, 24);
+  const coursePlan = buildDistributedValues(courseFee, safeCount);
+
+  const baseInstallments = Array.from({ length: safeCount }, (_, index) => {
+    const isFirst = index === 0;
+    const isLast = index === safeCount - 1;
+    const feeComponents = {
+      admissionFee: isFirst ? round2(admissionFee) : 0,
+      courseFee: coursePlan[index],
+      certificateFee: isLast ? round2(certificateFee) : 0,
+      examFee: 0,
+      registrationFee: 0,
+      practicalFee: 0,
+      otherFee: 0,
+    };
+
+    return {
+      installmentNumber: index + 1,
+      description:
+        safeCount === 1
+          ? "Full Payment"
+          : isFirst
+            ? "Admission Fee + Course Fee"
+            : isLast
+              ? "Course Fee + Certificate Fee"
+              : `Course Fee Installment ${index + 1}`,
+      amount: getInstallmentComponentsTotal(feeComponents),
+      dueDate: addMonths(startDate, index),
+      status: "Pending",
+      paidAmount: 0,
+      feeComponents,
+    };
+  });
+
+  const extraInstallments = [];
+  let extraOffset = 0;
+
+  normalizeAdditionalFees(additionalFees).forEach((fee) => {
+    const componentKey = getFeeComponentKey(fee.feeType);
+    const baseIndex = safeCount + extraOffset;
+
+    if (fee.paymentMode === "one_time") {
+      extraInstallments.push({
+        installmentNumber: baseIndex + 1,
+        description: fee.title,
+        amount: fee.amount,
+        dueDate: addMonths(startDate, baseIndex),
+        status: "Pending",
+        paidAmount: 0,
+        feeComponents: {
+          admissionFee: 0,
+          courseFee: 0,
+          certificateFee: 0,
+          examFee: fee.feeType === "exam" ? fee.amount : 0,
+          registrationFee: fee.feeType === "registration" ? fee.amount : 0,
+          practicalFee: fee.feeType === "practical" ? fee.amount : 0,
+          otherFee: fee.feeType === "other" ? fee.amount : 0,
+          [componentKey]: fee.amount,
+        },
+      });
+      extraOffset += 1;
+      return;
+    }
+
+    const firstAmount = round2(Math.floor((fee.amount / 2) * 100) / 100);
+    const secondAmount = round2(fee.amount - firstAmount);
+
+    extraInstallments.push(
+      {
+        installmentNumber: baseIndex + 1,
+        description: `${fee.title} - Installment 1/2`,
+        amount: firstAmount,
+        dueDate: addMonths(startDate, baseIndex),
+        status: "Pending",
+        paidAmount: 0,
+        feeComponents: {
+          admissionFee: 0,
+          courseFee: 0,
+          certificateFee: 0,
+          examFee: fee.feeType === "exam" ? firstAmount : 0,
+          registrationFee: fee.feeType === "registration" ? firstAmount : 0,
+          practicalFee: fee.feeType === "practical" ? firstAmount : 0,
+          otherFee: fee.feeType === "other" ? firstAmount : 0,
+        },
+      },
+      {
+        installmentNumber: baseIndex + 2,
+        description: `${fee.title} - Installment 2/2`,
+        amount: secondAmount,
+        dueDate: addMonths(startDate, baseIndex + 1),
+        status: "Pending",
+        paidAmount: 0,
+        feeComponents: {
+          admissionFee: 0,
+          courseFee: 0,
+          certificateFee: 0,
+          examFee: fee.feeType === "exam" ? secondAmount : 0,
+          registrationFee: fee.feeType === "registration" ? secondAmount : 0,
+          practicalFee: fee.feeType === "practical" ? secondAmount : 0,
+          otherFee: fee.feeType === "other" ? secondAmount : 0,
+        },
+      },
+    );
+    extraOffset += 2;
+  });
+
+  return rebalanceInstallmentsToTarget(
+    [...baseInstallments, ...extraInstallments].map((item, index) => ({
+      ...item,
+      installmentNumber: index + 1,
+    })),
+    finalFee,
+  );
+};
+
 const getDb = async () => {
   const mongoose = (await import("mongoose")).default;
   return mongoose.connection.db;
@@ -109,8 +368,16 @@ export const createOrUpdateFeeStructure = async (req, res) => {
       practicalFee,
       otherFee,
       discount,
+      additionalFees,
+      paymentPlanType,
+      discountOnAdmission,
+      discountOnCourseFee,
+      discountPercentage,
+      totalFee,
+      finalFee,
       installmentEnabled,
       numberOfInstallments,
+      installments,
       installmentDetails,
       notes,
     } = req.body;
@@ -145,20 +412,36 @@ export const createOrUpdateFeeStructure = async (req, res) => {
     }
 
     const feeData = {
-      admissionFee: admissionFee ?? course.admissionFee ?? 0,
-      courseFee: courseFee ?? course.courseFee ?? 0,
-      certificateFee: certificateFee ?? course.certificateFee ?? 0,
-      examFee: examFee ?? course.examFee ?? 0,
-      registrationFee: registrationFee ?? course.registrationFee ?? 0,
-      practicalFee: practicalFee ?? course.practicalFee ?? 0,
-      otherFee: otherFee ?? course.otherFee ?? 0,
-      discount: discount ?? 0,
+      admissionFee: round2(admissionFee ?? course.admissionFee ?? 0),
+      courseFee: round2(courseFee ?? course.courseFee ?? 0),
+      certificateFee: round2(certificateFee ?? course.certificateFee ?? 0),
+      examFee: round2(examFee ?? course.examFee ?? 0),
+      registrationFee: round2(registrationFee ?? course.registrationFee ?? 0),
+      practicalFee: round2(practicalFee ?? course.practicalFee ?? 0),
+      otherFee: round2(otherFee ?? course.otherFee ?? 0),
     };
-    feeData.discount = Math.min(feeData.courseFee, Math.max(0, feeData.discount));
-    feeData.discountOnCourseFee = feeData.discount;
-    feeData.discountOnAdmission = 0;
-    feeData.discountType = feeData.discount > 0 ? "courseFee" : "none";
-
+    const resolvedAdditionalFees = normalizeAdditionalFees(additionalFees);
+    const additionalFeesTotal = round2(
+      resolvedAdditionalFees.reduce((sum, item) => sum + item.amount, 0),
+    );
+    const effectiveDiscountPercentage = clamp(discountPercentage, 0, 100);
+    const requestedCourseDiscount = round2(
+      discountOnCourseFee ?? discount ?? 0,
+    );
+    const percentageCourseDiscount = round2(
+      (feeData.courseFee * effectiveDiscountPercentage) / 100,
+    );
+    const resolvedCourseDiscount = round2(
+      Math.min(
+        feeData.courseFee,
+        discountOnCourseFee != null
+          ? requestedCourseDiscount
+          : effectiveDiscountPercentage > 0
+            ? percentageCourseDiscount
+            : requestedCourseDiscount,
+      ),
+    );
+    const resolvedAdmissionDiscount = round2(discountOnAdmission || 0);
     const totalBeforeDiscount =
       feeData.admissionFee +
       feeData.courseFee +
@@ -166,8 +449,64 @@ export const createOrUpdateFeeStructure = async (req, res) => {
       feeData.examFee +
       feeData.registrationFee +
       feeData.practicalFee +
-      feeData.otherFee;
-    feeData.totalFee = totalBeforeDiscount - feeData.discountOnCourseFee;
+      feeData.otherFee +
+      additionalFeesTotal;
+
+    feeData.discount = resolvedCourseDiscount;
+    feeData.discountOnCourseFee = resolvedCourseDiscount;
+    feeData.discountOnAdmission = resolvedAdmissionDiscount;
+    feeData.discountType =
+      resolvedAdmissionDiscount > 0 && resolvedCourseDiscount > 0
+        ? "both"
+        : resolvedAdmissionDiscount > 0
+          ? "admission"
+          : resolvedCourseDiscount > 0
+            ? "courseFee"
+            : "none";
+    feeData.totalFee = round2(
+      finalFee ??
+        totalFee ??
+        (totalBeforeDiscount -
+          resolvedAdmissionDiscount -
+          resolvedCourseDiscount),
+    );
+
+    const rawInstallments = Array.isArray(installments) && installments.length
+      ? installments
+      : installmentDetails;
+    const enrollmentStartDate = enrollment.enrollmentDate || new Date();
+    let normalizedInstallments = normalizeInstallments({
+      installments: rawInstallments,
+      totalAmount: feeData.totalFee,
+      startDate: enrollmentStartDate,
+      preserveExactAmounts: true,
+    });
+
+    if (
+      !normalizedInstallments.length &&
+      (installmentEnabled || Number(numberOfInstallments || 1) > 1 || resolvedAdditionalFees.length > 0)
+    ) {
+      normalizedInstallments = buildInstallments({
+        count: numberOfInstallments || 1,
+        startDate: enrollmentStartDate,
+        admissionFee: Math.max(0, feeData.admissionFee - resolvedAdmissionDiscount),
+        courseFee: Math.max(0, feeData.courseFee - resolvedCourseDiscount),
+        certificateFee: feeData.certificateFee,
+        additionalFees: resolvedAdditionalFees,
+        finalFee: feeData.totalFee,
+      });
+    }
+
+    const resolvedInstallmentCount = normalizedInstallments.length || 1;
+    const resolvedInstallmentEnabled = resolvedInstallmentCount > 1;
+    const resolvedTotalFee = normalizedInstallments.length
+      ? round2(
+          normalizedInstallments.reduce(
+            (sum, item) => sum + Number(item?.amount || 0),
+            0,
+          ),
+        )
+      : feeData.totalFee;
 
     // Check if fee structure already exists
     let feeStructure = await FeeStructureSchema.findOne({
@@ -187,21 +526,20 @@ export const createOrUpdateFeeStructure = async (req, res) => {
       feeStructure.discount = feeData.discount;
       feeStructure.discountOnCourseFee = feeData.discountOnCourseFee;
       feeStructure.discountOnAdmission = feeData.discountOnAdmission;
+      feeStructure.discountPercentage = effectiveDiscountPercentage;
       feeStructure.discountType = feeData.discountType;
-      feeStructure.totalFee = feeData.totalFee;
-      feeStructure.remainingAmount = feeData.totalFee - feeStructure.paidAmount;
-
-      if (installmentEnabled) {
-        feeStructure.installmentEnabled = true;
-        feeStructure.numberOfInstallments = numberOfInstallments || 1;
-        feeStructure.installmentAmount =
-          feeData.totalFee / feeStructure.numberOfInstallments;
-
-        // Create installments
-        if (installmentDetails && installmentDetails.length > 0) {
-          feeStructure.installments = installmentDetails;
-        }
-      }
+      feeStructure.paymentPlanType = paymentPlanType || "custom";
+      feeStructure.additionalFees = resolvedAdditionalFees;
+      feeStructure.totalFee = resolvedTotalFee;
+      feeStructure.remainingAmount = round2(
+        resolvedTotalFee - Number(feeStructure.paidAmount || 0),
+      );
+      feeStructure.installmentEnabled = resolvedInstallmentEnabled;
+      feeStructure.numberOfInstallments = resolvedInstallmentCount;
+      feeStructure.installmentAmount = resolvedInstallmentEnabled
+        ? round2(resolvedTotalFee / resolvedInstallmentCount)
+        : resolvedTotalFee;
+      feeStructure.installments = normalizedInstallments;
 
       if (notes) feeStructure.notes = notes;
 
@@ -213,18 +551,20 @@ export const createOrUpdateFeeStructure = async (req, res) => {
         course: courseId,
         enrollment: enrollment._id,
         ...feeData,
-        remainingAmount: feeData.totalFee,
-        installmentEnabled: installmentEnabled || false,
-        numberOfInstallments: numberOfInstallments || 1,
-        installmentAmount: installmentEnabled
-          ? feeData.totalFee / (numberOfInstallments || 1)
-          : feeData.totalFee,
+        additionalFees: resolvedAdditionalFees,
+        totalFee: resolvedTotalFee,
+        remainingAmount: resolvedTotalFee,
+        paymentPlanType: paymentPlanType || "custom",
+        discountPercentage: effectiveDiscountPercentage,
+        installmentEnabled: resolvedInstallmentEnabled,
+        numberOfInstallments: resolvedInstallmentCount,
+        installmentAmount: resolvedInstallmentEnabled
+          ? round2(resolvedTotalFee / resolvedInstallmentCount)
+          : resolvedTotalFee,
         notes,
       };
 
-      if (installmentEnabled && installmentDetails) {
-        newFeeStructureData.installments = installmentDetails;
-      }
+      newFeeStructureData.installments = normalizedInstallments;
 
       feeStructure = new FeeStructureSchema(newFeeStructureData);
       await feeStructure.save();

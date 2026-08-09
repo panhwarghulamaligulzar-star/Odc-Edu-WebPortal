@@ -603,12 +603,22 @@ export const calculateTeacherCompensationData = async (
         registrationNo: enrollment.student.registrationNo || "N/A",
         totalWorkingDays: 0,
         attendedUnits: 0,
+        presentDays: 0,
+        halfDays: 0,
+        absentDays: 0,
+        leaveDays: 0,
+        holidayDays: 0,
       });
     }
 
     const aggregated = studentMonthMap.get(studentId);
     aggregated.totalWorkingDays += totalWorkingDays;
     aggregated.attendedUnits += attendedUnits;
+    aggregated.presentDays += presentDays;
+    aggregated.halfDays += halfDays;
+    aggregated.absentDays += absentDays;
+    aggregated.leaveDays += leaveDays;
+    aggregated.holidayDays += holidayDays;
   });
 
   const salaryType = salaryConfigOverride.salaryType || teacher.salaryType || "fixed";
@@ -667,12 +677,20 @@ export const calculateTeacherCompensationData = async (
       studentName: student.studentName,
       registrationNo: student.registrationNo,
       totalWorkingDays: student.totalWorkingDays,
+      attendedUnits: round2(student.attendedUnits),
+      presentDays: student.presentDays,
+      halfDays: student.halfDays,
+      absentDays: student.absentDays,
+      leaveDays: student.leaveDays,
+      holidayDays: student.holidayDays,
       monthlyAttendancePercentage,
+      attendancePercentage: monthlyAttendancePercentage,
       hasManualAdjustment: Boolean(adjustment),
       manualAdjustedAmount: adjustment ? calculatedSalaryAmount : null,
       manualAdjustmentNote: adjustment?.note || "",
       defaultCalculatedSalaryAmount,
       isSalaryEligible,
+      isEligible: isSalaryEligible,
       calculatedSalaryAmount,
     };
   });

@@ -39,6 +39,7 @@ import academyConfig from "../../../config/academyConfig";
 import {
   getCourses,
   getPaymentReceipt,
+  getStudentEnrollments,
   getStudentPaymentHistory,
   getStudentFeeStructures,
 } from "../../../services/feeService";
@@ -299,6 +300,7 @@ export default function Receipt() {
   const [historyRows, setHistoryRows] = useState([]);
   const [historyContext, setHistoryContext] = useState(null);
   const [historyFeeStructures, setHistoryFeeStructures] = useState([]);
+  const [historyEnrollments, setHistoryEnrollments] = useState([]);
   const [historyPayments, setHistoryPayments] = useState([]);
   const [historyStatusTab, setHistoryStatusTab] = useState("all");
   const [historyCourseFilter, setHistoryCourseFilter] = useState("all");
@@ -490,15 +492,33 @@ export default function Receipt() {
 
   const historyCourseOptions = Array.from(
     new Map(
-      historyFeeStructures.map((item) => [
-        String(item?.course?._id || item?.course || ""),
-        {
-          label: item?.course?.courseName || "Course",
-          value: String(item?.course?._id || item?.course || ""),
-        },
-      ]),
+      historyEnrollments
+        .map((item) => [
+          String(item?.course?._id || item?.course || ""),
+          {
+            label: item?.course?.courseName || "Course",
+            value: String(item?.course?._id || item?.course || ""),
+          },
+        ])
+        .filter(([value]) => value),
     ).values(),
   );
+
+  const normalizedHistoryCourseOptions = historyCourseOptions.length
+    ? historyCourseOptions
+    : Array.from(
+        new Map(
+          historyFeeStructures
+            .map((item) => [
+              String(item?.course?._id || item?.course || ""),
+              {
+                label: item?.course?.courseName || "Course",
+                value: String(item?.course?._id || item?.course || ""),
+              },
+            ])
+            .filter(([value]) => value),
+        ).values(),
+      );
 
   const filteredHistoryRows = historyRows.filter((item) => {
     if (historyStatusTab !== "all" && item.status !== historyStatusTab) {

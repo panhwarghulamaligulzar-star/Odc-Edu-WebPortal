@@ -8,6 +8,29 @@ dotenv.config();
 const targetURI = process.env.LOCAL_DB_URI || process.env.DB_URI;
 const backupFile = path.join(process.cwd(), "seeders", "backup", "backup.json");
 
+const isoDateRegex =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+
+const reviveSpecialTypes = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(reviveSpecialTypes);
+  }
+
+  if (!value || typeof value !== "object") {
+    if (typeof value === "string" && isoDateRegex.test(value)) {
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? value : parsed;
+    }
+    return value;
+  }
+
+  const revived = {};
+  for (const [key, nestedValue] of Object.entries(value)) {
+    revived[key] = reviveSpecialTypes(nestedValue);
+  }
+  return revived;
+};
+
 const buildUniqueKey = (document, fields) => {
   const values = fields.map((field) => {
     const value = document[field];
@@ -124,10 +147,12 @@ const restoreDatabase = async () => {
       console.log("Cleared existing documents");
 
       if (documents.length > 0) {
+        const revivedDocuments = documents.map(reviveSpecialTypes);
+
         const { filteredDocuments } = await removeInBatchDuplicates(
           collection,
           collectionName,
-          documents,
+          revivedDocuments,
         );
 
         try {
