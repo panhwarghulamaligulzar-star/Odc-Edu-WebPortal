@@ -138,6 +138,20 @@ const isDisabledDate = (d, batchDays, holidayMap) => {
   return false;
 };
 
+const getBatchDateRange = (batch) => {
+  const start = batch?.startDate ? dayjs(batch.startDate).startOf("day") : null;
+  const end = batch?.endDate ? dayjs(batch.endDate).endOf("day") : null;
+  return { start, end };
+};
+
+const clampDateToBatchRange = (date, batch) => {
+  if (!date) return date;
+  const { start, end } = getBatchDateRange(batch);
+  if (start && date.isBefore(start, "day")) return start;
+  if (end && date.isAfter(end, "day")) return end.startOf("day");
+  return date;
+};
+
 // ─── StatusPicker ─────────────────────────────────────────────────────────────
 const StatusPicker = ({ value, onChange, disabled = false }) => (
   <div className="flex gap-1 flex-wrap">
@@ -223,6 +237,10 @@ function MarkAttendancePanel({ batches }) {
   const [personTypeFilter, setPersonTypeFilter] = useState("all"); // "all"|"student"|"teacher"
   const [selectedPersonId, setSelectedPersonId] = useState(null);
   const [personCalendarData, setPersonCalendarData] = useState({}); // "YYYY-MM-DD" → status string
+  const selectedBatchDetails = useMemo(
+    () => batches.find((batch) => batch._id === selectedBatch) || null,
+    [batches, selectedBatch],
+  );
 
   // ── Load members when batch changes ────────────────────────────────────────
   useEffect(() => {
@@ -233,6 +251,11 @@ function MarkAttendancePanel({ batches }) {
       .catch(() => message.error("Failed to load batch members"))
       .finally(() => setLoading(false));
   }, [selectedBatch]);
+
+  useEffect(() => {
+    if (!selectedBatchDetails) return;
+    setSelectedDate((current) => clampDateToBatchRange(current, selectedBatchDetails));
+  }, [selectedBatchDetails]);
 
   // ── Load calendar data for a given month ───────────────────────────────────
   // MERGE into existing map so navigating months keeps previous months' dots
@@ -608,7 +631,18 @@ function MarkAttendancePanel({ batches }) {
     });
   }, [calendarData, selectedPersonId, personCalendarData, personTypeFilter, holidayMap]);
 
-  const batchInfo = members.batch;
+  const batchInfo = members.batch || selectedBatchDetails;
+  const batchDateRange = useMemo(() => getBatchDateRange(batchInfo), [batchInfo]);
+  const formattedBatchDateRange = useMemo(() => {
+    if (!batchInfo?.startDate && !batchInfo?.endDate) return null;
+    const startLabel = batchInfo?.startDate
+      ? dayjs(batchInfo.startDate).format("DD MMM YYYY")
+      : "Open";
+    const endLabel = batchInfo?.endDate
+      ? dayjs(batchInfo.endDate).format("DD MMM YYYY")
+      : "Open";
+    return `${startLabel} to ${endLabel}`;
+  }, [batchInfo]);
   // If a person is selected, filter the table to show only that person
   const filteredStudents = useMemo(() => {
     if (!selectedPersonId) return members.students;
@@ -744,7 +778,15 @@ function MarkAttendancePanel({ batches }) {
         <div className="flex flex-col gap-1 min-w-[220px]">
           <label className="text-xs font-semibold text-gray-600">Select Batch</label>
           <Select placeholder="Choose a batch" value={selectedBatch}
-            onChange={(v) => { setSelectedBatch(v); setAttendanceMap({}); setTimeMap({}); setCalendarData({}); setDirty(false); }}
+            onChange={(v) => {
+              const nextBatch = batches.find((batch) => batch._id === v) || null;
+              setSelectedBatch(v);
+              setSelectedDate((current) => clampDateToBatchRange(current, nextBatch));
+              setAttendanceMap({});
+              setTimeMap({});
+              setCalendarData({});
+              setDirty(false);
+            }}
             showSearch filterOption={(input, o) => o?.label?.toLowerCase().includes(input.toLowerCase())}
             options={batches.map((b) => ({ value: b._id, label: `${b.batchName} (${b.batchCode})` }))}
             className="w-full" />
@@ -755,9 +797,16 @@ function MarkAttendancePanel({ batches }) {
           </label>
           <DatePicker
             value={selectedDate}
-            onChange={(d) => { if (d) { setSelectedDate(d); setDirty(false); } }}
+            onChange={(d) => {
+              if (d) {
+                setSelectedDate(clampDateToBatchRange(d, batchInfo));
+                setDirty(false);
+              }
+            }}
             onPanelChange={(d) => { if (d && selectedBatch) loadCalendar(selectedBatch, d); }}
             onOpenChange={(open) => { if (open && selectedBatch) loadCalendar(selectedBatch, selectedDate); }}
+            minDate={batchDateRange.start || undefined}
+            maxDate={batchDateRange.end || undefined}
             disabledDate={(d) => {
               if (!d) return true;
               // Disable dates outside the batch's start/end date range
@@ -785,12 +834,22 @@ function MarkAttendancePanel({ batches }) {
             format="DD MMM YYYY"
             allowClear={false}
           />
+          {formattedBatchDateRange && (
+            <span className="text-[11px] text-slate-500">
+              Attendance available only from {formattedBatchDateRange}
+            </span>
+          )}
         </div>
         {batchInfo && (
           <div className="flex flex-wrap gap-2 items-center text-xs">
             <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded">{batchInfo.shift} Shift</span>
             <span className="bg-purple-50 text-purple-700 border border-purple-200 px-2 py-1 rounded">{batchInfo.days}</span>
             <span className="bg-green-50 text-green-700 border border-green-200 px-2 py-1 rounded">{batchInfo.hoursPerDay}h/day</span>
+            {formattedBatchDateRange && (
+              <span className="bg-slate-50 text-slate-700 border border-slate-200 px-2 py-1 rounded">
+                {formattedBatchDateRange}
+              </span>
+            )}
           </div>
         )}
 

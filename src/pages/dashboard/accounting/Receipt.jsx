@@ -19,6 +19,7 @@ import {
   message,
 } from "antd";
 import {
+  FileExcelOutlined,
   EyeOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -32,6 +33,7 @@ import {
   BarChartOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
+import * as XLSX from "xlsx";
 import { MdReceiptLong } from "react-icons/md";
 import { useNavigate } from "react-router-dom";
 import { getReceiptDuesOverview, exportReceiptDues } from "../../../services/accountingService";
@@ -272,7 +274,7 @@ export default function Receipt() {
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [receiptLoading, setReceiptLoading] = useState(false);
-  const [exportLoading, setExportLoading] = useState(false);
+  const [exportLoadingFormat, setExportLoadingFormat] = useState(null);
   const [summary, setSummary] = useState({
     totalDues: 0,
     collected: 0,
@@ -312,6 +314,8 @@ export default function Receipt() {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [selectedInstallment, setSelectedInstallment] = useState(null);
   const [selectedHistoryInstallments, setSelectedHistoryInstallments] = useState([]);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [selectedExportType, setSelectedExportType] = useState("all");
 
   useEffect(() => {
     fetchCourses();
@@ -356,32 +360,120 @@ export default function Receipt() {
     }
   };
 
-  const handleExport = async (exportType = "all") => {
-    setExportLoading(true);
+  const openExportModal = (exportType = "all") => {
+    setSelectedExportType(exportType);
+    setExportModalOpen(true);
+  };
+
+  const downloadBlobFile = (blob, fileName) => {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", fileName);
+    document.body.appendChild(link);
+    link.click();
+    link.parentNode.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
+  const buildExcelExport = async (exportType = "all") => {
+    const effectiveStatus =
+      exportType && exportType !== "all" ? exportType : filters.status;
+
+    const response = await getReceiptDuesOverview({
+      ...filters,
+      status: effectiveStatus === "all" ? "all" : effectiveStatus,
+      page: 1,
+      limit: Math.max(pagination.total || 0, 5000),
+    });
+
+    const exportRows = response?.data || [];
+    const exportSummary = response?.summary || {};
+
+    const workbook = XLSX.utils.book_new();
+
+    const summarySheet = XLSX.utils.json_to_sheet([
+      { Metric: "Export Type", Value: exportType },
+      { Metric: "Search", Value: filters.search || "-" },
+      { Metric: "Course", Value: filters.courseId || "All" },
+      { Metric: "Status", Value: effectiveStatus || "all" },
+      {
+        Metric: "Due Date From",
+        Value: filters.dueDateFrom
+          ? dayjs(filters.dueDateFrom).format("DD MMM YYYY")
+          : "All",
+      },
+      {
+        Metric: "Due Date To",
+        Value: filters.dueDateTo
+          ? dayjs(filters.dueDateTo).format("DD MMM YYYY")
+          : "All",
+      },
+      { Metric: "Sort Order", Value: filters.sortOrder || "asc" },
+      { Metric: "Total Dues", Value: exportSummary.totalDues || 0 },
+      { Metric: "Collected", Value: exportSummary.collected || 0 },
+      { Metric: "Remaining", Value: exportSummary.remaining || 0 },
+      { Metric: "Entries", Value: exportSummary.studentCount || exportRows.length || 0 },
+      { Metric: "Paid Count", Value: exportSummary.paidCount || 0 },
+      { Metric: "Partial Count", Value: exportSummary.partialCount || 0 },
+      { Metric: "Pending Count", Value: exportSummary.pendingCount || 0 },
+    ]);
+
+    const detailsSheet = XLSX.utils.json_to_sheet(
+      exportRows.map((row, index) => ({
+        "Sr. No": index + 1,
+        "Student Name": row.student?.studentName || "",
+        "Registration No": row.student?.registrationNo || "",
+        "Mobile Number": row.student?.mobileNumber || "",
+        Course: row.course?.courseName || "",
+        "Course ID": row.course?.courseId || "",
+        Description: row.description || "",
+        "Due Date": row.dueDate ? dayjs(row.dueDate).format("DD MMM YYYY") : "",
+        "Installment No": row.installmentNumber || "",
+        Amount: Number(row.amount || 0),
+        Paid: Number(row.paidAmount || 0),
+        Remaining: Number(row.remainingAmount || 0),
+        Status: row.dueStatus || "",
+        "Receipt No": row.receiptNo || row.latestPayment?.receiptNo || "",
+        "Voucher No": row.voucherNo || row.latestPayment?.voucherNo || "",
+      })),
+    );
+
+    XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+    XLSX.utils.book_append_sheet(workbook, detailsSheet, "Receipt Dues");
+
+    XLSX.writeFile(
+      workbook,
+      `receipt-dues-${exportType}-${new Date().toISOString().split("T")[0]}.xlsx`,
+    );
+  };
+
+  const handleExport = async (exportType = "all", format = "pdf") => {
+    setExportLoadingFormat(format);
     try {
-      const blob = await exportReceiptDues({
-        ...filters,
-        exportType,
-      });
+      if (format === "excel") {
+        await buildExcelExport(exportType);
+      } else {
+        const blob = await exportReceiptDues({
+          ...filters,
+          exportType,
+          format,
+        });
 
-      // Create download link
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute(
-        "download",
-        `receipt-dues-${exportType}-${new Date().toISOString().split("T")[0]}.pdf`,
+        downloadBlobFile(
+          blob,
+          `receipt-dues-${exportType}-${new Date().toISOString().split("T")[0]}.pdf`,
+        );
+      }
+
+      setExportModalOpen(false);
+      message.success(
+        `Receipt report exported in ${format === "excel" ? "Excel" : "PDF"} format successfully!`,
       );
-      document.body.appendChild(link);
-      link.click();
-      link.parentNode.removeChild(link);
-      window.URL.revokeObjectURL(url);
-
-      message.success("Report exported successfully!");
     } catch (error) {
       message.error(error.message || "Failed to export report");
     } finally {
-      setExportLoading(false);
+      setExportLoadingFormat(null);
     }
   };
 
@@ -871,40 +963,37 @@ export default function Receipt() {
                     key: "all",
                     label: "Export All Dues",
                     icon: <FilePdfOutlined />,
-                    onClick: () => handleExport("all"),
                   },
                   {
                     key: "paid",
                     label: "Export Paid Only",
                     icon: <FilePdfOutlined />,
-                    onClick: () => handleExport("paid"),
                   },
                   {
                     key: "partial",
                     label: "Export Partial Only",
                     icon: <FilePdfOutlined />,
-                    onClick: () => handleExport("partial"),
                   },
                   {
                     key: "pending",
                     label: "Export Pending Only",
                     icon: <FilePdfOutlined />,
-                    onClick: () => handleExport("pending"),
                   },
                 ],
+                onClick: ({ key }) => openExportModal(key),
               }}
               trigger={["click"]}
             >
               <Button
                 type="primary"
-                loading={exportLoading}
+                loading={Boolean(exportLoadingFormat)}
                 className="!h-11 !rounded-xl !border-0 !px-5 !font-medium"
                 style={{
                   background: "linear-gradient(135deg, #1677ff 0%, #1447b2 100%)",
                   boxShadow: "0 12px 28px rgba(20, 71, 178, 0.28)",
                 }}
               >
-                Export PDF <DownOutlined />
+                Export <DownOutlined />
               </Button>
             </Dropdown>
           </Space>
@@ -968,6 +1057,53 @@ export default function Receipt() {
           </Col>
         ))}
       </Row>
+
+      <Modal
+        open={exportModalOpen}
+        onCancel={() => setExportModalOpen(false)}
+        footer={null}
+        title="Download Receipt Report"
+        destroyOnClose
+      >
+        <div className="space-y-4 pt-2">
+          <div className="text-sm text-slate-600">
+            Choose how you want to download the selected receipt report.
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            Export type:{" "}
+            <span className="font-semibold text-[#142d78] capitalize">
+              {selectedExportType}
+            </span>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Button
+              type="primary"
+              icon={<FilePdfOutlined />}
+              loading={exportLoadingFormat === "pdf"}
+              disabled={Boolean(exportLoadingFormat) && exportLoadingFormat !== "pdf"}
+              onClick={() => handleExport(selectedExportType, "pdf")}
+              className="!h-11 !flex-1 !rounded-xl !border-0 !font-medium"
+              style={{
+                background: "linear-gradient(135deg, #dc2626 0%, #991b1b 100%)",
+              }}
+            >
+              Download PDF
+            </Button>
+            <Button
+              icon={<FileExcelOutlined />}
+              loading={exportLoadingFormat === "excel"}
+              disabled={Boolean(exportLoadingFormat) && exportLoadingFormat !== "excel"}
+              onClick={() => handleExport(selectedExportType, "excel")}
+              className="!h-11 !flex-1 !rounded-xl !border-emerald-200 !font-medium !text-emerald-700"
+              style={{
+                background: "#f0fdf4",
+              }}
+            >
+              Download Excel
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Row gutter={[18, 18]} className="mb-5">
         {entryCards.map((card) => (

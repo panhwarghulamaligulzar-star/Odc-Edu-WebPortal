@@ -21,6 +21,25 @@ const isWorkingDay = (date, batchDays) => {
   return batchDaysToDowSet(batchDays).has(dow);
 };
 
+const isWithinBatchDateRange = (date, batch) => {
+  const targetDate = new Date(date);
+  targetDate.setHours(0, 0, 0, 0);
+
+  if (batch?.startDate) {
+    const startDate = new Date(batch.startDate);
+    startDate.setHours(0, 0, 0, 0);
+    if (targetDate < startDate) return false;
+  }
+
+  if (batch?.endDate) {
+    const endDate = new Date(batch.endDate);
+    endDate.setHours(23, 59, 59, 999);
+    if (targetDate > endDate) return false;
+  }
+
+  return true;
+};
+
 // ─── Helper: check if date is a holiday for the batch ────────────────────────
 const checkHoliday = async (date, batchId) => {
   const d = new Date(date);
@@ -67,6 +86,13 @@ const bulkMarkAttendance = async (req, res) => {
 
     const attendanceDate = new Date(date);
     attendanceDate.setHours(0, 0, 0, 0);
+
+    if (!isWithinBatchDateRange(attendanceDate, batch)) {
+      return res.status(400).json({
+        success: false,
+        message: `Attendance can only be marked between ${new Date(batch.startDate).toDateString()} and ${batch.endDate ? new Date(batch.endDate).toDateString() : "the batch end date"} for batch "${batch.batchName}"`,
+      });
+    }
 
     if (!isWorkingDay(attendanceDate, batch.days)) {
       return res.status(400).json({

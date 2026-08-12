@@ -13,6 +13,7 @@ import TeacherSchema from "../modules/teacherModule.js";
 import ExpenseHeadEntry from "../modules/expenseHeadEntryModule.js";
 import { calculateTeacherCompensationData } from "../controller/teacherController.js";
 import PDFKit from "pdfkit";
+import XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
 
@@ -2627,6 +2628,7 @@ export const exportReceiptDues = async (req, res) => {
       dueDateTo,
       sortOrder = "asc",
       exportType = "all", // all, paid, partial, pending
+      format = "pdf",
     } = req.query;
 
     const enrollmentFilter = { status: "Active" };
@@ -2668,8 +2670,31 @@ export const exportReceiptDues = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
+    const normalizedFormat = String(format || "pdf").trim().toLowerCase();
+
     if (!enrolledFeeStructures.length) {
-      // Return empty PDF
+      if (normalizedFormat === "excel" || normalizedFormat === "xlsx") {
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(
+          workbook,
+          XLSX.utils.json_to_sheet([]),
+          "Receipt Dues",
+        );
+        const emptyBuffer = XLSX.write(workbook, {
+          type: "buffer",
+          bookType: "xlsx",
+        });
+        res.setHeader(
+          "Content-Type",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        );
+        res.setHeader(
+          "Content-Disposition",
+          "attachment; filename=receipt-dues-empty.xlsx",
+        );
+        return res.send(emptyBuffer);
+      }
+
       const doc = new PDFKit({ margin: 50 });
       doc.fontSize(16).text("No data found", { align: "center" });
       const chunks = [];
@@ -2961,6 +2986,74 @@ export const exportReceiptDues = async (req, res) => {
       resolveAssetPath(appSettings.pdfLogo) ||
       resolveAssetPath(appSettings.logo) ||
       resolveAssetPath("public/assets/LOGO-gGjlK6W5.png");
+
+    if (normalizedFormat === "excel" || normalizedFormat === "xlsx") {
+      const exportRows = filteredRows.map((row, index) => ({
+        "Sr. No": index + 1,
+        "Registration No": row.student?.registrationNo || "",
+        "Student Name": row.student?.studentName || "",
+        "Mobile Number": row.student?.mobileNumber || "",
+        Course: row.course?.courseName || "",
+        "Course ID": row.course?.courseId || "",
+        Description: row.description || "",
+        "Installment No": row.installmentNumber || "",
+        "Due Date": row.dueDate ? new Date(row.dueDate) : "",
+        Amount: Number(row.amount || 0),
+        Paid: Number(row.paidAmount || 0),
+        Remaining: Number(row.remainingAmount || 0),
+        Status: row.dueStatus || "",
+        "Receipt No": row.receiptNo || row.latestPayment?.receiptNo || "",
+        "Voucher No": row.voucherNo || row.latestPayment?.voucherNo || "",
+        "Payment Count": Number(row.paymentCount || 0),
+      }));
+
+      const summaryRows = [
+        { Metric: "Export Type", Value: exportType },
+        { Metric: "Format", Value: "Excel" },
+        { Metric: "Status Filter", Value: status || "All" },
+        { Metric: "Course Filter", Value: courseId || "All" },
+        { Metric: "Search", Value: search || "-" },
+        {
+          Metric: "Due Date Range",
+          Value:
+            dueDateFrom || dueDateTo
+              ? `${safeDate(dueDateFrom)} - ${safeDate(dueDateTo)}`
+              : "All",
+        },
+        { Metric: "Sort Order", Value: sortOrder || "asc" },
+        { Metric: "Total Dues", Value: Number(summary.totalDues || 0) },
+        { Metric: "Collected", Value: Number(summary.collected || 0) },
+        { Metric: "Remaining", Value: Number(summary.remaining || 0) },
+        { Metric: "Total Entries", Value: Number(summary.studentCount || 0) },
+        { Metric: "Paid Entries", Value: Number(summary.paidCount || 0) },
+        { Metric: "Partial Entries", Value: Number(summary.partialCount || 0) },
+        { Metric: "Pending Entries", Value: Number(summary.pendingCount || 0) },
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
+      const detailsSheet = XLSX.utils.json_to_sheet(exportRows);
+
+      XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+      XLSX.utils.book_append_sheet(workbook, detailsSheet, "Receipt Dues");
+
+      const workbookBuffer = XLSX.write(workbook, {
+        type: "buffer",
+        bookType: "xlsx",
+      });
+
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      );
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename=receipt-dues-${exportType}-${new Date()
+          .toISOString()
+          .split("T")[0]}.xlsx`,
+      );
+      return res.send(workbookBuffer);
+    }
 
     const doc = new PDFKit({ margin: 40, size: pageSize });
     const chunks = [];
