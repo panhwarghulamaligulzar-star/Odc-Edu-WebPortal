@@ -2055,18 +2055,17 @@ const StudentProfile = () => {
           right: 22px;
           bottom: 24px;
           z-index: 2;
-          width: 172px;
+          width: 150px;
           text-align: center;
+          overflow: hidden;
         }
         .id-front-signature-image {
           width: 100%;
-          height: 64px;
+          height: 42px;
           object-fit: contain;
-          object-position: center bottom;
+          object-position: center center;
           display: block;
-          margin: 0 auto -10px;
-          transform: scale(1.28);
-          transform-origin: center center;
+          margin: 0 auto 2px;
           filter: brightness(0) invert(1) contrast(1.55);
         }
         .id-front-signature-mark {
@@ -2304,7 +2303,7 @@ const StudentProfile = () => {
           .id-front-signature-block {
             right: 6mm !important;
             bottom: 5mm !important;
-            width: 43mm !important;
+            width: 36mm !important;
           }
           .id-front-signature-mark {
             font-size: 6.8pt !important;

@@ -3960,18 +3960,17 @@ const Students = () => {
             right: 22px;
             bottom: 24px;
             z-index: 2;
-            width: 172px;
+            width: 150px;
             text-align: center;
+            overflow: hidden;
           }
           .bulk-id-signature-image {
             width: 100%;
-            height: 64px;
+            height: 42px;
             object-fit: contain;
-            object-position: center bottom;
+            object-position: center center;
             display: block;
-            margin: 0 auto -10px;
-            transform: scale(1.28);
-            transform-origin: center center;
+            margin: 0 auto 2px;
             filter: brightness(0) invert(1) contrast(1.55);
           }
           .bulk-id-signature-text {
