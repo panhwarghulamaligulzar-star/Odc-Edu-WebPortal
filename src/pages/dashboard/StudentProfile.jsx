@@ -63,6 +63,7 @@ import jsPDF from "jspdf";
 import "jspdf-autotable";
 import odysseyLogo from "../../assets/images/logos/LOGO.png";
 import sidebarLogo from "../../assets/images/logos/ODC-PNG.jpg";
+import founderSignature from "../../assets/images/logos/founder-sig.png";
 import academyConfig from "../../config/academyConfig";
 
 const THEME = "#01134C";
@@ -75,6 +76,40 @@ const MAX_PROFILE_PHOTO_SIZE = 5 * 1024 * 1024;
 const fmt = (v) => (v ? dayjs(v).format("DD MMM YYYY") : "—");
 const fmtPKR = (n) => `PKR ${Number(n || 0).toLocaleString("en-PK")}`;
 const fmtIdDate = (v) => (v ? dayjs(v).format("DD/MM/YYYY") : "00/00/0000");
+const fmtIdCardLongDate = (v) => (v ? dayjs(v).format("D MMM YYYY") : "N/A");
+const ACTIVE_ENROLLMENT_STATUS_SET = new Set(["active", "enrolled"]);
+
+const getEnrollmentStartDate = (enrollment) =>
+  enrollment?.batch?.startDate ||
+  enrollment?.enrollmentDate ||
+  enrollment?.createdAt ||
+  null;
+
+const getIdCardDisplayEnrollment = (enrollments = []) =>
+  [...enrollments].sort((a, b) => {
+    const durationDiff =
+      Number(b?.course?.duration || 0) - Number(a?.course?.duration || 0);
+    if (durationDiff !== 0) return durationDiff;
+
+    return (
+      dayjs(getEnrollmentStartDate(a)).valueOf() -
+      dayjs(getEnrollmentStartDate(b)).valueOf()
+    );
+  })[0] || null;
+
+const getStudentCardAddress = (student) => {
+  const addressParts = [
+    student?.address,
+    student?.permanentAddress,
+    student?.city,
+    student?.tehsil,
+    student?.district,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  return addressParts.length ? addressParts.join(", ") : "N/A";
+};
 
 const statusColor = {
   active: "green",
@@ -400,20 +435,12 @@ const StudentProfile = () => {
     );
   }, 0);
 
-  const activeEnrollments = enrollments.filter(
-    (e) =>
-      e.status?.toLowerCase() === "active" ||
-      e.status?.toLowerCase() === "enrolled",
-  ).length;
+  const activeEnrollmentRecords = enrollments.filter((e) =>
+    ACTIVE_ENROLLMENT_STATUS_SET.has(e.status?.toLowerCase()),
+  );
+  const activeEnrollments = activeEnrollmentRecords.length;
   const primaryEnrollment =
-    enrollments.find(
-      (e) =>
-        e.status?.toLowerCase() === "active" ||
-        e.status?.toLowerCase() === "enrolled",
-    ) || enrollments[0] || null;
-  const idCardExpiry = student?.registrationDate
-    ? dayjs(student.registrationDate).add(1, "year")
-    : null;
+    getIdCardDisplayEnrollment(activeEnrollmentRecords) || enrollments[0] || null;
 
   /* ── Loading ── */
   if (loading) {
@@ -1119,20 +1146,20 @@ const StudentProfile = () => {
       student?.lastClassAttended ||
       "Student";
     const studentCode = student?.registrationNo || "N/A";
-    const joinDate = fmtIdDate(student?.registrationDate || student?.createdAt);
-    const expiryDate = fmtIdDate(idCardExpiry);
-    const contactNumber =
-      student?.mobileNumber ||
-      student?.whatsappNumber ||
-      student?.emergencyContactNumber ||
-      "N/A";
-    const emailAddress = student?.emailAddress || "N/A";
+    const joinBaseDate =
+      getEnrollmentStartDate(primaryEnrollment) ||
+      student?.registrationDate ||
+      student?.createdAt;
+    const joinDate = fmtIdDate(joinBaseDate);
+    const expiryDate = fmtIdDate(
+      joinBaseDate ? dayjs(joinBaseDate).add(2, "year").endOf("month") : null,
+    );
+    const contactNumber = "+92 349 2425428";
     const guardianName = student?.fatherName || student?.guardianName || "N/A";
-    const admissionNo =
-      student?.admissionNo || student?.registrationNo || student?._id || "N/A";
+    const cnicNumber = student?.cnicOrBForm || "N/A";
+    const address = getStudentCardAddress(student);
     const rollNo =
       student?.rollNo || student?.studentRollNo || student?.registrationNo || "N/A";
-    const dob = fmtIdDate(student?.dateOfBirth);
     const attendanceQrValue = JSON.stringify({
       type: "student_attendance",
       studentId: student?._id || student?.id || "",
@@ -1181,7 +1208,7 @@ const StudentProfile = () => {
                 <div className="id-front-title-sub">ACADEMY KHIPRO</div>
                 <div className="id-front-title-rule">
                   <span />
-                  <em>Where Success Begins.</em>
+                  <em>Where Success Begins!</em>
                   <span />
                 </div>
               </div>
@@ -1214,16 +1241,12 @@ const StudentProfile = () => {
                   <strong>{courseName}</strong>
                 </div>
                 <div className="id-card-detail-row">
-                  <span>ROLL NO.</span>
-                  <strong>{rollNo}</strong>
+                  <span>CNIC / B-FORM</span>
+                  <strong>{cnicNumber}</strong>
                 </div>
                 <div className="id-card-detail-row">
-                  <span>ADMISSION NO.</span>
-                  <strong>{admissionNo}</strong>
-                </div>
-                <div className="id-card-detail-row">
-                  <span>DATE OF BIRTH</span>
-                  <strong>{dob}</strong>
+                  <span>ADDRESS</span>
+                  <strong>{address}</strong>
                 </div>
               </div>
 
@@ -1237,11 +1260,17 @@ const StudentProfile = () => {
                     bgColor="#ffffff"
                   />
                 </div>
+                <div className="id-front-qr-id-number">ID: {studentCode}</div>
               </div>
 
               <div className="id-front-signature-block">
-                <div className="id-front-signature-mark">Authorized Signature</div>
+                <img
+                  src={founderSignature}
+                  alt="Founder signature"
+                  className="id-front-signature-image"
+                />
                 <div className="id-front-signature-line" />
+                <div className="id-front-signature-mark">Authorized Signature</div>
               </div>
             </div>
           </div>
@@ -1283,19 +1312,19 @@ const StudentProfile = () => {
               <div className="id-back-contact-block">
                 <div className="id-back-contact-row">
                   <EnvironmentOutlined />
-                  <span>{academyConfig.address}</span>
+                  <span className="id-back-address">{academyConfig.address}</span>
                 </div>
                 <div className="id-back-contact-row">
                   <PhoneOutlined />
-                  <span>{contactNumber !== "N/A" ? contactNumber : academyConfig.phone}</span>
+                  <span>{contactNumber}</span>
                 </div>
                 <div className="id-back-contact-row">
                   <GlobalOutlined />
-                  <span>{academyConfig.website}</span>
+                  <span>odysseyacademy.education</span>
                 </div>
                 <div className="id-back-date-row">
-                  <span>Join: {joinDate}</span>
-                  <span>Expire: {expiryDate}</span>
+                  <span>Issued: {fmtIdCardLongDate(joinBaseDate)}</span>
+                  <span>Valid Till: {fmtIdCardLongDate(dayjs(joinBaseDate).add(2, "year").endOf("month").toDate())}</span>
                 </div>
               </div>
             </div>
@@ -1727,8 +1756,8 @@ const StudentProfile = () => {
         .id-front-bottom-gold-wave {
           left: -36px;
           right: -36px;
-          bottom: 90px;
-          height: 172px;
+          bottom: 88px;
+          height: 84px;
           background: linear-gradient(90deg, #e4af17 0%, #c99011 100%);
           border-top-left-radius: 58% 100%;
           border-top-right-radius: 58% 100%;
@@ -1991,6 +2020,9 @@ const StudentProfile = () => {
           bottom: 18px;
           z-index: 2;
           display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 8px;
           justify-content: flex-start;
         }
         .id-front-qr-shell {
@@ -2007,26 +2039,49 @@ const StudentProfile = () => {
         .id-front-qr-shell svg {
           display: block;
         }
+        .id-front-qr-id-number {
+          color: #ffffff;
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.02em;
+          text-align: center;
+          width: 100%;
+          max-width: 118px;
+          line-height: 1.15;
+          word-break: break-word;
+        }
         .id-front-signature-block {
           position: absolute;
           right: 22px;
-          bottom: 28px;
+          bottom: 24px;
           z-index: 2;
-          width: 126px;
+          width: 172px;
           text-align: center;
+        }
+        .id-front-signature-image {
+          width: 100%;
+          height: 64px;
+          object-fit: contain;
+          object-position: center bottom;
+          display: block;
+          margin: 0 auto -10px;
+          transform: scale(1.28);
+          transform-origin: center center;
+          filter: brightness(0) invert(1) contrast(1.55);
         }
         .id-front-signature-mark {
           color: #ffffff;
-          font-size: 11px;
+          font-size: 10px;
           font-weight: 800;
           text-transform: uppercase;
-          letter-spacing: 0.04em;
+          letter-spacing: 0.03em;
+          margin-top: 1px;
+          white-space: nowrap;
         }
         .id-front-signature-line {
           width: 100%;
           height: 2px;
           background: #d1a12a;
-          margin-top: 10px;
           border-radius: 999px;
         }
         .id-back-contact-block {
@@ -2059,13 +2114,17 @@ const StudentProfile = () => {
           text-align: left;
           line-height: 1.35;
         }
+        .id-back-address {
+          font-size: 10.5px;
+          white-space: nowrap;
+        }
         .id-back-date-row {
           display: flex;
           justify-content: space-between;
           gap: 12px;
           padding-top: 4px;
           color: #f3f4f6;
-          font-size: 11px;
+          font-size: 10.5px;
           text-transform: uppercase;
           letter-spacing: 0.03em;
         }
@@ -2226,7 +2285,7 @@ const StudentProfile = () => {
             bottom: 22mm !important;
             left: -8mm !important;
             right: -8mm !important;
-            height: 36mm !important;
+            height: 19mm !important;
             border-top-left-radius: 58% 100% !important;
             border-top-right-radius: 58% 100% !important;
             border-bottom-left-radius: 0 !important;
@@ -2245,7 +2304,7 @@ const StudentProfile = () => {
           .id-front-signature-block {
             right: 6mm !important;
             bottom: 5mm !important;
-            width: 32mm !important;
+            width: 43mm !important;
           }
           .id-front-signature-mark {
             font-size: 6.8pt !important;

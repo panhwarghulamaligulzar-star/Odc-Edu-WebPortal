@@ -7,6 +7,11 @@ export const bulkMarkAttendance = async (batchId, date, records) => {
   return response.data;
 };
 
+export const markQrAttendance = async ({ date, studentId, studentCode }) => {
+  const response = await api.post("/attendance/qr-mark", { date, studentId, studentCode });
+  return response.data;
+};
+
 // Get attendance records for a batch on a specific date
 export const getAttendanceByBatchAndDate = async (batchId, date) => {
   const response = await api.get(`/attendance/batch/${batchId}`, {

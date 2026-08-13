@@ -67,6 +67,171 @@ const checkHoliday = async (date, batchId) => {
   return holiday || null;
 };
 
+const ACTIVE_QR_ENROLLMENT_STATUSES = ["Active", "On Hold"];
+
+const findQrEligibleStudentEnrollments = async ({ studentId, studentCode, attendanceDate }) => {
+  const enrollments = await EnrollmentSchema.find({
+    status: { $in: ACTIVE_QR_ENROLLMENT_STATUSES },
+  })
+    .populate("student", "studentName registrationNo gender profilePicture mobileNumber")
+    .populate("batch", "batchName batchCode days shift hoursPerDay startDate endDate")
+    .lean();
+
+  const normalizedStudentId = String(studentId || "").trim();
+  const normalizedStudentCode = String(studentCode || "").trim();
+
+  return enrollments.filter((enrollment) => {
+    const student = enrollment?.student;
+    const batch = enrollment?.batch;
+
+    if (!student || !batch) return false;
+
+    const matchesStudent =
+      (normalizedStudentId && String(student._id || "") === normalizedStudentId) ||
+      (normalizedStudentCode &&
+        String(student.registrationNo || "").trim() === normalizedStudentCode);
+
+    if (!matchesStudent) return false;
+    if (!isWithinBatchDateRange(attendanceDate, batch)) return false;
+    if (!isWorkingDay(attendanceDate, batch.days)) return false;
+
+    return true;
+  });
+};
+
+const markQrAttendance = async (req, res) => {
+  try {
+    const { date, studentId, studentCode } = req.body || {};
+
+    if (!date || (!studentId && !studentCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "date and either studentId or studentCode are required",
+      });
+    }
+
+    const attendanceDate = new Date(date);
+    attendanceDate.setHours(0, 0, 0, 0);
+
+    const eligibleEnrollments = await findQrEligibleStudentEnrollments({
+      studentId,
+      studentCode,
+      attendanceDate,
+    });
+
+    if (!eligibleEnrollments.length) {
+      return res.status(404).json({
+        success: false,
+        message:
+          "No active working batch was found for this student on the selected date. Please check the student's batch schedule and try again.",
+      });
+    }
+
+    const holidayFilteredEnrollments = [];
+    for (const enrollment of eligibleEnrollments) {
+      const holiday = await checkHoliday(attendanceDate, enrollment.batch._id);
+      if (!holiday || holiday.type !== "academy") {
+        holidayFilteredEnrollments.push(enrollment);
+      }
+    }
+
+    if (!holidayFilteredEnrollments.length) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "This student's active batch is on an academy holiday for the selected date, so QR attendance cannot be marked today.",
+      });
+    }
+
+    const student = holidayFilteredEnrollments[0].student;
+    const batchIds = holidayFilteredEnrollments.map((enrollment) => enrollment.batch._id);
+
+    const existingRecords = await AttendanceSchema.find({
+      batch: { $in: batchIds },
+      date: attendanceDate,
+      person: student._id,
+      personType: "student",
+    })
+      .select("batch status")
+      .lean();
+
+    if (existingRecords.length === batchIds.length) {
+      return res.status(409).json({
+        success: false,
+        code: "ATTENDANCE_ALREADY_MARKED",
+        message:
+          "Attendance already marked for this student today. Please scan again next day.",
+      });
+    }
+
+    const existingBatchIds = new Set(existingRecords.map((record) => String(record.batch)));
+    const targetEnrollments = holidayFilteredEnrollments.filter(
+      (enrollment) => !existingBatchIds.has(String(enrollment.batch._id)),
+    );
+
+    if (!targetEnrollments.length) {
+      return res.status(409).json({
+        success: false,
+        code: "ATTENDANCE_ALREADY_MARKED",
+        message:
+          "Attendance already marked for this student today. Please scan again next day.",
+      });
+    }
+
+    const ops = targetEnrollments.map((enrollment) => ({
+      updateOne: {
+        filter: {
+          batch: enrollment.batch._id,
+          date: attendanceDate,
+          person: student._id,
+        },
+        update: {
+          $set: {
+            batch: enrollment.batch._id,
+            date: attendanceDate,
+            person: student._id,
+            personModel: "Admission",
+            personType: "student",
+            status: "Present",
+            notes: "Marked via QR ID card scan",
+            markedBy: req.user?._id,
+          },
+        },
+        upsert: true,
+      },
+    }));
+
+    await AttendanceSchema.bulkWrite(ops, { ordered: false });
+
+    return res.status(200).json({
+      success: true,
+      message:
+        targetEnrollments.length > 1
+          ? "Attendance marked successfully for all active batches."
+          : "Attendance marked successfully.",
+      data: {
+        student: {
+          _id: student._id,
+          name: student.studentName,
+          registrationNo: student.registrationNo,
+          gender: student.gender,
+          profilePicture: student.profilePicture || "",
+          mobileNumber: student.mobileNumber || "",
+        },
+        batchesMarked: targetEnrollments.map((enrollment) => ({
+          _id: enrollment.batch._id,
+          batchName: enrollment.batch.batchName,
+          batchCode: enrollment.batch.batchCode,
+          shift: enrollment.batch.shift || "",
+        })),
+      },
+    });
+  } catch (error) {
+    console.error("markQrAttendance error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // ─── POST /attendance/bulk ────────────────────────────────────────────────────
 // Body: { batchId, date, records: [{ personId, personType, status, notes }] }
 const bulkMarkAttendance = async (req, res) => {
@@ -222,7 +387,7 @@ const getBatchMembers = async (req, res) => {
     const enrollments = await EnrollmentSchema.find({
       batch: batchId,
     })
-      .populate("student", "studentName registrationNo gender")
+      .populate("student", "studentName registrationNo gender profilePicture mobileNumber")
       .lean();
 
     console.log(`[Attendance] Batch: ${batchId} | Enrollments found: ${enrollments.length}`);
@@ -234,6 +399,8 @@ const getBatchMembers = async (req, res) => {
         name: e.student.studentName,
         registrationNo: e.student.registrationNo,
         gender: e.student.gender,
+        profilePicture: e.student.profilePicture || "",
+        mobileNumber: e.student.mobileNumber || "",
         enrollmentStatus: e.status,
         personType: "student",
       }));
@@ -602,6 +769,7 @@ const markHolidayAttendance = async (req, res) => {
 
 export {
   bulkMarkAttendance,
+  markQrAttendance,
   getAttendanceByBatchAndDate,
   getPersonAttendance,
   getBatchMembers,

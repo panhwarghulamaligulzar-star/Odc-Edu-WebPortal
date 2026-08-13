@@ -71,6 +71,7 @@ import { MdPeople } from "react-icons/md";
 import academyConfig from "../../config/academyConfig";
 import odysseyLogo from "../../assets/images/logos/LOGO.png";
 import sidebarLogo from "../../assets/images/logos/ODC-PNG.jpg";
+import founderSignature from "../../assets/images/logos/founder-sig.png";
 import { useModulePermissions } from "../../hooks/usePermissions";
 import { updateEnrollmentStatus } from "../../services/feeService";
 
@@ -123,6 +124,8 @@ const ACTIVE_ENROLLMENT_STATUS_SET = new Set(["active", "enrolled"]);
 
 const fmtIdDate = (value) =>
   value ? dayjs(value).format("DD/MM/YYYY") : "N/A";
+const fmtIdCardLongDate = (value) =>
+  value ? dayjs(value).format("D MMM YYYY") : "N/A";
 
 const getActiveEnrollments = (student) =>
   (Array.isArray(student?.enrollments) ? student.enrollments : []).filter(
@@ -144,6 +147,51 @@ const getPrimaryActiveEnrollment = (student, preferredCourseId = "all") => {
   }
 
   return activeEnrollments[0] || null;
+};
+
+const getEnrollmentStartDate = (enrollment) =>
+  enrollment?.batch?.startDate ||
+  enrollment?.enrollmentDate ||
+  enrollment?.createdAt ||
+  null;
+
+const getIdCardDisplayEnrollment = (student, preferredCourseId = "all") => {
+  const activeEnrollments = getActiveEnrollments(student);
+
+  if (!activeEnrollments.length) return null;
+
+  if (preferredCourseId !== "all") {
+    const matchedEnrollment = activeEnrollments.find(
+      (enrollment) =>
+        String(enrollment?.course?._id || "") === String(preferredCourseId),
+    );
+    if (matchedEnrollment) return matchedEnrollment;
+  }
+
+  return [...activeEnrollments].sort((a, b) => {
+    const durationDiff =
+      Number(b?.course?.duration || 0) - Number(a?.course?.duration || 0);
+    if (durationDiff !== 0) return durationDiff;
+
+    return (
+      dayjs(getEnrollmentStartDate(a)).valueOf() -
+      dayjs(getEnrollmentStartDate(b)).valueOf()
+    );
+  })[0];
+};
+
+const getStudentCardAddress = (student) => {
+  const addressParts = [
+    student?.address,
+    student?.permanentAddress,
+    student?.city,
+    student?.tehsil,
+    student?.district,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  return addressParts.length ? addressParts.join(", ") : "N/A";
 };
 
 const STUDENT_STATUS_OPTIONS = [
@@ -818,16 +866,16 @@ const Students = () => {
   };
 
   const renderStudentIdFront = (student, preferredCourseId = "all") => {
-    const primaryEnrollment = getPrimaryActiveEnrollment(student, preferredCourseId);
+    const displayEnrollment = getIdCardDisplayEnrollment(student, preferredCourseId);
     const courseName =
-      primaryEnrollment?.course?.courseName ||
+      displayEnrollment?.course?.courseName ||
       student?.lastClassAttended ||
       "Student";
     const studentCode = student?.registrationNo || "N/A";
-    const admissionNo = student?.admissionNo || studentCode || student?._id || "N/A";
+    const cnicNumber = student?.cnicOrBForm || "N/A";
+    const address = getStudentCardAddress(student);
     const rollNo =
       student?.rollNo || student?.studentRollNo || student?.registrationNo || "N/A";
-    const joinDate = fmtIdDate(student?.registrationDate || student?.createdAt);
     const guardianName = student?.fatherName || student?.guardianName || "N/A";
     const qrValue = JSON.stringify({
       type: "student_id_card",
@@ -849,11 +897,11 @@ const Students = () => {
         <div className="bulk-id-front-header">
           <div className="bulk-id-front-brand-main !text-[30px]">ODYSSEY</div>
           <div className="bulk-id-front-brand-sub">ACADEMY KHIPRO</div>
-          <div className="bulk-id-front-brand-tagline">
-            <span />
-            <em>Where Success Begins.</em>
-            <span />
-          </div>
+                <div className="bulk-id-front-brand-tagline">
+                  <span />
+            <em>Where Success Begins!</em>
+                  <span />
+                </div>
         </div>
 
         <div className="bulk-id-photo-frame !h-[150px]">
@@ -884,16 +932,12 @@ const Students = () => {
             <strong>{courseName}</strong>
           </div>
           <div className="bulk-id-detail-row">
-            <span>ROLL NO.</span>
-            <strong>{rollNo}</strong>
+            <span>CNIC / B-FORM</span>
+            <strong>{cnicNumber}</strong>
           </div>
           <div className="bulk-id-detail-row">
-            <span>ADMISSION NO.</span>
-            <strong>{admissionNo}</strong>
-          </div>
-          <div className="bulk-id-detail-row">
-            <span>DATE OF BIRTH</span>
-            <strong>{fmtIdDate(student?.dateOfBirth)}</strong>
+            <span>ADDRESS</span>
+            <strong>{address}</strong>
           </div>
         </div>
 
@@ -907,28 +951,36 @@ const Students = () => {
               bgColor="#ffffff"
             />
           </div>
+          <div className="bulk-id-qr-id-number">ID: {studentCode}</div>
         </div>
 
         <div className="bulk-id-signature">
-          <div className="bulk-id-signature-text">Authorized Signature </div>
+          <img
+            src={founderSignature}
+            alt="Founder signature"
+            className="bulk-id-signature-image"
+          />
           <div className="bulk-id-signature-line" />
-          <div className="bulk-id-join-date">{joinDate}</div>
+          <div className="bulk-id-signature-text">Authorized Signature</div>
         </div>
       </div>
     );
   };
 
   const renderStudentIdBack = (student) => {
+    const displayEnrollment = getIdCardDisplayEnrollment(student);
+    const joinBaseDate =
+      getEnrollmentStartDate(displayEnrollment) ||
+      student?.registrationDate ||
+      student?.createdAt ||
+      new Date();
     const expiryDate = fmtIdDate(
-      dayjs(student?.registrationDate || student?.createdAt || new Date())
-        .add(1, "year")
+      dayjs(joinBaseDate)
+        .add(2, "year")
+        .endOf("month")
         .toDate(),
     );
-    const contactNumber =
-      student?.mobileNumber ||
-      student?.whatsappNumber ||
-      student?.emergencyContactNumber ||
-      academyConfig.phone;
+    const contactNumber = "+92 349 2425428";
 
     return (
       <div className="bulk-id-card bulk-id-card-back">
@@ -967,7 +1019,7 @@ const Students = () => {
         <div className="bulk-id-back-contact">
           <div className="bulk-id-back-contact-row">
             <EnvironmentOutlined />
-            <span>{academyConfig.address}</span>
+            <span className="bulk-id-back-address">{academyConfig.address}</span>
           </div>
           <div className="bulk-id-back-contact-row">
             <PhoneOutlined />
@@ -975,11 +1027,11 @@ const Students = () => {
           </div>
           <div className="bulk-id-back-contact-row">
             <FaGraduationCap />
-            <span>{academyConfig.website}</span>
+            <span>odysseyacademy.education</span>
           </div>
           <div className="bulk-id-back-dates">
-            <span>Join: {fmtIdDate(student?.registrationDate || student?.createdAt)}</span>
-            <span>Expire: {expiryDate}</span>
+            <span>Issued: {fmtIdCardLongDate(joinBaseDate)}</span>
+            <span>Valid Till: {fmtIdCardLongDate(dayjs(joinBaseDate).add(2, "year").endOf("month").toDate())}</span>
           </div>
         </div>
       </div>
@@ -3730,8 +3782,8 @@ const Students = () => {
           .bulk-id-front-bottom-gold {
             left: -36px;
             right: -36px;
-            bottom: 90px;
-            height: 172px;
+            bottom: 88px;
+            height: 84px;
             background: linear-gradient(90deg, #e4af17 0%, #c99011 100%);
             border-top-left-radius: 58% 100%;
             border-top-right-radius: 58% 100%;
@@ -3877,6 +3929,9 @@ const Students = () => {
             bottom: 18px;
             z-index: 2;
             display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
             justify-content: flex-start;
           }
           .bulk-id-qr-shell {
@@ -3889,26 +3944,49 @@ const Students = () => {
             box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
             border: 2px solid rgba(17, 45, 104, 0.18);
           }
+          .bulk-id-qr-id-number {
+            color: #ffffff;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            text-align: center;
+            width: 100%;
+            max-width: 118px;
+            line-height: 1.15;
+            word-break: break-word;
+          }
           .bulk-id-signature {
             position: absolute;
             right: 22px;
-            bottom: 28px;
+            bottom: 24px;
             z-index: 2;
-            width: 126px;
+            width: 172px;
             text-align: center;
+          }
+          .bulk-id-signature-image {
+            width: 100%;
+            height: 64px;
+            object-fit: contain;
+            object-position: center bottom;
+            display: block;
+            margin: 0 auto -10px;
+            transform: scale(1.28);
+            transform-origin: center center;
+            filter: brightness(0) invert(1) contrast(1.55);
           }
           .bulk-id-signature-text {
             color: #ffffff;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 800;
             text-transform: uppercase;
-            letter-spacing: 0.04em;
+            letter-spacing: 0.03em;
+            margin-top: 1px;
+            white-space: nowrap;
           }
           .bulk-id-signature-line {
             width: 100%;
             height: 2px;
             background: #d1a12a;
-            margin-top: 10px;
             border-radius: 999px;
           }
           .bulk-id-join-date {
@@ -4055,13 +4133,17 @@ const Students = () => {
             text-align: left;
             line-height: 1.35;
           }
+          .bulk-id-back-address {
+            font-size: 10.5px;
+            white-space: nowrap;
+          }
           .bulk-id-back-dates {
             display: flex;
             justify-content: space-between;
             gap: 12px;
             padding-top: 4px;
             color: #f3f4f6;
-            font-size: 11px;
+            font-size: 10.5px;
             text-transform: uppercase;
             letter-spacing: 0.03em;
           }

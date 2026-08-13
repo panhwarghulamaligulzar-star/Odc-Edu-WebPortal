@@ -22,6 +22,7 @@
     "html2canvas": "^1.4.1",
     "jspdf": "^3.0.4",
     "jspdf-autotable": "^5.0.7",
+    "jsqr": "^1.4.0",
     "lucide-react": "^0.555.0",
     "moment": "^2.30.1",
     "react": "^19.0.0",

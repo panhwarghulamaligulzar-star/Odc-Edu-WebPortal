@@ -5,19 +5,21 @@ import {
 } from "antd";
 import {
   MdCheckCircle, MdCancel, MdAccessTime, MdBeachAccess,
-  MdSave, MdHistory, MdFactCheck, MdDownload, MdUpload,
+  MdSave, MdHistory, MdFactCheck, MdDownload, MdUpload, MdQrCodeScanner,
 } from "react-icons/md";
 import { FaFileExcel, FaFilePdf } from "react-icons/fa";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
+import jsQR from "jsqr";
 import odysseyLogo from "../../assets/images/logos/LOGO.png";
 import { getAllBatches } from "../../services/batchService";
 import {
   getBatchMembers,
   getAttendanceByBatchAndDate,
   bulkMarkAttendance,
+  markQrAttendance,
   getAttendanceHistory,
   getMonthCalendar,
   getPersonAttendance,
@@ -152,6 +154,28 @@ const clampDateToBatchRange = (date, batch) => {
   return date;
 };
 
+const parseAttendanceQrPayload = (rawValue) => {
+  if (!rawValue) return null;
+
+  try {
+    const parsed = JSON.parse(String(rawValue));
+    if (
+      parsed &&
+      (parsed.type === "student_attendance" || parsed.type === "student_id_card") &&
+      (parsed.studentId || parsed.studentCode)
+    ) {
+      return parsed;
+    }
+  } catch {
+    // Ignore non-JSON QR codes.
+  }
+
+  return null;
+};
+
+const INVALID_QR_MESSAGE =
+  "QR code detected, but it is not a valid student attendance ID card QR code.";
+
 // ─── StatusPicker ─────────────────────────────────────────────────────────────
 const StatusPicker = ({ value, onChange, disabled = false }) => (
   <div className="flex gap-1 flex-wrap">
@@ -220,6 +244,8 @@ function MarkAttendancePanel({ batches }) {
   const [selectedDate, setSelectedDate] = useState(dayjs());
   const [activeTab, setActiveTab] = useState("student");
   const [members, setMembers] = useState({ students: [], teachers: [], batch: null });
+  const [qrRoster, setQrRoster] = useState([]);
+  const [qrRosterLoading, setQrRosterLoading] = useState(false);
   const [attendanceMap, setAttendanceMap] = useState({});   // personId → status
   const [timeMap, setTimeMap] = useState({});               // personId → "HH:mm DD MMM"
   const [calendarData, setCalendarData] = useState({});     // "YYYY-MM-DD" → { Present, Absent, ... }
@@ -241,6 +267,34 @@ function MarkAttendancePanel({ batches }) {
     () => batches.find((batch) => batch._id === selectedBatch) || null,
     [batches, selectedBatch],
   );
+  const [attendanceMode, setAttendanceMode] = useState("manual");
+  const [qrScannerOpen, setQrScannerOpen] = useState(false);
+  const [qrSupported, setQrSupported] = useState(false);
+  const [qrInitializing, setQrInitializing] = useState(false);
+  const [qrBusy, setQrBusy] = useState(false);
+  const [qrScanError, setQrScanError] = useState("");
+  const [qrSuccessOpen, setQrSuccessOpen] = useState(false);
+  const [qrSuccessData, setQrSuccessData] = useState(null);
+  const qrVideoRef = useRef(null);
+  const qrCanvasRef = useRef(null);
+  const qrStreamRef = useRef(null);
+  const qrAnimationFrameRef = useRef(null);
+  const qrDetectorRef = useRef(null);
+  const qrBusyRef = useRef(false);
+  const qrLastScanRef = useRef({ key: "", at: 0 });
+  const qrLastErrorRef = useRef({ key: "", at: 0 });
+  const qrSuccessTimerRef = useRef(null);
+  const loadCalendarRef = useRef(async () => {});
+  const isQrMode = attendanceMode === "qr";
+
+  useEffect(() => {
+    if (!isQrMode) return;
+    setSelectedBatch(null);
+    setMembers({ students: [], teachers: [], batch: null });
+    setAttendanceMap({});
+    setTimeMap({});
+    setDirty(false);
+  }, [isQrMode]);
 
   // ── Load members when batch changes ────────────────────────────────────────
   useEffect(() => {
@@ -256,6 +310,328 @@ function MarkAttendancePanel({ batches }) {
     if (!selectedBatchDetails) return;
     setSelectedDate((current) => clampDateToBatchRange(current, selectedBatchDetails));
   }, [selectedBatchDetails]);
+
+  useEffect(() => {
+    if (!isQrMode || !batches.length) return;
+
+    let cancelled = false;
+
+    const loadQrRoster = async () => {
+      setQrRosterLoading(true);
+
+      try {
+        const responses = await Promise.all(
+          batches.map((batch) =>
+            getBatchMembers(batch._id)
+              .then((res) => ({ batch, data: res.data || { students: [], teachers: [], batch: null } }))
+              .catch(() => ({ batch, data: { students: [], teachers: [], batch: null } })),
+          ),
+        );
+
+        const rosterMap = new Map();
+
+        responses.forEach(({ batch, data }) => {
+          (data.students || [])
+            .filter((student) => student.enrollmentStatus === "Active")
+            .forEach((student) => {
+              const key = String(student._id);
+              const existing = rosterMap.get(key);
+              const batchDetails = data.batch || batch;
+              const batchLabel = batchDetails?.batchName
+                ? `${batchDetails.batchName}${batchDetails.batchCode ? ` (${batchDetails.batchCode})` : ""}`
+                : batch.batchName;
+
+              if (!existing) {
+                rosterMap.set(key, {
+                  ...student,
+                  batchLabels: [batchLabel],
+                  batchIds: [batchDetails?._id || batch._id],
+                });
+                return;
+              }
+
+              if (!existing.batchIds.includes(batchDetails?._id || batch._id)) {
+                existing.batchIds.push(batchDetails?._id || batch._id);
+                existing.batchLabels.push(batchLabel);
+              }
+            });
+        });
+
+        if (!cancelled) {
+          setQrRoster(
+            Array.from(rosterMap.values()).sort((a, b) =>
+              String(a.name || "").localeCompare(String(b.name || "")),
+            ),
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setQrRosterLoading(false);
+        }
+      }
+    };
+
+    loadQrRoster();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [batches, isQrMode]);
+
+  useEffect(() => {
+    setQrSupported(
+      typeof window !== "undefined" &&
+      typeof navigator !== "undefined" &&
+      typeof navigator.mediaDevices?.getUserMedia === "function",
+    );
+  }, []);
+
+  const stopQrScanner = useCallback(() => {
+    if (qrAnimationFrameRef.current) {
+      cancelAnimationFrame(qrAnimationFrameRef.current);
+      qrAnimationFrameRef.current = null;
+    }
+
+    if (qrStreamRef.current) {
+      qrStreamRef.current.getTracks().forEach((track) => track.stop());
+      qrStreamRef.current = null;
+    }
+
+    if (qrVideoRef.current) {
+      qrVideoRef.current.srcObject = null;
+    }
+
+    qrBusyRef.current = false;
+    setQrBusy(false);
+    setQrInitializing(false);
+  }, []);
+
+  useEffect(() => () => {
+    stopQrScanner();
+    if (qrSuccessTimerRef.current) {
+      clearTimeout(qrSuccessTimerRef.current);
+    }
+  }, [stopQrScanner]);
+
+  const handleQrAttendanceMarked = useCallback((studentRecord) => {
+    const timestamp = dayjs().format("HH:mm, DD MMM");
+
+    setAttendanceMap((prev) => ({
+      ...prev,
+      [studentRecord._id]: "Present",
+    }));
+    setTimeMap((prev) => ({
+      ...prev,
+      [studentRecord._id]: timestamp,
+    }));
+    setDirty(false);
+    setQrSuccessData({
+      ...studentRecord,
+      markedAt: timestamp,
+      attendanceDate: selectedDate.format("DD MMM YYYY"),
+      batchName:
+        studentRecord.batchName ||
+        members.batch?.batchName ||
+        selectedBatchDetails?.batchName ||
+        "",
+    });
+    setQrSuccessOpen(true);
+
+    if (qrSuccessTimerRef.current) {
+      clearTimeout(qrSuccessTimerRef.current);
+    }
+
+    qrSuccessTimerRef.current = setTimeout(() => {
+      setQrSuccessOpen(false);
+    }, 5000);
+  }, [members.batch?.batchName, selectedBatchDetails?.batchName, selectedDate]);
+
+  const handleQrPayload = useCallback(async (payload) => {
+    const studentRecord = qrRoster.find(
+      (student) =>
+        String(student._id || "") === String(payload.studentId || "") ||
+        String(student.registrationNo || "").trim() === String(payload.studentCode || "").trim(),
+    );
+
+    if (!studentRecord) {
+      const missingMessage =
+        "This QR code does not match any active student in the current QR attendance roster.";
+      setQrScanError(missingMessage);
+      message.error(missingMessage);
+      return;
+    }
+
+    const scanKey = String(studentRecord._id);
+    const now = Date.now();
+    if (
+      qrLastScanRef.current.key === scanKey &&
+      now - qrLastScanRef.current.at < 4000
+    ) {
+      return;
+    }
+
+    qrBusyRef.current = true;
+    setQrBusy(true);
+    setQrScanError("");
+
+    try {
+      setQrScanError("");
+      const response = await markQrAttendance({
+        date: selectedDate.format("YYYY-MM-DD"),
+        studentId: payload.studentId,
+        studentCode: payload.studentCode,
+      });
+
+      qrLastScanRef.current = { key: scanKey, at: now };
+      const markedStudent = response?.data?.student || studentRecord;
+      const batchesMarked = response?.data?.batchesMarked || [];
+
+      handleQrAttendanceMarked({
+        ...studentRecord,
+        ...markedStudent,
+        batchName:
+          batchesMarked.length > 1
+            ? `${batchesMarked.length} batches marked`
+            : batchesMarked[0]?.batchName || studentRecord.batchLabels?.[0] || "",
+      });
+
+      message.success(
+        response?.message ||
+          "Attendance marked successfully.",
+      );
+    } catch (error) {
+      const serverMessage = error?.response?.data?.message || "Failed to mark QR attendance";
+      setQrScanError(serverMessage);
+      message.error(serverMessage);
+    } finally {
+      qrBusyRef.current = false;
+      setQrBusy(false);
+    }
+  }, [handleQrAttendanceMarked, qrRoster, selectedDate]);
+
+  const reportQrScanError = useCallback((errorKey, errorMessage) => {
+    const now = Date.now();
+    if (
+      qrLastErrorRef.current.key === errorKey &&
+      now - qrLastErrorRef.current.at < 3000
+    ) {
+      return;
+    }
+
+    qrLastErrorRef.current = { key: errorKey, at: now };
+    setQrScanError(errorMessage);
+    message.error(errorMessage);
+  }, []);
+
+  const startQrScanner = useCallback(async () => {
+    if (!qrSupported) {
+      setQrScanError("This browser does not allow camera access for QR attendance.");
+      return;
+    }
+
+    setQrScanError("");
+    setQrInitializing(true);
+
+    try {
+      stopQrScanner();
+
+      if (
+        typeof window !== "undefined" &&
+        typeof window.BarcodeDetector !== "undefined" &&
+        !qrDetectorRef.current
+      ) {
+        qrDetectorRef.current = new window.BarcodeDetector({ formats: ["qr_code"] });
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "environment",
+        },
+        audio: false,
+      });
+
+      qrStreamRef.current = stream;
+
+      if (qrVideoRef.current) {
+        qrVideoRef.current.srcObject = stream;
+        await qrVideoRef.current.play();
+      }
+
+      const scanFrame = async () => {
+        const video = qrVideoRef.current;
+        const detector = qrDetectorRef.current;
+        const canvas = qrCanvasRef.current;
+
+        if (!video || video.readyState < 2) {
+          qrAnimationFrameRef.current = requestAnimationFrame(scanFrame);
+          return;
+        }
+
+        try {
+          let rawValue = "";
+
+          if (detector) {
+            const barcodes = await detector.detect(video);
+            rawValue = barcodes[0]?.rawValue || "";
+          } else if (canvas) {
+            const context = canvas.getContext("2d", { willReadFrequently: true });
+            if (context) {
+              canvas.width = video.videoWidth || 1280;
+              canvas.height = video.videoHeight || 720;
+              context.drawImage(video, 0, 0, canvas.width, canvas.height);
+              const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+              const qrCode = jsQR(imageData.data, imageData.width, imageData.height, {
+                inversionAttempts: "attemptBoth",
+              });
+              rawValue = qrCode?.data || "";
+            }
+          }
+
+          if (rawValue && !qrBusyRef.current) {
+            const payload = parseAttendanceQrPayload(rawValue);
+            if (payload) {
+              setQrScanError("");
+              await handleQrPayload(payload);
+            } else {
+              reportQrScanError("invalid-qr", INVALID_QR_MESSAGE);
+            }
+          }
+        } catch (error) {
+          setQrScanError(error?.message || "Unable to read QR code from camera.");
+        }
+
+        qrAnimationFrameRef.current = requestAnimationFrame(scanFrame);
+      };
+
+      qrAnimationFrameRef.current = requestAnimationFrame(scanFrame);
+    } catch (error) {
+      setQrScanError(
+        error?.message || "Camera access failed. Please allow camera permission and try again.",
+      );
+    } finally {
+      setQrInitializing(false);
+    }
+  }, [handleQrPayload, qrSupported, reportQrScanError, stopQrScanner]);
+
+  const closeQrScanner = useCallback(() => {
+    setQrScannerOpen(false);
+    stopQrScanner();
+  }, [stopQrScanner]);
+
+  useEffect(() => {
+    if (attendanceMode !== "qr") {
+      closeQrScanner();
+      return;
+    }
+
+    setQrScannerOpen(true);
+  }, [attendanceMode, closeQrScanner]);
+
+  useEffect(() => {
+    if (!qrScannerOpen) return;
+    startQrScanner();
+    return () => stopQrScanner();
+  }, [qrScannerOpen, startQrScanner, stopQrScanner]);
 
   // ── Load calendar data for a given month ───────────────────────────────────
   // MERGE into existing map so navigating months keeps previous months' dots
@@ -279,6 +655,10 @@ function MarkAttendancePanel({ batches }) {
   }, [members.batch]);
 
   // ── Load holidays for a 2-year window when batch changes ────────────────
+  useEffect(() => {
+    loadCalendarRef.current = loadCalendar;
+  }, [loadCalendar]);
+
   const loadHolidays = useCallback(async (batchId) => {
     if (!batchId) return;
     try {
@@ -765,6 +1145,36 @@ function MarkAttendancePanel({ batches }) {
     },
   ];
 
+  const qrStudentCols = [
+    { title: "#", width: 50, render: (_, __, i) => i + 1 },
+    { title: "Name", dataIndex: "name", render: (v) => <span className="font-medium">{v}</span> },
+    { title: "Reg. No", dataIndex: "registrationNo" },
+    { title: "Gender", dataIndex: "gender", render: (g) => <Tag color={g === "Male" ? "blue" : "pink"}>{g}</Tag> },
+    {
+      title: "Active Batches",
+      dataIndex: "batchLabels",
+      render: (labels = []) => (
+        <div className="flex flex-wrap gap-1">
+          {labels.map((label) => (
+            <Tag key={label} color="processing">{label}</Tag>
+          ))}
+        </div>
+      ),
+    },
+    {
+      title: "QR Status",
+      width: 150,
+      render: (_, r) => (
+        <div className="flex flex-col gap-1">
+          <StatusTag status={attendanceMap[r._id]} />
+          {timeMap[r._id] && (
+            <span className="text-[10px] text-gray-400">🕐 {timeMap[r._id]}</span>
+          )}
+        </div>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-4">
       {/* CSS for the attendance DatePicker portal — targets .attend-cal class */}
@@ -787,6 +1197,7 @@ function MarkAttendancePanel({ batches }) {
               setCalendarData({});
               setDirty(false);
             }}
+            disabled={isQrMode}
             showSearch filterOption={(input, o) => o?.label?.toLowerCase().includes(input.toLowerCase())}
             options={batches.map((b) => ({ value: b._id, label: `${b.batchName} (${b.batchCode})` }))}
             className="w-full" />
@@ -799,16 +1210,17 @@ function MarkAttendancePanel({ batches }) {
             value={selectedDate}
             onChange={(d) => {
               if (d) {
-                setSelectedDate(clampDateToBatchRange(d, batchInfo));
+                setSelectedDate(isQrMode ? d : clampDateToBatchRange(d, batchInfo));
                 setDirty(false);
               }
             }}
-            onPanelChange={(d) => { if (d && selectedBatch) loadCalendar(selectedBatch, d); }}
-            onOpenChange={(open) => { if (open && selectedBatch) loadCalendar(selectedBatch, selectedDate); }}
-            minDate={batchDateRange.start || undefined}
-            maxDate={batchDateRange.end || undefined}
+            onPanelChange={(d) => { if (d && selectedBatch && !isQrMode) loadCalendar(selectedBatch, d); }}
+            onOpenChange={(open) => { if (open && selectedBatch && !isQrMode) loadCalendar(selectedBatch, selectedDate); }}
+            minDate={isQrMode ? undefined : batchDateRange.start || undefined}
+            maxDate={isQrMode ? undefined : batchDateRange.end || undefined}
             disabledDate={(d) => {
               if (!d) return true;
+              if (isQrMode) return false;
               // Disable dates outside the batch's start/end date range
               if (batchInfo) {
                 if (batchInfo.startDate) {
@@ -834,13 +1246,13 @@ function MarkAttendancePanel({ batches }) {
             format="DD MMM YYYY"
             allowClear={false}
           />
-          {formattedBatchDateRange && (
+          {!isQrMode && formattedBatchDateRange && (
             <span className="text-[11px] text-slate-500">
               Attendance available only from {formattedBatchDateRange}
             </span>
           )}
         </div>
-        {batchInfo && (
+        {!isQrMode && batchInfo && (
           <div className="flex flex-wrap gap-2 items-center text-xs">
             <span className="bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded">{batchInfo.shift} Shift</span>
             <span className="bg-purple-50 text-purple-700 border border-purple-200 px-2 py-1 rounded">{batchInfo.days}</span>
@@ -853,8 +1265,39 @@ function MarkAttendancePanel({ batches }) {
           </div>
         )}
 
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-semibold text-gray-600">Attendance Mode</label>
+          <Segmented
+            value={attendanceMode}
+            onChange={setAttendanceMode}
+            options={[
+              { label: "Manual", value: "manual" },
+              { label: "QR Scan", value: "qr" },
+            ]}
+          />
+        </div>
+        {attendanceMode === "qr" && (
+          <div className="flex flex-col gap-1 min-w-[220px]">
+            <label className="text-xs font-semibold text-gray-600">QR Attendance</label>
+            <Button
+              type="primary"
+              icon={<MdQrCodeScanner size={18} />}
+              onClick={() => setQrScannerOpen(true)}
+              className="!h-[42px] !rounded-xl !border-0 !font-medium"
+              style={{
+                background: "linear-gradient(135deg, #0f766e 0%, #14532d 100%)",
+              }}
+            >
+              Open Scanner
+            </Button>
+            <span className="text-[11px] text-slate-500">
+              Scan the student ID card QR code. The system will detect the correct active batch automatically.
+            </span>
+          </div>
+        )}
+
         {/* ── Person filter: type + name dropdown ── */}
-        {selectedBatch && (
+        {selectedBatch && !isQrMode && (
           <>
             <div className="flex flex-col gap-1">
               <label className="text-xs font-semibold text-gray-600">Filter by Type</label>
@@ -908,7 +1351,7 @@ function MarkAttendancePanel({ batches }) {
 
       </div>
 
-      {selectedBatch && batchInfo && (
+      {!isQrMode && selectedBatch && batchInfo && (
         <div className="bg-white rounded-xl shadow p-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -953,7 +1396,7 @@ function MarkAttendancePanel({ batches }) {
       )}
 
       {/* Summary counts */}
-      {selectedBatch && (
+      {!isQrMode && selectedBatch && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {unmarkedCount > 0 && (
             <div className="rounded-xl border px-4 py-3 flex items-center gap-3 bg-gray-50 border-gray-300 text-gray-700">
@@ -989,7 +1432,31 @@ function MarkAttendancePanel({ batches }) {
       )}
 
       {/* Table */}
-      {selectedBatch ? (
+      {isQrMode ? (
+        <div className="bg-white rounded-xl shadow">
+          <div className="border-b border-slate-100 px-4 py-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-slate-800">QR Attendance Roster</div>
+              <div className="text-xs text-slate-500">
+                All active students across batches are listed here. Scan a student ID card and the system will mark that student present in the correct active batch for {selectedDate.format("DD MMM YYYY")}.
+              </div>
+            </div>
+            <div className="text-xs text-slate-500">
+              {qrRoster.length} active students available
+            </div>
+          </div>
+          <Spin spinning={qrRosterLoading || loading}>
+            <Table
+              dataSource={qrRoster}
+              columns={qrStudentCols}
+              rowKey="_id"
+              pagination={false}
+              size="middle"
+              locale={{ emptyText: "No active students were found across batches" }}
+            />
+          </Spin>
+        </div>
+      ) : selectedBatch ? (
         <div className="bg-white rounded-xl shadow">
           {!isAcademyHoliday && !hasSavedRecordsForSelection && (
             <div className="mx-4 mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -1060,6 +1527,122 @@ function MarkAttendancePanel({ batches }) {
           <p className="text-sm">Only working days based on batch schedule are selectable</p>
         </div>
       )}
+      <Modal
+        title="QR Attendance Scanner"
+        open={qrScannerOpen}
+        onCancel={() => {
+          closeQrScanner();
+          setAttendanceMode("manual");
+        }}
+        footer={null}
+        width={720}
+        destroyOnClose
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="text-sm text-slate-700">
+              Scan the QR code printed on the student ID card. Attendance will be marked instantly as <span className="font-semibold text-emerald-700">Present</span> for <span className="font-semibold">{selectedDate.format("DD MMM YYYY")}</span>.
+            </div>
+            <div className="mt-2 text-xs text-slate-500">
+              No batch selection is required. The scanner will automatically detect the student's correct active batch.
+            </div>
+          </div>
+
+          {!qrSupported && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              QR camera scanning is not available because camera access is missing in this browser or device.
+            </div>
+          )}
+
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-[#0f172a]">
+            <video
+              ref={qrVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className="h-[360px] w-full object-cover"
+            />
+            <canvas ref={qrCanvasRef} className="hidden" />
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Mode</div>
+              <div className="mt-1 font-medium text-slate-800">QR Scan Attendance</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Students</div>
+              <div className="mt-1 font-medium text-slate-800">{qrRoster.length} active across batches</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Scan Status</div>
+              <div className="mt-1 font-medium text-slate-800">
+                {qrInitializing ? "Starting camera..." : qrBusy ? "Saving attendance..." : "Ready to scan"}
+              </div>
+            </div>
+          </div>
+
+          {qrScanError ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {qrScanError}
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+
+      <Modal
+        title="Attendance Marked Successfully"
+        open={qrSuccessOpen}
+        footer={null}
+        closable={false}
+        maskClosable={false}
+        onCancel={() => setQrSuccessOpen(false)}
+      >
+        {qrSuccessData ? (
+          <div className="space-y-4 pt-2">
+            <div className="flex items-center gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+              {qrSuccessData.profilePicture ? (
+                <img
+                  src={qrSuccessData.profilePicture}
+                  alt={qrSuccessData.name}
+                  className="h-16 w-16 rounded-2xl object-cover ring-2 ring-white"
+                />
+              ) : (
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-600 text-xl font-bold text-white">
+                  {String(qrSuccessData.name || "S").charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div>
+                <div className="text-lg font-semibold text-slate-900">{qrSuccessData.name}</div>
+                <div className="text-sm text-slate-600">Registration No: {qrSuccessData.registrationNo || "N/A"}</div>
+                <div className="text-sm text-emerald-700 font-medium">Status: Present</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Attendance Date</div>
+                <div className="mt-1 font-medium text-slate-800">{qrSuccessData.attendanceDate}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Marked At</div>
+                <div className="mt-1 font-medium text-slate-800">{qrSuccessData.markedAt}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Batch</div>
+                <div className="mt-1 font-medium text-slate-800">{qrSuccessData.batchName || "Selected Batch"}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Attendance Method</div>
+                <div className="mt-1 font-medium text-slate-800">Student ID Card QR Scan</div>
+              </div>
+            </div>
+            <div className="text-center text-xs text-slate-500">
+              This popup will close automatically in 5 seconds. Camera stays ready for the next student.
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
       <Modal
         title="Create Global Holiday"
         open={holidayModalOpen}
