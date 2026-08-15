@@ -143,6 +143,7 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
   const [installmentsView, setInstallmentsView] = useState("list");
   const [trackerCourseFilter, setTrackerCourseFilter] = useState("all");
   const [trackerMonth, setTrackerMonth] = useState(null);
+  const [selectedTrackerRowKeys, setSelectedTrackerRowKeys] = useState([]);
 
   useEffect(() => {
     if (studentId) {
@@ -174,6 +175,22 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
   const handleRecordPayment = (feeStructure, installment = null) => {
     setSelectedFeeStructure(feeStructure);
     setSelectedInstallment(installment);
+    setPaymentModalVisible(true);
+  };
+
+  const handleBulkTrackerPayment = () => {
+    const selectedRows = trackerTableRows.filter((row) =>
+      selectedTrackerRowKeys.includes(row.key),
+    );
+
+    if (!selectedRows.length) {
+      message.warning("Please select one or more installments to pay.");
+      return;
+    }
+
+    const firstRow = selectedRows[0];
+    setSelectedFeeStructure(firstRow.feeStructureRecord);
+    setSelectedInstallment(null);
     setPaymentModalVisible(true);
   };
 
@@ -649,6 +666,11 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
           balance: getInstallmentBalance(installment),
           monthPaidAmount: Number(installment.paidAmount || 0),
           monthAmount: Number(installment.amount || 0),
+          remainingAmount: getInstallmentBalance(installment),
+          rowId: `${record._id}-${installment._id || installment.installmentNumber}`,
+          studentId: record.student?._id || record.student,
+          courseId: record.course?._id || record.course,
+          feeStructureId: record._id,
         })),
       )
       .sort((a, b) => {
@@ -661,6 +683,18 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
         return (a.installmentNumber || 0) - (b.installmentNumber || 0);
       });
   }, [trackerVisibleRows]);
+
+  const selectedTrackerRows = useMemo(
+    () =>
+      trackerTableRows.filter((row) => selectedTrackerRowKeys.includes(row.key)),
+    [trackerTableRows, selectedTrackerRowKeys],
+  );
+
+  useEffect(() => {
+    setSelectedTrackerRowKeys((current) =>
+      current.filter((key) => trackerTableRows.some((row) => row.key === key)),
+    );
+  }, [trackerTableRows]);
 
   const trackerPaymentActivity = useMemo(() => {
     if (!trackerMonth) return [];
@@ -742,7 +776,7 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
               title={`Scheduled In ${selectedTrackerMonthLabel}`}
               value={trackerSummary.scheduledAmount}
               prefix="Rs"
-              valueStyle={{ color: "#1677ff" }}
+              styles={{ content: { color: "#1677ff" } }}
             />
           </Col>
           <Col xs={24} md={12} xl={6}>
@@ -750,7 +784,7 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
               title="Paid Portion"
               value={trackerSummary.paidAmount}
               prefix="Rs"
-              valueStyle={{ color: "#52c41a" }}
+              styles={{ content: { color: "#52c41a" } }}
             />
           </Col>
           <Col xs={24} md={12} xl={6}>
@@ -758,14 +792,14 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
               title="Remaining Portion"
               value={trackerSummary.remainingAmount}
               prefix="Rs"
-              valueStyle={{ color: "#ff4d4f" }}
+              styles={{ content: { color: "#ff4d4f" } }}
             />
           </Col>
           <Col xs={24} md={12} xl={6}>
             <Statistic
               title="Courses In View"
               value={trackerSummary.coursesInMonth}
-              valueStyle={{ color: "#722ed1" }}
+              styles={{ content: { color: "#722ed1" } }}
             />
           </Col>
         </Row>
@@ -811,12 +845,40 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
                 ? `All course installments for ${selectedTrackerMonthLabel}`
                 : `Selected course installments for ${selectedTrackerMonthLabel}`
             }
+            extra={
+              <Space wrap>
+                <Text type="secondary">
+                  {selectedTrackerRows.length} selected
+                </Text>
+                <Button
+                  type="primary"
+                  disabled={!selectedTrackerRows.length}
+                  onClick={handleBulkTrackerPayment}
+                >
+                  Pay Selected
+                </Button>
+              </Space>
+            }
           >
             <Table
               size="small"
               pagination={false}
               rowKey="key"
               dataSource={trackerTableRows}
+              rowSelection={{
+                selectedRowKeys: selectedTrackerRowKeys,
+                onChange: (keys, rows) => {
+                  const payableRows = rows.filter(
+                    (row) => row.status !== "Paid" && Number(row.remainingAmount || 0) > 0,
+                  );
+                  setSelectedTrackerRowKeys(payableRows.map((row) => row.key));
+                },
+                getCheckboxProps: (record) => ({
+                  disabled:
+                    record.status === "Paid" ||
+                    Number(record.remainingAmount || 0) <= 0,
+                }),
+              }}
               columns={[
                 {
                   title: "Course",
@@ -907,12 +969,13 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
                         <Button
                           type="primary"
                           size="small"
-                          onClick={() =>
+                          onClick={() => {
+                            setSelectedTrackerRowKeys([]);
                             handleRecordPayment(
                               installment.feeStructureRecord,
                               installment,
-                            )
-                          }
+                            );
+                          }}
                         >
                           Pay
                         </Button>
@@ -932,7 +995,7 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
                     </Space>
                   ),
                 },
-              ]}
+                ]}
             />
           </Card>
         )}
@@ -1293,7 +1356,7 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
               title="Total Fee"
               value={totalFee}
               prefix="Rs"
-              valueStyle={{ color: "#1890ff" }}
+              styles={{ content: { color: "#1890ff" } }}
             />
           </Col>
           <Col span={6}>
@@ -1301,7 +1364,7 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
               title="Total Paid"
               value={totalPaid}
               prefix="Rs"
-              valueStyle={{ color: "#52c41a" }}
+              styles={{ content: { color: "#52c41a" } }}
             />
           </Col>
           <Col span={6}>
@@ -1309,14 +1372,14 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
               title="Total Remaining"
               value={totalRemaining}
               prefix="Rs"
-              valueStyle={{ color: "#ff4d4f" }}
+              styles={{ content: { color: "#ff4d4f" } }}
             />
           </Col>
           <Col span={6}>
             <Statistic
               title="Enrolled Courses"
               value={enrollments.length}
-              valueStyle={{ color: "#722ed1" }}
+              styles={{ content: { color: "#722ed1" } }}
             />
           </Col>
         </Row>
@@ -1877,14 +1940,17 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
           setPaymentModalVisible(false);
           setSelectedFeeStructure(null);
           setSelectedInstallment(null);
+          setSelectedTrackerRowKeys([]);
         }}
         onPaymentSuccess={(data) => {
           message.success("Payment recorded successfully!");
+          setSelectedTrackerRowKeys([]);
           fetchStudentData();
         }}
         feeStructure={selectedFeeStructure}
         studentInfo={studentInfo}
         selectedInstallment={selectedInstallment}
+        initialSelectedPaymentRows={selectedTrackerRows}
       />
 
       <PaymentReceipt
