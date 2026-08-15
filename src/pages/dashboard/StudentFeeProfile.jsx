@@ -34,6 +34,8 @@ import {
   DeleteOutlined,
   ExclamationCircleOutlined,
   EditOutlined,
+  LeftOutlined,
+  RightOutlined,
 } from "@ant-design/icons";
 import {
   getStudentFeeStructures,
@@ -71,6 +73,54 @@ const getInstallmentSortDate = (installment) => {
   return installment?.dueDate;
 };
 
+const getEnrollmentStartDate = (record) =>
+  record?.enrollment?.batch?.startDate ||
+  record?.enrollment?.enrollmentDate ||
+  record?.enrollment?.createdAt ||
+  record?.createdAt ||
+  null;
+
+const getRecordTotalFee = (record) => {
+  const additionalFeeTotal = (record?.additionalFees || []).reduce(
+    (acc, fee) => acc + Number(fee?.amount || 0),
+    0,
+  );
+
+  return (
+    Number(record?.admissionFee || 0) +
+    Number(record?.courseFee || 0) +
+    Number(record?.certificateFee || 0) +
+    Number(record?.examFee || 0) +
+    Number(record?.registrationFee || 0) +
+    Number(record?.practicalFee || 0) +
+    Number(record?.otherFee || 0) +
+    additionalFeeTotal -
+    Number(record?.discount || 0)
+  );
+};
+
+const getRecordDurationMonths = (record) => {
+  const duration = Number(
+    record?.course?.duration ||
+      record?.numberOfInstallments ||
+      record?.installments?.length ||
+      1,
+  );
+
+  return Number.isFinite(duration) && duration > 0 ? duration : 1;
+};
+
+const getMonthKey = (value) => {
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed.format("YYYY-MM") : null;
+};
+
+const getInstallmentBalance = (installment) =>
+  Math.max(
+    0,
+    Number(installment?.amount || 0) - Number(installment?.paidAmount || 0),
+  );
+
 const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
   const [feeStructures, setFeeStructures] = useState([]);
   const [payments, setPayments] = useState([]);
@@ -90,6 +140,9 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
   const [editPaymentMethod, setEditPaymentMethod] = useState("Cash");
   const [editPaymentDate, setEditPaymentDate] = useState(null);
   const [editNotes, setEditNotes] = useState("");
+  const [installmentsView, setInstallmentsView] = useState("list");
+  const [trackerCourseFilter, setTrackerCourseFilter] = useState("all");
+  const [trackerMonth, setTrackerMonth] = useState(null);
 
   useEffect(() => {
     if (studentId) {
@@ -375,44 +428,573 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
   };
 
   const totalFee = feeStructureRows.reduce((sum, fs) => {
-    const additionalFeeTotal = (fs.additionalFees || []).reduce(
-      (acc, fee) => acc + (fee.amount || 0),
-      0,
-    );
-    const correctTotal =
-      (fs.admissionFee || 0) +
-      (fs.courseFee || 0) +
-      (fs.certificateFee || 0) +
-      (fs.examFee || 0) +
-      (fs.registrationFee || 0) +
-      (fs.practicalFee || 0) +
-      (fs.otherFee || 0) +
-      additionalFeeTotal -
-      (fs.discount || 0);
-    return sum + correctTotal;
+    return sum + getRecordTotalFee(fs);
   }, 0);
   const totalPaid = feeStructureRows.reduce(
     (sum, fs) => sum + (fs.paidAmount || 0),
     0,
   );
   const totalRemaining = feeStructureRows.reduce((sum, fs) => {
-    const additionalFeeTotal = (fs.additionalFees || []).reduce(
-      (acc, fee) => acc + (fee.amount || 0),
-      0,
-    );
-    const correctTotal =
-      (fs.admissionFee || 0) +
-      (fs.courseFee || 0) +
-      (fs.certificateFee || 0) +
-      (fs.examFee || 0) +
-      (fs.registrationFee || 0) +
-      (fs.practicalFee || 0) +
-      (fs.otherFee || 0) +
-      additionalFeeTotal -
-      (fs.discount || 0);
-    const remaining = correctTotal - (fs.paidAmount || 0);
+    const remaining = getRecordTotalFee(fs) - (fs.paidAmount || 0);
     return sum + Math.max(0, remaining);
   }, 0);
+
+  const trackerBaseRows = useMemo(() => {
+    return feeStructureRows
+      .filter((record) => record?.course?._id || record?.course?.courseName)
+      .map((record) => {
+        const startDate = getEnrollmentStartDate(record);
+        const startMonth = startDate ? dayjs(startDate).startOf("month") : null;
+        const durationMonths = getRecordDurationMonths(record);
+        const endMonth = startMonth
+          ? startMonth.add(durationMonths - 1, "month")
+          : null;
+
+        const normalizedInstallments =
+          record.installmentEnabled && record.installments?.length
+            ? record.installments
+            : [
+                {
+                  installmentNumber: 1,
+                  description: "Full payment",
+                  amount: getRecordTotalFee(record),
+                  paidAmount: record.paidAmount || 0,
+                  dueDate: startDate,
+                  paidDate: sortedPayments.find(
+                    (payment) =>
+                      (payment.feeStructure === record._id ||
+                        payment.feeStructure?._id === record._id) &&
+                      payment.status !== "Refunded",
+                  )?.paymentDate,
+                  status:
+                    record.feeStatus === "Unpaid"
+                      ? "Pending"
+                      : record.feeStatus || "Pending",
+                  receiptNumber: sortedPayments.find(
+                    (payment) =>
+                      (payment.feeStructure === record._id ||
+                        payment.feeStructure?._id === record._id) &&
+                      payment.status !== "Refunded",
+                  )?.receiptNo,
+                  voucherNo: sortedPayments.find(
+                    (payment) =>
+                      (payment.feeStructure === record._id ||
+                        payment.feeStructure?._id === record._id) &&
+                      payment.status !== "Refunded",
+                  )?.voucherNo,
+                },
+              ];
+
+        return {
+          ...record,
+          trackerStartDate: startDate,
+          trackerStartMonth: startMonth,
+          trackerEndMonth: endMonth,
+          trackerDurationMonths: durationMonths,
+          trackerInstallments: normalizedInstallments,
+        };
+      })
+      .filter((record) => record.trackerStartMonth && record.trackerEndMonth);
+  }, [feeStructureRows, sortedPayments]);
+
+  const trackerCourseOptions = useMemo(() => {
+    return trackerBaseRows.map((record) => ({
+      value: record._id,
+      label: record.course?.courseName || "Course",
+    }));
+  }, [trackerBaseRows]);
+
+  const trackerAvailableMonths = useMemo(() => {
+    const monthMap = new Map();
+    const filteredRows =
+      trackerCourseFilter === "all"
+        ? trackerBaseRows
+        : trackerBaseRows.filter((record) => record._id === trackerCourseFilter);
+
+    filteredRows.forEach((record) => {
+      let cursor = record.trackerStartMonth;
+      while (cursor.isBefore(record.trackerEndMonth) || cursor.isSame(record.trackerEndMonth, "month")) {
+        monthMap.set(cursor.format("YYYY-MM"), cursor.format("MMMM YYYY"));
+        cursor = cursor.add(1, "month");
+      }
+    });
+
+    return [...monthMap.entries()]
+      .sort(([a], [b]) => (a > b ? 1 : -1))
+      .map(([value, label]) => ({ value, label }));
+  }, [trackerBaseRows, trackerCourseFilter]);
+
+  useEffect(() => {
+    if (!trackerAvailableMonths.length) {
+      setTrackerMonth(null);
+      return;
+    }
+
+    const todayMonth = dayjs().format("YYYY-MM");
+    const existingMonth = trackerAvailableMonths.find(
+      (item) => item.value === trackerMonth,
+    );
+
+    if (existingMonth) return;
+
+    const defaultMonth =
+      trackerAvailableMonths.find((item) => item.value === todayMonth)?.value ||
+      trackerAvailableMonths[trackerAvailableMonths.length - 1]?.value ||
+      null;
+
+    setTrackerMonth(defaultMonth);
+  }, [trackerAvailableMonths, trackerMonth]);
+
+  const trackerMonthIndex = trackerAvailableMonths.findIndex(
+    (item) => item.value === trackerMonth,
+  );
+  const selectedTrackerMonthLabel =
+    trackerAvailableMonths.find((item) => item.value === trackerMonth)?.label ||
+    "Select month";
+
+  const trackerVisibleRows = useMemo(() => {
+    if (!trackerMonth) return [];
+
+    const monthStart = dayjs(`${trackerMonth}-01`).startOf("month");
+    const filteredRows =
+      trackerCourseFilter === "all"
+        ? trackerBaseRows
+        : trackerBaseRows.filter((record) => record._id === trackerCourseFilter);
+
+    return filteredRows
+      .filter(
+        (record) =>
+          (monthStart.isAfter(record.trackerStartMonth) ||
+            monthStart.isSame(record.trackerStartMonth, "month")) &&
+          (monthStart.isBefore(record.trackerEndMonth) ||
+            monthStart.isSame(record.trackerEndMonth, "month")),
+      )
+      .map((record) => {
+        const monthInstallments = record.trackerInstallments
+          .filter((installment) => getMonthKey(installment.dueDate) === trackerMonth)
+          .sort((a, b) => {
+            const dateDiff =
+              getTimeValue(getInstallmentSortDate(a)) -
+              getTimeValue(getInstallmentSortDate(b));
+
+            if (dateDiff !== 0) return dateDiff;
+            return (a.installmentNumber || 0) - (b.installmentNumber || 0);
+          });
+
+        return {
+          ...record,
+          trackerMonthInstallments: monthInstallments,
+          trackerMonthScheduled: monthInstallments.reduce(
+            (sum, installment) => sum + Number(installment.amount || 0),
+            0,
+          ),
+          trackerMonthPaid: monthInstallments.reduce(
+            (sum, installment) => sum + Number(installment.paidAmount || 0),
+            0,
+          ),
+          trackerMonthRemaining: monthInstallments.reduce(
+            (sum, installment) => sum + getInstallmentBalance(installment),
+            0,
+          ),
+        };
+      });
+  }, [trackerBaseRows, trackerCourseFilter, trackerMonth]);
+
+  const trackerSummary = useMemo(() => {
+    const installmentRows = trackerVisibleRows.flatMap((record) =>
+      record.trackerMonthInstallments.map((installment) => ({
+        ...installment,
+        courseName: record.course?.courseName || "Course",
+      })),
+    );
+
+    return {
+      coursesInMonth: trackerVisibleRows.length,
+      scheduledAmount: installmentRows.reduce(
+        (sum, installment) => sum + Number(installment.amount || 0),
+        0,
+      ),
+      paidAmount: installmentRows.reduce(
+        (sum, installment) => sum + Number(installment.paidAmount || 0),
+        0,
+      ),
+      remainingAmount: installmentRows.reduce(
+        (sum, installment) => sum + getInstallmentBalance(installment),
+        0,
+      ),
+      paidCount: installmentRows.filter((installment) => installment.status === "Paid")
+        .length,
+      partialCount: installmentRows.filter(
+        (installment) => installment.status === "Partial",
+      ).length,
+      pendingCount: installmentRows.filter(
+        (installment) => installment.status === "Pending",
+      ).length,
+      overdueCount: installmentRows.filter(
+        (installment) => installment.status === "Overdue",
+      ).length,
+    };
+  }, [trackerVisibleRows]);
+
+  const trackerTableRows = useMemo(() => {
+    return trackerVisibleRows
+      .flatMap((record) =>
+        record.trackerMonthInstallments.map((installment) => ({
+          ...installment,
+          key: `${record._id}-${installment._id || installment.installmentNumber}`,
+          feeStructureRecord: record,
+          courseName: record.course?.courseName || "Course",
+          courseCode: record.course?.courseId || "-",
+          durationMonths: record.trackerDurationMonths,
+          balance: getInstallmentBalance(installment),
+          monthPaidAmount: Number(installment.paidAmount || 0),
+          monthAmount: Number(installment.amount || 0),
+        })),
+      )
+      .sort((a, b) => {
+        const dueDateDiff = getTimeValue(a.dueDate) - getTimeValue(b.dueDate);
+        if (dueDateDiff !== 0) return dueDateDiff;
+
+        const courseDiff = String(a.courseName).localeCompare(String(b.courseName));
+        if (courseDiff !== 0) return courseDiff;
+
+        return (a.installmentNumber || 0) - (b.installmentNumber || 0);
+      });
+  }, [trackerVisibleRows]);
+
+  const trackerPaymentActivity = useMemo(() => {
+    if (!trackerMonth) return [];
+
+    return sortedPayments.filter((payment) => {
+      const paymentMonth = getMonthKey(payment.paymentDate);
+      if (paymentMonth !== trackerMonth) return false;
+      if (trackerCourseFilter === "all") return true;
+
+      const paymentFeeStructureId = payment.feeStructure?._id || payment.feeStructure;
+      return paymentFeeStructureId === trackerCourseFilter;
+    });
+  }, [sortedPayments, trackerMonth, trackerCourseFilter]);
+
+  const renderInstallmentTrackerContent = () => (
+    <Card size="small">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <Title level={5} style={{ marginBottom: 4 }}>
+              Month-wise installment tracking
+            </Title>
+            <Text type="secondary">
+              Track previous and upcoming month installments by course duration, including paid, unpaid, pending, and partial amounts.
+            </Text>
+          </div>
+
+          <Space wrap>
+            <Select
+              value={trackerCourseFilter}
+              onChange={setTrackerCourseFilter}
+              style={{ minWidth: 240 }}
+              options={[
+                { value: "all", label: "All enrolled courses" },
+                ...trackerCourseOptions,
+              ]}
+            />
+            <Button
+              icon={<LeftOutlined />}
+              onClick={() =>
+                trackerMonthIndex > 0 &&
+                setTrackerMonth(
+                  trackerAvailableMonths[trackerMonthIndex - 1].value,
+                )
+              }
+              disabled={trackerMonthIndex <= 0}
+            >
+              Previous
+            </Button>
+            <Select
+              value={trackerMonth}
+              onChange={setTrackerMonth}
+              style={{ minWidth: 180 }}
+              options={trackerAvailableMonths}
+              placeholder="Select month"
+            />
+            <Button
+              icon={<RightOutlined />}
+              onClick={() =>
+                trackerMonthIndex >= 0 &&
+                trackerMonthIndex < trackerAvailableMonths.length - 1 &&
+                setTrackerMonth(
+                  trackerAvailableMonths[trackerMonthIndex + 1].value,
+                )
+              }
+              disabled={
+                trackerMonthIndex < 0 ||
+                trackerMonthIndex >= trackerAvailableMonths.length - 1
+              }
+            >
+              Next
+            </Button>
+          </Space>
+        </div>
+
+        <Row gutter={16}>
+          <Col xs={24} md={12} xl={6}>
+            <Statistic
+              title={`Scheduled In ${selectedTrackerMonthLabel}`}
+              value={trackerSummary.scheduledAmount}
+              prefix="Rs"
+              valueStyle={{ color: "#1677ff" }}
+            />
+          </Col>
+          <Col xs={24} md={12} xl={6}>
+            <Statistic
+              title="Paid Portion"
+              value={trackerSummary.paidAmount}
+              prefix="Rs"
+              valueStyle={{ color: "#52c41a" }}
+            />
+          </Col>
+          <Col xs={24} md={12} xl={6}>
+            <Statistic
+              title="Remaining Portion"
+              value={trackerSummary.remainingAmount}
+              prefix="Rs"
+              valueStyle={{ color: "#ff4d4f" }}
+            />
+          </Col>
+          <Col xs={24} md={12} xl={6}>
+            <Statistic
+              title="Courses In View"
+              value={trackerSummary.coursesInMonth}
+              valueStyle={{ color: "#722ed1" }}
+            />
+          </Col>
+        </Row>
+
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Card size="small">
+            <div className="text-xs text-gray-500">Paid installments</div>
+            <div className="text-xl font-semibold text-green-600">
+              {trackerSummary.paidCount}
+            </div>
+          </Card>
+          <Card size="small">
+            <div className="text-xs text-gray-500">Partial installments</div>
+            <div className="text-xl font-semibold text-orange-500">
+              {trackerSummary.partialCount}
+            </div>
+          </Card>
+          <Card size="small">
+            <div className="text-xs text-gray-500">Pending installments</div>
+            <div className="text-xl font-semibold text-gray-700">
+              {trackerSummary.pendingCount}
+            </div>
+          </Card>
+          <Card size="small">
+            <div className="text-xs text-gray-500">Overdue installments</div>
+            <div className="text-xl font-semibold text-red-600">
+              {trackerSummary.overdueCount}
+            </div>
+          </Card>
+        </div>
+
+        {trackerTableRows.length === 0 ? (
+          <Card size="small" className="text-center">
+            <Text type="secondary">
+              No installment record is scheduled for {selectedTrackerMonthLabel}.
+            </Text>
+          </Card>
+        ) : (
+          <Card
+            size="small"
+            title={
+              trackerCourseFilter === "all"
+                ? `All course installments for ${selectedTrackerMonthLabel}`
+                : `Selected course installments for ${selectedTrackerMonthLabel}`
+            }
+          >
+            <Table
+              size="small"
+              pagination={false}
+              rowKey="key"
+              dataSource={trackerTableRows}
+              columns={[
+                {
+                  title: "Course",
+                  dataIndex: "courseName",
+                  key: "courseName",
+                  render: (_, row) => (
+                    <div>
+                      <div className="font-medium">{row.courseName}</div>
+                      <div className="text-xs text-gray-500">
+                        {row.courseCode} • Duration: {row.durationMonths} month
+                        {row.durationMonths > 1 ? "s" : ""}
+                      </div>
+                    </div>
+                  ),
+                },
+                {
+                  title: "#",
+                  dataIndex: "installmentNumber",
+                  key: "installmentNumber",
+                  render: (value) => <Tag color="blue">#{value}</Tag>,
+                },
+                {
+                  title: "Description",
+                  dataIndex: "description",
+                  key: "description",
+                  render: (value) => value || "Installment",
+                },
+                {
+                  title: "Due Date",
+                  dataIndex: "dueDate",
+                  key: "dueDate",
+                  render: (value) =>
+                    value ? dayjs(value).format("DD MMM YYYY") : "-",
+                },
+                {
+                  title: "Amount",
+                  dataIndex: "monthAmount",
+                  key: "monthAmount",
+                  render: (value) =>
+                    `Rs ${Number(value || 0).toLocaleString()}`,
+                },
+                {
+                  title: "Paid",
+                  dataIndex: "monthPaidAmount",
+                  key: "monthPaidAmount",
+                  render: (value) => (
+                    <span className="text-green-600 font-medium">
+                      Rs {Number(value || 0).toLocaleString()}
+                    </span>
+                  ),
+                },
+                {
+                  title: "Unpaid",
+                  dataIndex: "balance",
+                  key: "balance",
+                  render: (value) => (
+                    <span className="text-red-600 font-medium">
+                      Rs {Number(value || 0).toLocaleString()}
+                    </span>
+                  ),
+                },
+                {
+                  title: "Status",
+                  dataIndex: "status",
+                  key: "status",
+                  render: (status) => {
+                    const colors = {
+                      Paid: "green",
+                      Partial: "orange",
+                      Pending: "default",
+                      Overdue: "red",
+                    };
+                    return <Tag color={colors[status]}>{status}</Tag>;
+                  },
+                },
+                {
+                  title: "Receipt",
+                  dataIndex: "receiptNumber",
+                  key: "receiptNumber",
+                  render: (value) => value || "-",
+                },
+                {
+                  title: "Action",
+                  key: "action",
+                  render: (_, installment) => (
+                    <Space size="small">
+                      {installment.status !== "Paid" && (
+                        <Button
+                          type="primary"
+                          size="small"
+                          onClick={() =>
+                            handleRecordPayment(
+                              installment.feeStructureRecord,
+                              installment,
+                            )
+                          }
+                        >
+                          Pay
+                        </Button>
+                      )}
+                      {installment.receiptNumber && (
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            handleViewReceiptByNumber(
+                              installment.receiptNumber,
+                            )
+                          }
+                        >
+                          Receipt
+                        </Button>
+                      )}
+                    </Space>
+                  ),
+                },
+              ]}
+            />
+          </Card>
+        )}
+
+        <Card
+          size="small"
+          title={`Payment activity in ${selectedTrackerMonthLabel}`}
+        >
+          <Table
+            size="small"
+            rowKey="_id"
+            pagination={false}
+            dataSource={trackerPaymentActivity}
+            locale={{
+              emptyText: "No payment activity recorded in this month.",
+            }}
+            columns={[
+              {
+                title: "Receipt No",
+                dataIndex: "receiptNo",
+                key: "receiptNo",
+                render: (value) => value || "-",
+              },
+              {
+                title: "Course",
+                dataIndex: ["course", "courseName"],
+                key: "course",
+                render: (value) => value || "Course",
+              },
+              {
+                title: "Installment",
+                dataIndex: "installmentNumber",
+                key: "installmentNumber",
+                render: (value) =>
+                  value ? `#${value}` : "Full payment",
+              },
+              {
+                title: "Amount",
+                dataIndex: "amount",
+                key: "amount",
+                render: (value) =>
+                  `Rs ${Number(value || 0).toLocaleString()}`,
+              },
+              {
+                title: "Payment Date",
+                dataIndex: "paymentDate",
+                key: "paymentDate",
+                render: (value) =>
+                  value ? dayjs(value).format("DD MMM YYYY") : "-",
+              },
+              {
+                title: "Status",
+                dataIndex: "status",
+                key: "status",
+                render: (value) => <Tag>{value || "Completed"}</Tag>,
+              },
+            ]}
+          />
+        </Card>
+      </div>
+    </Card>
+  );
 
   const feeStructureColumns = [
     {
@@ -742,6 +1324,18 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
 
       <Card>
         <Tabs activeKey={activeTab} onChange={setActiveTab}>
+          <Tabs.TabPane
+            tab={
+              <span>
+                <CalendarOutlined />
+                Installment Tracker
+              </span>
+            }
+            key="4"
+          >
+            {renderInstallmentTrackerContent()}
+          </Tabs.TabPane>
+
           <Tabs.TabPane
             tab={
               <span>
@@ -1152,96 +1746,127 @@ const StudentFeeProfile = ({ studentId, studentInfo, onEnrollmentChanged }) => {
             }
             key="3"
           >
-            {feeStructures.map((fs) => (
-              <Card
-                key={fs._id}
-                size="small"
-                title={`${fs.course?.courseName || "Course"} - Installments`}
-                className="mb-4"
-              >
-                {fs.installments?.length > 0 ? (
-                  <Table
-                    dataSource={getSortedInstallments(fs.installments)}
-                    columns={[
-                      {
-                        title: "#",
-                        dataIndex: "installmentNumber",
-                        key: "number",
-                        render: (num) => <Tag color="blue">#{num}</Tag>,
-                      },
-                      {
-                        title: "Description",
-                        dataIndex: "description",
-                        key: "description",
-                      },
-                      {
-                        title: "Amount",
-                        dataIndex: "amount",
-                        key: "amount",
-                        render: (amt) => `Rs ${amt?.toLocaleString()}`,
-                      },
-                      {
-                        title: "Paid",
-                        dataIndex: "paidAmount",
-                        key: "paidAmount",
-                        render: (amt) => `Rs ${(amt || 0).toLocaleString()}`,
-                      },
-                      {
-                        title: "Date",
-                        dataIndex: "dueDate",
-                        key: "dueDate",
-                        render: (_, inst) => {
-                          const displayDate = getInstallmentSortDate(inst);
-                          const isPaid = inst.status === "Paid";
-                          const isPartial = inst.status === "Partial";
-                          return (
-                            <span>
-                              {new Date(displayDate).toLocaleDateString()}
-                              {(isPaid || isPartial) && inst.paidDate
-                                ? " (Paid Date)"
-                                : " (Due Date)"}
-                            </span>
-                          );
+            <Card size="small" className="mb-4">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <Title level={5} style={{ marginBottom: 4 }}>
+                    Installment Views
+                  </Title>
+                  <Text type="secondary">
+                    Switch between all installment records and month-wise tracker.
+                  </Text>
+                </div>
+                <Space>
+                  <Button
+                    type={installmentsView === "list" ? "primary" : "default"}
+                    onClick={() => setInstallmentsView("list")}
+                  >
+                    All Installments
+                  </Button>
+                  <Button
+                    type={installmentsView === "tracker" ? "primary" : "default"}
+                    onClick={() => setInstallmentsView("tracker")}
+                  >
+                    Installment Tracker
+                  </Button>
+                </Space>
+              </div>
+            </Card>
+
+            {installmentsView === "tracker" ? (
+              renderInstallmentTrackerContent()
+            ) : (
+              feeStructures.map((fs) => (
+                <Card
+                  key={fs._id}
+                  size="small"
+                  title={`${fs.course?.courseName || "Course"} - Installments`}
+                  className="mb-4"
+                >
+                  {fs.installments?.length > 0 ? (
+                    <Table
+                      dataSource={getSortedInstallments(fs.installments)}
+                      columns={[
+                        {
+                          title: "#",
+                          dataIndex: "installmentNumber",
+                          key: "number",
+                          render: (num) => <Tag color="blue">#{num}</Tag>,
                         },
-                      },
-                      {
-                        title: "Status",
-                        dataIndex: "status",
-                        key: "status",
-                        render: (status) => {
-                          const colors = {
-                            Paid: "green",
-                            Partial: "orange",
-                            Pending: "default",
-                            Overdue: "red",
-                          };
-                          return <Tag color={colors[status]}>{status}</Tag>;
+                        {
+                          title: "Description",
+                          dataIndex: "description",
+                          key: "description",
                         },
-                      },
-                      {
-                        title: "Actions",
-                        key: "actions",
-                        render: (_, inst) => (
-                          <Button
-                            type="primary"
-                            size="small"
-                            icon={<DollarOutlined />}
-                            onClick={() => handleRecordPayment(fs, inst)}
-                            disabled={inst.status === "Paid"}
-                          >
-                            Pay
-                          </Button>
-                        ),
-                      },
-                    ]}
-                    rowKey="_id"
-                    pagination={false}
-                  />
-                ) : (
-                  <Text type="secondary">No installments configured.</Text>
-                )}
-              </Card>
-            ))}
+                        {
+                          title: "Amount",
+                          dataIndex: "amount",
+                          key: "amount",
+                          render: (amt) => `Rs ${amt?.toLocaleString()}`,
+                        },
+                        {
+                          title: "Paid",
+                          dataIndex: "paidAmount",
+                          key: "paidAmount",
+                          render: (amt) => `Rs ${(amt || 0).toLocaleString()}`,
+                        },
+                        {
+                          title: "Date",
+                          dataIndex: "dueDate",
+                          key: "dueDate",
+                          render: (_, inst) => {
+                            const displayDate = getInstallmentSortDate(inst);
+                            const isPaid = inst.status === "Paid";
+                            const isPartial = inst.status === "Partial";
+                            return (
+                              <span>
+                                {new Date(displayDate).toLocaleDateString()}
+                                {(isPaid || isPartial) && inst.paidDate
+                                  ? " (Paid Date)"
+                                  : " (Due Date)"}
+                              </span>
+                            );
+                          },
+                        },
+                        {
+                          title: "Status",
+                          dataIndex: "status",
+                          key: "status",
+                          render: (status) => {
+                            const colors = {
+                              Paid: "green",
+                              Partial: "orange",
+                              Pending: "default",
+                              Overdue: "red",
+                            };
+                            return <Tag color={colors[status]}>{status}</Tag>;
+                          },
+                        },
+                        {
+                          title: "Actions",
+                          key: "actions",
+                          render: (_, inst) => (
+                            <Button
+                              type="primary"
+                              size="small"
+                              icon={<DollarOutlined />}
+                              onClick={() => handleRecordPayment(fs, inst)}
+                              disabled={inst.status === "Paid"}
+                            >
+                              Pay
+                            </Button>
+                          ),
+                        },
+                      ]}
+                      rowKey="_id"
+                      pagination={false}
+                    />
+                  ) : (
+                    <Text type="secondary">No installments configured.</Text>
+                  )}
+                </Card>
+              ))
+            )}
           </Tabs.TabPane>
         </Tabs>
       </Card>
