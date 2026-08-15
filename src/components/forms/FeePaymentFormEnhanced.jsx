@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Modal,
   Form,
@@ -52,6 +52,7 @@ const FeePaymentFormEnhanced = ({
   initialSelectedPaymentRows = [],
 }) => {
   const [form] = Form.useForm();
+  const initRef = useRef("");
   const [loading, setLoading] = useState(false);
   const [receiptVisible, setReceiptVisible] = useState(false);
   const [paymentData, setPaymentData] = useState(null);
@@ -61,6 +62,27 @@ const FeePaymentFormEnhanced = ({
   const [accountingMethods, setAccountingMethods] = useState([]);
   const [methodsLoading, setMethodsLoading] = useState(false);
   const hasMixedCourseSelection = initialSelectedPaymentRows.length > 0;
+  const selectedInstallmentsKey = useMemo(
+    () => initialSelectedInstallments.join(","),
+    [initialSelectedInstallments],
+  );
+  const selectedPaymentRowsKey = useMemo(
+    () =>
+      initialSelectedPaymentRows
+        .map(
+          (row) =>
+            `${row.rowId || row.installmentNumber}-${row.feeStructureId || row.courseId}-${row.remainingAmount || 0}`,
+        )
+        .join("|"),
+    [initialSelectedPaymentRows],
+  );
+  const defaultAccountingMethodId = useMemo(
+    () =>
+      accountingMethods.find((m) => m.isDefault)?._id ||
+      accountingMethods[0]?._id ||
+      undefined,
+    [accountingMethods],
+  );
 
   const getInstallmentRemaining = (installment) =>
     Math.max(
@@ -434,68 +456,61 @@ const FeePaymentFormEnhanced = ({
     return `Rs. ${amount?.toLocaleString() || 0}`;
   };
 
-  // Reset form when visible changes
   useEffect(() => {
-    if (visible) {
-      form.resetFields();
-      setSelectedInstallments(initialSelectedInstallments);
-      setPayMultiple(
-        hasMixedCourseSelection || initialSelectedInstallments.length > 0,
-      );
-      form.setFieldsValue({
-        amount: getDefaultAmount(),
-        paymentDate: getSelectedInstallmentDueDate(),
-      });
-    }
-  }, [
-    visible,
-    form,
-    hasMixedCourseSelection,
-    initialSelectedInstallments,
-    initialSelectedPaymentRows,
-    selectedInstallment,
-    feeStructure,
-  ]);
-
-  useEffect(() => {
-    if (!visible) return;
-
-    if (hasMixedCourseSelection) {
-      const totalAmount = initialSelectedPaymentRows.reduce(
-        (sum, row) => sum + Number(row.remainingAmount || 0),
-        0,
-      );
-      form.setFieldsValue({ amount: totalAmount });
+    if (!visible) {
+      initRef.current = "";
       return;
     }
 
-    if (initialSelectedInstallments.length > 0) {
-      const totalAmount = initialSelectedInstallments.reduce((sum, instNum) => {
-        const inst = feeStructure?.installments?.find(
-          (item) => item.installmentNumber === instNum,
-        );
-        return sum + getInstallmentRemaining(inst);
-      }, 0);
+    const initSignature = [
+      feeStructure?._id || "no-fee-structure",
+      selectedInstallment?.installmentNumber || "single",
+      hasMixedCourseSelection ? "mixed" : "simple",
+      selectedInstallmentsKey,
+      selectedPaymentRowsKey,
+    ].join("::");
 
-      form.setFieldsValue({
-        amount: Math.min(totalAmount, getOverallRemaining() || totalAmount),
-        paymentDate: getSelectedInstallmentDueDate(),
-      });
+    if (initRef.current === initSignature) {
       return;
     }
+
+    initRef.current = initSignature;
+
+    const shouldPayMultiple =
+      hasMixedCourseSelection || initialSelectedInstallments.length > 0;
+    const nextSelectedInstallments = hasMixedCourseSelection
+      ? []
+      : initialSelectedInstallments;
+
+    setSelectedInstallments(nextSelectedInstallments);
+    setPayMultiple(shouldPayMultiple);
 
     form.setFieldsValue({
       amount: getDefaultAmount(),
       paymentDate: getSelectedInstallmentDueDate(),
+      accountingPaymentMethodId:
+        form.getFieldValue("accountingPaymentMethodId") ||
+        defaultAccountingMethodId,
+      paymentType: "Partial",
+      voucherNo: currentVoucherNo || undefined,
     });
   }, [
     visible,
     hasMixedCourseSelection,
+    selectedInstallmentsKey,
+    selectedPaymentRowsKey,
     initialSelectedInstallments,
-    initialSelectedPaymentRows,
     feeStructure,
+    selectedInstallment,
+    currentVoucherNo,
+    defaultAccountingMethodId,
     form,
   ]);
+
+  useEffect(() => {
+    if (!visible || !currentVoucherNo) return;
+    form.setFieldValue("voucherNo", currentVoucherNo);
+  }, [visible, currentVoucherNo, form]);
 
   const getDefaultAmount = () => {
     if (hasMixedCourseSelection) {
@@ -541,6 +556,7 @@ const FeePaymentFormEnhanced = ({
     <>
       <Modal
         open={visible}
+        destroyOnHidden
         title={
           <Space>
             <DollarOutlined />
@@ -836,15 +852,6 @@ const FeePaymentFormEnhanced = ({
           form={form}
           layout="vertical"
           onFinish={handleSubmit}
-          initialValues={{
-            amount: getDefaultAmount(),
-            paymentDate: dayjs(),
-            accountingPaymentMethodId:
-              accountingMethods.find((m) => m.isDefault)?._id ||
-              accountingMethods[0]?._id ||
-              undefined,
-            paymentType: "Partial",
-          }}
         >
           <Form.Item
             name="amount"
