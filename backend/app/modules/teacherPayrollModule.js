@@ -44,6 +44,26 @@ const TeacherPayrollSchema = new mongoose.Schema(
       min: 0,
       max: 100,
     },
+    deductionAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    deductionNote: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    bonusAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    bonusNote: {
+      type: String,
+      trim: true,
+      default: "",
+    },
     totalActiveStudents: {
       type: Number,
       default: 0,
@@ -118,6 +138,31 @@ const TeacherPayrollSchema = new mongoose.Schema(
           type: Number,
           required: true,
           min: 0,
+        },
+        baseAmount: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+        deductionAmount: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+        deductionNote: {
+          type: String,
+          trim: true,
+          default: "",
+        },
+        bonusAmount: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+        bonusNote: {
+          type: String,
+          trim: true,
+          default: "",
         },
         transactionId: {
           type: String,

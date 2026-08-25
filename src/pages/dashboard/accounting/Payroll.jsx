@@ -57,6 +57,16 @@ const Payroll = () => {
   const [selectedTeacherId, setSelectedTeacherId] = useState(null);
   const [selectedHeadTypeId, setSelectedHeadTypeId] = useState(null);
   const [form] = Form.useForm();
+  const watchedBaseAmount = Form.useWatch("amount", form);
+  const watchedDeductionAmount = Form.useWatch("deductionAmount", form);
+  const watchedBonusAmount = Form.useWatch("bonusAmount", form);
+
+  const computedFinalPaymentAmount = useMemo(() => {
+    const baseAmount = Math.max(0, Number(watchedBaseAmount || 0));
+    const deductionAmount = Math.max(0, Number(watchedDeductionAmount || 0));
+    const bonusAmount = Math.max(0, Number(watchedBonusAmount || 0));
+    return Math.max(0, baseAmount - deductionAmount + bonusAmount);
+  }, [watchedBaseAmount, watchedDeductionAmount, watchedBonusAmount]);
 
   const getPreferredPaymentMethodId = (methods = paymentMethods) =>
     methods.find((m) => m.isDefault)?._id || methods[0]?._id || null;
@@ -234,6 +244,10 @@ const Payroll = () => {
     form.setFieldsValue({
       paymentDate: dayjs(),
       amount: record.payroll.remainingAmount || 0,
+      deductionAmount: 0,
+      deductionNote: "",
+      bonusAmount: 0,
+      bonusNote: "",
       paymentMethodId: getPreferredPaymentMethodId(),
       head: preferredSalaryHead?._id,
       headTypeId: preferredHeadTypeId,
@@ -256,14 +270,28 @@ const Payroll = () => {
   const handlePayment = async () => {
     try {
       const values = await form.validateFields();
-      const paymentAmount = Number(values.amount || 0);
-      if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+      const baseAmount = Number(values.amount || 0);
+      const deductionAmount = Math.max(0, Number(values.deductionAmount || 0));
+      const bonusAmount = Math.max(0, Number(values.bonusAmount || 0));
+      const paymentAmount = baseAmount - deductionAmount + bonusAmount;
+
+      if (!Number.isFinite(baseAmount) || baseAmount <= 0) {
         message.error("Please enter a valid salary payment amount.");
         return;
       }
 
-      if (paymentAmount > Number(selectedRecord?.payroll?.remainingAmount || 0)) {
-        message.error("Payment amount cannot exceed the remaining amount.");
+      if (deductionAmount > baseAmount) {
+        message.error("Deduction amount cannot be greater than base salary amount.");
+        return;
+      }
+
+      if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+        message.error("Final salary amount must be greater than zero.");
+        return;
+      }
+
+      if (baseAmount > Number(selectedRecord?.payroll?.remainingAmount || 0)) {
+        message.error("Base salary amount cannot exceed the remaining amount.");
         return;
       }
 
@@ -282,6 +310,10 @@ const Payroll = () => {
 
       const payload = {
         ...values,
+        amount: paymentAmount,
+        baseAmount,
+        deductionAmount,
+        bonusAmount,
         head: salaryHead._id,
         headId: salaryHead._id,
         type:
@@ -413,7 +445,7 @@ const Payroll = () => {
       autoTable(doc, {
         startY: doc.lastAutoTable.finalY + 8,
         theme: "grid",
-        head: [["Payment Date", "Account", "Amount", "Details"]],
+        head: [["Payment Date", "Account", "Final Amount", "Adjustments", "Details"]],
         body:
           (record.payroll.paymentEntries || []).map((entry) => [
             entry.paymentDate
@@ -421,6 +453,17 @@ const Payroll = () => {
               : "N/A",
             entry.paymentMethodName || "N/A",
             formatCurrency(entry.amount || 0),
+            [
+              `Base: ${formatCurrency(entry.baseAmount || entry.amount || 0)}`,
+              Number(entry.deductionAmount || 0) > 0
+                ? `Deduction: ${formatCurrency(entry.deductionAmount)}${entry.deductionNote ? ` (${entry.deductionNote})` : ""}`
+                : null,
+              Number(entry.bonusAmount || 0) > 0
+                ? `Bonus: ${formatCurrency(entry.bonusAmount)}${entry.bonusNote ? ` (${entry.bonusNote})` : ""}`
+                : null,
+            ]
+              .filter(Boolean)
+              .join("\n"),
             entry.details || "-",
           ]) || [],
         headStyles: {
@@ -636,7 +679,7 @@ const Payroll = () => {
             <DatePicker className="w-full" />
           </Form.Item>
           <Form.Item
-            label="Amount"
+            label="Base Salary Amount"
             name="amount"
             rules={[{ required: true, message: "Enter payment amount" }]}
           >
@@ -646,6 +689,43 @@ const Payroll = () => {
               max={selectedRecord?.payroll?.remainingAmount || 0}
             />
           </Form.Item>
+          <Form.Item label="Deduction Amount" name="deductionAmount">
+            <InputNumber className="w-full" min={0} />
+          </Form.Item>
+          <Form.Item label="Deduction Note / Reason" name="deductionNote">
+            <Input.TextArea
+              rows={2}
+              placeholder="Optional reason for salary deduction"
+            />
+          </Form.Item>
+          <Form.Item label="Bonus / Extra Amount" name="bonusAmount">
+            <InputNumber className="w-full" min={0} />
+          </Form.Item>
+          <Form.Item label="Bonus / Extra Note" name="bonusNote">
+            <Input.TextArea
+              rows={2}
+              placeholder="Optional note for bonus or extra amount"
+            />
+          </Form.Item>
+          <Card size="small" className="mb-4 bg-slate-50">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <Statistic
+                title="Remaining Salary"
+                value={Number(selectedRecord?.payroll?.remainingAmount || 0)}
+                formatter={(value) => formatCurrency(value)}
+              />
+              <Statistic
+                title="Base Salary"
+                value={Number(watchedBaseAmount || 0)}
+                formatter={(value) => formatCurrency(value)}
+              />
+              <Statistic
+                title="Final Payable"
+                value={computedFinalPaymentAmount}
+                formatter={(value) => formatCurrency(value)}
+              />
+            </div>
+          </Card>
           <Form.Item
             label="Pay From Account"
             name="paymentMethodId"
@@ -870,6 +950,29 @@ const Payroll = () => {
                     dataIndex: "amount",
                     key: "amount",
                     render: (value) => formatCurrency(value),
+                  },
+                  {
+                    title: "Adjustments",
+                    key: "adjustments",
+                    render: (_, entry) => (
+                      <div>
+                        <div>
+                          Base: {formatCurrency(entry.baseAmount || entry.amount || 0)}
+                        </div>
+                        {Number(entry.deductionAmount || 0) > 0 ? (
+                          <div className="text-xs text-rose-600">
+                            Deduction: {formatCurrency(entry.deductionAmount)}
+                            {entry.deductionNote ? ` - ${entry.deductionNote}` : ""}
+                          </div>
+                        ) : null}
+                        {Number(entry.bonusAmount || 0) > 0 ? (
+                          <div className="text-xs text-emerald-600">
+                            Bonus: {formatCurrency(entry.bonusAmount)}
+                            {entry.bonusNote ? ` - ${entry.bonusNote}` : ""}
+                          </div>
+                        ) : null}
+                      </div>
+                    ),
                   },
                   {
                     title: "Details",

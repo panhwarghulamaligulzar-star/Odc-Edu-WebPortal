@@ -283,6 +283,9 @@ export default function Receipt() {
     paidCount: 0,
     partialCount: 0,
     pendingCount: 0,
+    cashCollected: 0,
+    bankCollected: 0,
+    unassignedCollected: 0,
   });
   const [filters, setFilters] = useState({
     search: "",
@@ -1052,6 +1055,45 @@ export default function Receipt() {
                 >
                   {formatCurrency(summary[card.field])}
                 </div>
+                {card.key === "collected" ? (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <div
+                      className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium"
+                      style={{
+                        background: "#ffffff",
+                        borderColor: "#b7e4d7",
+                        color: "#0f766e",
+                      }}
+                    >
+                      <span>Cash</span>
+                      <span>{formatCurrency(summary.cashCollected)}</span>
+                    </div>
+                    <div
+                      className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium"
+                      style={{
+                        background: "#ffffff",
+                        borderColor: "#bfdbfe",
+                        color: "#1d4ed8",
+                      }}
+                    >
+                      <span>Bank</span>
+                      <span>{formatCurrency(summary.bankCollected)}</span>
+                    </div>
+                    {Number(summary.unassignedCollected || 0) > 0 ? (
+                      <div
+                        className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium"
+                        style={{
+                          background: "#ffffff",
+                          borderColor: "#f5d0a6",
+                          color: "#b45309",
+                        }}
+                      >
+                        <span>Other</span>
+                        <span>{formatCurrency(summary.unassignedCollected)}</span>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </Card>
           </Col>

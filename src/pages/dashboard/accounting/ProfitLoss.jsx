@@ -1,510 +1,620 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Empty,
+  Row,
+  Select,
+  Space,
+  Statistic,
   Table,
   Tag,
-  Button,
-  DatePicker,
-  Space,
-  Row,
-  Col,
-  Card,
-  Statistic,
-  Select,
   Tooltip,
   message,
-  Alert,
 } from "antd";
 import {
-  ArrowUpOutlined,
   ArrowDownOutlined,
+  ArrowUpOutlined,
   DownloadOutlined,
-  FileTextOutlined,
+  FilterOutlined,
 } from "@ant-design/icons";
 import { MdTrendingUp } from "react-icons/md";
 import { ScaleLoader } from "react-spinners";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { getProfitLoss } from "../../../services/accountingService";
-import useZustandStore from "../../../stores/zustandStore";
-import { canViewAccountingBalances } from "../../../utils/accountingAccess";
+import { getHeadsOfAccount, getProfitLoss } from "../../../services/accountingService";
+import { getCourses } from "../../../services/feeService";
 
-const { RangePicker } = DatePicker;
 const { Option } = Select;
 
-// ── helpers ────────────────────────────────────────────────
-const fmt = (n) =>
-  Number(n || 0).toLocaleString("en-PK", {
+const formatCurrency = (value) =>
+  Number(value || 0).toLocaleString("en-PK", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 
-const PRESETS = [
-  { label: "This Month", value: "month" },
-  { label: "Last Month", value: "lastMonth" },
-  { label: "This Quarter", value: "quarter" },
-  { label: "This Year", value: "year" },
-  { label: "Custom", value: "custom" },
+const MONTH_OPTIONS = [
+  { value: 1, label: "January" },
+  { value: 2, label: "February" },
+  { value: 3, label: "March" },
+  { value: 4, label: "April" },
+  { value: 5, label: "May" },
+  { value: 6, label: "June" },
+  { value: 7, label: "July" },
+  { value: 8, label: "August" },
+  { value: 9, label: "September" },
+  { value: 10, label: "October" },
+  { value: 11, label: "November" },
+  { value: 12, label: "December" },
 ];
 
-const getPresetRange = (preset) => {
-  const now = dayjs();
-  switch (preset) {
-    case "month":
-      return [now.startOf("month"), now.endOf("month")];
-    case "lastMonth":
-      return [
-        now.subtract(1, "month").startOf("month"),
-        now.subtract(1, "month").endOf("month"),
-      ];
-    case "quarter":
-      return [now.startOf("quarter"), now.endOf("quarter")];
-    case "year":
-      return [now.startOf("year"), now.endOf("year")];
-    default:
-      return null;
-  }
-};
-
-// ── Progress bar component ──────────────────────────────────
-const BreakdownRow = ({ name, total, maxTotal, color, count }) => {
-  const pct = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
-  return (
-    <div className="mb-3">
-      <div className="flex justify-between text-sm mb-1">
-        <span className="font-medium text-gray-700 truncate max-w-[55%]">
-          {name}
-        </span>
-        <span className="text-gray-500 text-xs">
-          <span className="font-semibold" style={{ color }}>
-            Rs. {fmt(total)}
-          </span>
-          &nbsp;·&nbsp;{count} txn
-        </span>
-      </div>
-      <div className="w-full bg-gray-100 rounded-full h-[8px]">
-        <div
-          className="h-[8px] rounded-full transition-all duration-500"
-          style={{ width: `${pct.toFixed(1)}%`, background: color }}
-        />
-      </div>
-    </div>
-  );
-};
-
-// ── Main component ─────────────────────────────────────────
 const ProfitLoss = () => {
-  const defaultRange = getPresetRange("month");
-  const [preset, setPreset] = useState("month");
-  const [dateRange, setDateRange] = useState(defaultRange);
   const [loading, setLoading] = useState(false);
+  const [bootLoading, setBootLoading] = useState(true);
   const [data, setData] = useState(null);
-  const [txnType, setTxnType] = useState("all"); // "all" | "income" | "expense"
-  const { appSettings, isSuperAdmin, adminInfo } = useZustandStore();
-  const balancesVisible = canViewAccountingBalances({
-    appSettings,
-    isSuperAdmin,
-    adminInfo,
-  });
-
-  const fetchData = useCallback(async () => {
-    if (!balancesVisible) {
-      setData(null);
-      return;
-    }
-    if (!dateRange || !dateRange[0] || !dateRange[1]) return;
-    setLoading(true);
-    try {
-      const res = await getProfitLoss({
-        dateFrom: dateRange[0].format("YYYY-MM-DD"),
-        dateTo: dateRange[1].format("YYYY-MM-DD"),
-      });
-      if (res?.success) setData(res.data);
-    } catch (err) {
-      message.error(err?.message || "Failed to load P&L data");
-    } finally {
-      setLoading(false);
-    }
-  }, [dateRange, balancesVisible]);
+  const [courses, setCourses] = useState([]);
+  const [heads, setHeads] = useState([]);
+  const [selectedYear, setSelectedYear] = useState("all");
+  const [selectedMonth, setSelectedMonth] = useState("all");
+  const [selectedCourse, setSelectedCourse] = useState("all");
+  const [selectedIncomeHeadKey, setSelectedIncomeHeadKey] = useState(null);
+  const [selectedExpenseHeadKey, setSelectedExpenseHeadKey] = useState(null);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    const loadBootData = async () => {
+      try {
+        const [coursesResponse, headsResponse] = await Promise.all([
+          getCourses(),
+          getHeadsOfAccount(null, true),
+        ]);
+        if (coursesResponse?.success) {
+          setCourses(coursesResponse.data || []);
+        }
+        if (headsResponse?.success) {
+          setHeads(headsResponse.data || []);
+        }
+      } catch (error) {
+        console.error("Failed to load profit/loss boot data:", error);
+      } finally {
+        setBootLoading(false);
+      }
+    };
 
-  // ── Preset change handler ────────────────────────────────
-  const handlePreset = (val) => {
-    setPreset(val);
-    if (val !== "custom") {
-      const range = getPresetRange(val);
-      setDateRange(range);
+    loadBootData();
+  }, []);
+
+  useEffect(() => {
+    const loadReport = async () => {
+      setLoading(true);
+      try {
+        const response = await getProfitLoss({
+          year: selectedYear === "all" ? undefined : selectedYear,
+          month:
+            selectedYear === "all" || selectedMonth === "all"
+              ? undefined
+              : selectedMonth,
+          courseId: selectedCourse === "all" ? undefined : selectedCourse,
+        });
+        if (response?.success) {
+          setData(response.data);
+        }
+      } catch (error) {
+        message.error(error?.message || "Failed to load profit and loss data");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadReport();
+  }, [selectedCourse, selectedMonth, selectedYear]);
+
+  useEffect(() => {
+    setSelectedIncomeHeadKey(null);
+    setSelectedExpenseHeadKey(null);
+  }, [selectedCourse, selectedMonth, selectedYear, data?.meta?.generatedAt]);
+
+  const yearOptions = useMemo(() => {
+    const apiYears = Array.isArray(data?.meta?.availableYears)
+      ? data.meta.availableYears
+      : [];
+
+    if (apiYears.length) {
+      return apiYears;
     }
+
+    const currentYear = dayjs().year();
+    return Array.from({ length: 6 }, (_, index) => currentYear - index);
+  }, [data]);
+
+  const totalIncome = Number(data?.totalIncome || 0);
+  const totalExpense = Number(data?.totalExpense || 0);
+  const netBalance = Number(data?.netBalance || 0);
+  const isProfit = netBalance >= 0;
+
+  const incomeEntries = Array.isArray(data?.incomeEntries) ? data.incomeEntries : [];
+  const expenseEntries = Array.isArray(data?.expenseEntries) ? data.expenseEntries : [];
+  const statementRows = Array.isArray(data?.statementRows) ? data.statementRows : [];
+
+  const headsLookup = useMemo(() => {
+    const lookup = new Map();
+
+    heads.forEach((head) => {
+      const id = String(head?._id || "").trim();
+      const name = String(head?.name || "").trim();
+
+      if (id) {
+        lookup.set(id, {
+          _id: id,
+          name: name || "Unassigned Head",
+        });
+      }
+
+      if (name) {
+        lookup.set(name.toLowerCase(), {
+          _id: id || name,
+          name,
+        });
+      }
+    });
+
+    return lookup;
+  }, [heads]);
+
+  const resolveHead = (record) => {
+    if (record?.head?.name) {
+      return {
+        _id: String(record?.head?._id || record?.head?.name || ""),
+        name: record.head.name,
+      };
+    }
+
+    const rawHeadId = String(record?.head?._id || record?.head || "").trim();
+    if (rawHeadId && headsLookup.has(rawHeadId)) {
+      return headsLookup.get(rawHeadId);
+    }
+
+    const rawHeadName = String(record?.head?.label || record?.headName || "").trim().toLowerCase();
+    if (rawHeadName && headsLookup.has(rawHeadName)) {
+      return headsLookup.get(rawHeadName);
+    }
+
+    return {
+      _id: "unassigned",
+      name: "Unassigned Head",
+    };
   };
 
-  const handleRangeChange = (dates) => {
-    setPreset("custom");
-    setDateRange(dates);
-  };
+  const getHeadKey = (record) => String(resolveHead(record)?._id || "unassigned");
+  const getHeadLabel = (record) => String(resolveHead(record)?.name || "Unassigned Head");
 
-  // ── Filtered transactions ────────────────────────────────
-  const transactions = data?.transactions || [];
-  const filteredTxns = transactions.filter((t) => {
-    if (txnType === "all") return true;
-    return t.type?.name?.toLowerCase() === txnType;
-  });
+  const incomeHeadRows = useMemo(() => {
+    const groups = incomeEntries.reduce((acc, entry) => {
+      const key = getHeadKey(entry);
+      const existing = acc.get(key) || {
+        key,
+        headName: getHeadLabel(entry),
+        count: 0,
+        total: 0,
+      };
+      existing.count += 1;
+      existing.total += Number(entry.amount || 0);
+      acc.set(key, existing);
+      return acc;
+    }, new Map());
 
-  // ── PDF Export ───────────────────────────────────────────
+    return Array.from(groups.values()).sort((a, b) => b.total - a.total);
+  }, [incomeEntries, headsLookup]);
+
+  const expenseHeadRows = useMemo(() => {
+    const groups = expenseEntries.reduce((acc, entry) => {
+      const key = getHeadKey(entry);
+      const existing = acc.get(key) || {
+        key,
+        headName: getHeadLabel(entry),
+        count: 0,
+        total: 0,
+      };
+      existing.count += 1;
+      existing.total += Number(entry.amount || 0);
+      acc.set(key, existing);
+      return acc;
+    }, new Map());
+
+    return Array.from(groups.values()).sort((a, b) => b.total - a.total);
+  }, [expenseEntries, headsLookup]);
+
+  const selectedIncomeHead = useMemo(
+    () => incomeHeadRows.find((row) => row.key === selectedIncomeHeadKey) || null,
+    [incomeHeadRows, selectedIncomeHeadKey],
+  );
+
+  const selectedExpenseHead = useMemo(
+    () => expenseHeadRows.find((row) => row.key === selectedExpenseHeadKey) || null,
+    [expenseHeadRows, selectedExpenseHeadKey],
+  );
+
+  const visibleIncomeEntries = useMemo(() => {
+    if (!selectedIncomeHeadKey) return incomeEntries;
+    return incomeEntries.filter((entry) => getHeadKey(entry) === selectedIncomeHeadKey);
+  }, [incomeEntries, selectedIncomeHeadKey]);
+
+  const visibleExpenseEntries = useMemo(() => {
+    if (!selectedExpenseHeadKey) return expenseEntries;
+    return expenseEntries.filter((entry) => getHeadKey(entry) === selectedExpenseHeadKey);
+  }, [expenseEntries, selectedExpenseHeadKey]);
+
+  const selectedYearLabel = selectedYear === "all" ? "All years" : String(selectedYear);
+  const selectedMonthLabel =
+    selectedMonth === "all"
+      ? "All months"
+      : MONTH_OPTIONS.find((item) => item.value === selectedMonth)?.label || "All months";
+  const selectedCourseLabel =
+    selectedCourse === "all"
+      ? "All courses"
+      : courses.find((course) => String(course._id) === String(selectedCourse))?.courseName ||
+        "Selected course";
+
   const exportPDF = () => {
     try {
-      const doc = new jsPDF({
-        orientation: "portrait",
-        unit: "mm",
-        format: "a4",
-      });
-      const fromLabel = dateRange?.[0]?.format("DD MMM YYYY") || "";
-      const toLabel = dateRange?.[1]?.format("DD MMM YYYY") || "";
-      const isProfit = (data?.netBalance || 0) >= 0;
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-      // Header
       doc.setFillColor(1, 19, 76);
-      doc.rect(0, 0, 210, 30, "F");
-      doc.setTextColor(232, 252, 10);
-      doc.setFontSize(16);
+      doc.rect(0, 0, 210, 28, "F");
+      doc.setTextColor(255, 255, 255);
       doc.setFont("helvetica", "bold");
-      doc.text("Profit & Loss Report", 14, 12);
-      doc.setFontSize(9);
+      doc.setFontSize(18);
+      doc.text("Profit & Loss Statement", 14, 12);
       doc.setFont("helvetica", "normal");
-      doc.setTextColor(200, 210, 255);
-      doc.text(`Period: ${fromLabel} — ${toLabel}`, 14, 20);
-      doc.text(`Generated: ${dayjs().format("DD MMM YYYY HH:mm")}`, 14, 26);
+      doc.setFontSize(9);
+      doc.text(
+        `Year: ${selectedYearLabel} | Month: ${selectedMonthLabel} | Course: ${selectedCourseLabel}`,
+        14,
+        19,
+      );
+      doc.text(`Generated: ${dayjs().format("DD MMM YYYY hh:mm A")}`, 14, 24);
 
-      // Summary cards
-      doc.setTextColor(0, 0, 0);
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "bold");
-      doc.text("Summary", 14, 40);
-
-      const summary = [
-        ["Total Income", `Rs. ${fmt(data?.totalIncome)}`],
-        ["Total Expense", `Rs. ${fmt(data?.totalExpense)}`],
-        [
-          isProfit ? "Net Profit" : "Net Loss",
-          `Rs. ${fmt(Math.abs(data?.netBalance))}`,
-        ],
-      ];
       autoTable(doc, {
-        startY: 44,
-        head: [["Item", "Amount"]],
-        body: summary,
+        startY: 36,
+        head: [["Metric", "Amount"]],
+        body: [
+          ["Total Income", `Rs. ${formatCurrency(totalIncome)}`],
+          ["Total Expense", `Rs. ${formatCurrency(totalExpense)}`],
+          [isProfit ? "Net Profit" : "Net Loss", `Rs. ${formatCurrency(Math.abs(netBalance))}`],
+        ],
         theme: "grid",
-        styles: { fontSize: 10 },
-        headStyles: { fillColor: [1, 19, 76], textColor: [232, 252, 10] },
+        headStyles: { fillColor: [1, 19, 76], textColor: [255, 255, 255] },
         columnStyles: { 1: { halign: "right" } },
         margin: { left: 14, right: 14 },
       });
 
-      const afterSummary = doc.lastAutoTable.finalY + 8;
-
-      // Income breakdown
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "bold");
-      doc.text("Income Breakdown", 14, afterSummary);
       autoTable(doc, {
-        startY: afterSummary + 4,
-        head: [["Head", "Transactions", "Amount"]],
-        body: (data?.incomeBreakdown || []).map((r) => [
-          r.headName,
-          r.count,
-          `Rs. ${fmt(r.total)}`,
+        startY: doc.lastAutoTable.finalY + 8,
+        head: [["Income Entry", "Head", "Course", "Date", "Amount"]],
+        body: incomeEntries.map((row) => [
+          row.name || "-",
+          row.head?.name || "-",
+          row.courseLabel || "-",
+          row.paymentDate ? dayjs(row.paymentDate).format("DD MMM YYYY") : "-",
+          `Rs. ${formatCurrency(row.amount)}`,
         ]),
         theme: "striped",
-        styles: { fontSize: 9 },
-        headStyles: { fillColor: [34, 197, 94], textColor: [255, 255, 255] },
-        columnStyles: { 2: { halign: "right" } },
+        headStyles: { fillColor: [22, 163, 74], textColor: [255, 255, 255] },
+        columnStyles: { 4: { halign: "right" } },
         margin: { left: 14, right: 14 },
       });
 
-      const afterIncome = doc.lastAutoTable.finalY + 8;
-
-      // Expense breakdown
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "bold");
-      doc.text("Expense Breakdown", 14, afterIncome);
-      autoTable(doc, {
-        startY: afterIncome + 4,
-        head: [["Head", "Transactions", "Amount"]],
-        body: (data?.expenseBreakdown || []).map((r) => [
-          r.headName,
-          r.count,
-          `Rs. ${fmt(r.total)}`,
-        ]),
-        theme: "striped",
-        styles: { fontSize: 9 },
-        headStyles: { fillColor: [239, 68, 68], textColor: [255, 255, 255] },
-        columnStyles: { 2: { halign: "right" } },
-        margin: { left: 14, right: 14 },
-      });
-
-      const afterExpense = doc.lastAutoTable.finalY + 8;
-
-      // Transactions
       doc.addPage();
-      doc.setFillColor(1, 19, 76);
-      doc.rect(0, 0, 210, 14, "F");
-      doc.setTextColor(232, 252, 10);
-      doc.setFontSize(11);
-      doc.setFont("helvetica", "bold");
-      doc.text("Transaction List", 14, 10);
+
       autoTable(doc, {
-        startY: 18,
-        head: [["Date", "Name", "Head", "Type", "Payment Method", "Amount"]],
-        body: transactions.map((t) => [
-          t.paymentDate ? dayjs(t.paymentDate).format("DD MMM YYYY") : "-",
-          t.name || "-",
-          t.head?.name || "-",
-          t.type?.name || "-",
-          t.paymentMethod?.name || "-",
-          `Rs. ${fmt(t.amount)}`,
+        startY: 16,
+        head: [["Expense Entry", "Head", "Course", "Date", "Amount"]],
+        body: expenseEntries.map((row) => [
+          row.name || "-",
+          row.head?.name || "-",
+          row.courseLabel || "-",
+          row.paymentDate ? dayjs(row.paymentDate).format("DD MMM YYYY") : "-",
+          `Rs. ${formatCurrency(row.amount)}`,
         ]),
         theme: "striped",
-        styles: { fontSize: 8 },
-        headStyles: { fillColor: [1, 19, 76], textColor: [232, 252, 10] },
-        columnStyles: { 5: { halign: "right" } },
+        headStyles: { fillColor: [220, 38, 38], textColor: [255, 255, 255] },
+        columnStyles: { 4: { halign: "right" } },
         margin: { left: 14, right: 14 },
       });
 
-      doc.save(`profit-loss-${fromLabel}-to-${toLabel}.pdf`);
-    } catch (err) {
-      message.error("PDF export failed");
-      console.error(err);
+      doc.save(`profit-loss-${dayjs().format("YYYY-MM-DD-HHmm")}.pdf`);
+    } catch (error) {
+      console.error("Profit/loss PDF export failed:", error);
+      message.error("Failed to export profit and loss PDF");
     }
   };
 
-  // ── Table columns for transactions ───────────────────────
-  const columns = [
+  const transactionColumns = (entryType) => [
     {
       title: "Date",
       dataIndex: "paymentDate",
       key: "paymentDate",
-      width: 110,
-      render: (d) => (d ? dayjs(d).format("DD MMM YYYY") : "-"),
+      width: 120,
+      render: (value) => (value ? dayjs(value).format("DD MMM YYYY") : "-"),
     },
     {
-      title: "Description",
+      title: "Entry",
       dataIndex: "name",
       key: "name",
       ellipsis: true,
+      render: (value, record) => (
+        <div>
+          <div className="font-semibold text-slate-800">{value || "-"}</div>
+          <div className="text-xs text-slate-400">{record.transactionNo || "-"}</div>
+        </div>
+      ),
     },
     {
-      title: "Head of Account",
+      title: "Head",
       dataIndex: ["head", "name"],
       key: "head",
       ellipsis: true,
-      render: (_, r) => r.head?.name || "-",
+      render: (_, record) => getHeadLabel(record),
     },
     {
-      title: "Type",
-      dataIndex: ["type", "name"],
-      key: "type",
-      width: 100,
-      render: (_, r) => {
-        const isIncome = r.type?.name === "Income";
-        return (
-          <Tag
-            color={isIncome ? "green" : "red"}
-            style={{ fontWeight: 600, letterSpacing: "0.5px" }}
-          >
-            {isIncome ? "▲ IN" : "▼ OUT"}
-          </Tag>
-        );
-      },
+      title: "Course",
+      dataIndex: "courseLabel",
+      key: "courseLabel",
+      ellipsis: true,
+      render: (value) =>
+        value ? <Tag color="blue">{value}</Tag> : <span className="text-slate-400">General</span>,
     },
     {
       title: "Payment Method",
       dataIndex: ["paymentMethod", "name"],
       key: "paymentMethod",
-      render: (_, r) => r.paymentMethod?.name || "-",
+      render: (_, record) => record.paymentMethod?.name || "-",
     },
     {
-      title: "Amount (Rs.)",
+      title: "Amount",
       dataIndex: "amount",
       key: "amount",
       align: "right",
-      width: 130,
-      render: (amt, r) => {
-        const isIncome = r.type?.name === "Income";
-        return (
-          <span
-            className="font-semibold"
-            style={{ color: isIncome ? "#16a34a" : "#dc2626" }}
-          >
-            {isIncome ? "+" : "-"}Rs. {fmt(amt)}
-          </span>
-        );
-      },
+      width: 140,
+      render: (value) => (
+        <span
+          className="font-semibold"
+          style={{ color: entryType === "income" ? "#15803d" : "#dc2626" }}
+        >
+          {entryType === "income" ? "+" : "-"}Rs. {formatCurrency(value)}
+        </span>
+      ),
     },
   ];
 
-  const isProfit = (data?.netBalance ?? 0) >= 0;
-  const incomeMax = Math.max(
-    ...(data?.incomeBreakdown || []).map((r) => r.total),
-    1,
-  );
-  const expenseMax = Math.max(
-    ...(data?.expenseBreakdown || []).map((r) => r.total),
-    1,
-  );
+  const headSummaryColumns = (entryType, onSelectHead) => [
+    {
+      title: "Head Of Account",
+      dataIndex: "headName",
+      key: "headName",
+      render: (value, record) => (
+        <Button
+          type="link"
+          className="!px-0 !font-semibold"
+          style={{ color: entryType === "income" ? "#15803d" : "#dc2626" }}
+          onClick={() => onSelectHead(record.key)}
+        >
+          {value}
+        </Button>
+      ),
+    },
+    {
+      title: "Entries",
+      dataIndex: "count",
+      key: "count",
+      width: 110,
+      align: "center",
+      render: (value) => <Tag color={entryType === "income" ? "green" : "red"}>{value}</Tag>,
+    },
+    {
+      title: "Amount",
+      dataIndex: "total",
+      key: "total",
+      align: "right",
+      width: 160,
+      render: (value) => (
+        <span
+          className="font-semibold"
+          style={{ color: entryType === "income" ? "#15803d" : "#dc2626" }}
+        >
+          Rs. {formatCurrency(value)}
+        </span>
+      ),
+    },
+  ];
+
+  const statementColumns = [
+    {
+      title: "Statement Line",
+      dataIndex: "label",
+      key: "label",
+      render: (value) => <span className="font-semibold text-slate-800">{value}</span>,
+    },
+    {
+      title: "Income",
+      dataIndex: "incomeAmount",
+      key: "incomeAmount",
+      align: "right",
+      render: (value) =>
+        value !== null && value !== undefined ? (
+          <span className="font-semibold text-emerald-700">Rs. {formatCurrency(value)}</span>
+        ) : (
+          "-"
+        ),
+    },
+    {
+      title: "Expense",
+      dataIndex: "expenseAmount",
+      key: "expenseAmount",
+      align: "right",
+      render: (value) =>
+        value !== null && value !== undefined ? (
+          <span className="font-semibold text-rose-700">Rs. {formatCurrency(value)}</span>
+        ) : (
+          "-"
+        ),
+    },
+  ];
 
   return (
     <div className="w-full space-y-5">
-      {!balancesVisible ? (
-        <Alert
-          type="warning"
-          showIcon
-          message="Profit and loss totals are hidden by the super admin."
-          description="Accounting users can continue operational work, but monthly financial summaries are restricted."
-        />
-      ) : null}
-      {!balancesVisible ? null : (
-      <>
-      {/* ── Page Header ─────────────────────────────────── */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
           <div
-            className="w-10 h-10 rounded-lg flex items-center justify-center"
-            style={{ background: "#01134C" }}
+            className="flex h-11 w-11 items-center justify-center rounded-2xl"
+            style={{ background: "linear-gradient(135deg, #01134C 0%, #17338f 100%)" }}
           >
             <MdTrendingUp size={22} style={{ color: "#E8FC0A" }} />
           </div>
           <div>
             <h2 className="module-title">Profit & Loss</h2>
             <p className="module-subtitle">
-              Income vs expenses analytics by date range
+              View all income and expense entries and track net result across the accounting
+              module.
             </p>
           </div>
         </div>
 
-        {/* Controls */}
-        <Space wrap>
-          <Select
-            value={preset}
-            onChange={handlePreset}
-            style={{ width: 140 }}
-            size="middle"
+        <Tooltip title="Export current report">
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={exportPDF}
+            disabled={!data}
+            style={{
+              background: "#01134C",
+              borderColor: "#01134C",
+              color: "#E8FC0A",
+              fontWeight: 600,
+            }}
           >
-            {PRESETS.map((p) => (
-              <Option key={p.value} value={p.value}>
-                {p.label}
+            Export PDF
+          </Button>
+        </Tooltip>
+      </div>
+
+      <Card
+        bordered={false}
+        className="shadow-sm"
+        bodyStyle={{ padding: 24 }}
+        style={{
+          borderRadius: 24,
+          background: "linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)",
+          boxShadow: "0 18px 44px rgba(15, 23, 42, 0.06)",
+          border: "1px solid #e8eef6",
+        }}
+      >
+        <div className="mb-5 flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <div className="flex items-center gap-2 text-slate-800 font-semibold">
+              <FilterOutlined style={{ color: "#142d78" }} />
+              Filter Statement
+            </div>
+            <div className="mt-1 text-sm text-slate-500">
+              Check yearly, monthly, or course-wise profit and loss from the beginning of the
+              accounting records.
+            </div>
+          </div>
+          <Button
+            className="!h-10 !rounded-xl !border-slate-200 !px-4"
+            onClick={() => {
+              setSelectedYear("all");
+              setSelectedMonth("all");
+              setSelectedCourse("all");
+            }}
+          >
+            Clear Filters
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <Select
+            value={selectedYear}
+            onChange={(value) => {
+              setSelectedYear(value);
+              if (value === "all") {
+                setSelectedMonth("all");
+              }
+            }}
+            className="!h-11"
+          >
+            <Option value="all">All years</Option>
+            {yearOptions.map((year) => (
+              <Option key={year} value={year}>
+                {year}
               </Option>
             ))}
           </Select>
-          <RangePicker
-            value={dateRange}
-            onChange={handleRangeChange}
-            format="DD MMM YYYY"
-            allowClear={false}
-            style={{ minWidth: 240 }}
-          />
-          <Tooltip title="Export PDF">
-            <Button
-              icon={<DownloadOutlined />}
-              onClick={exportPDF}
-              disabled={!data}
-              style={{
-                background: "#01134C",
-                color: "#E8FC0A",
-                border: "none",
-                fontWeight: 600,
-              }}
-            >
-              PDF
-            </Button>
-          </Tooltip>
-        </Space>
-      </div>
 
-      {/* ── Loading ────────────────────────────────────── */}
-      {loading ? (
+          <Select
+            value={selectedMonth}
+            onChange={setSelectedMonth}
+            className="!h-11"
+            disabled={selectedYear === "all"}
+          >
+            <Option value="all">All months</Option>
+            {MONTH_OPTIONS.map((month) => (
+              <Option key={month.value} value={month.value}>
+                {month.label}
+              </Option>
+            ))}
+          </Select>
+
+          <Select value={selectedCourse} onChange={setSelectedCourse} className="!h-11" showSearch>
+            <Option value="all">All courses</Option>
+            {courses.map((course) => (
+              <Option key={course._id} value={course._id}>
+                {course.courseName}
+              </Option>
+            ))}
+          </Select>
+        </div>
+      </Card>
+
+      {bootLoading || loading ? (
         <div className="flex justify-center items-center py-24">
           <ScaleLoader color="#01134C" />
         </div>
       ) : (
         <>
-          {/* ── Summary Cards ──────────────────────────── */}
           <Row gutter={[16, 16]}>
-            <Col xs={24} sm={8}>
-              <Card
-                bordered={false}
-                className="shadow-sm"
-                style={{ borderTop: "4px solid #16a34a" }}
-              >
+            <Col xs={24} md={8}>
+              <Card bordered={false} className="shadow-sm" style={{ borderTop: "4px solid #16a34a" }}>
                 <Statistic
-                  title={
-                    <span className="text-gray-500 text-sm font-medium">
-                      Total Income
-                    </span>
-                  }
-                  value={data?.totalIncome ?? 0}
-                  precision={2}
-                  prefix={
-                    <ArrowUpOutlined
-                      style={{ color: "#16a34a", fontSize: 14 }}
-                    />
-                  }
-                  suffix="Rs."
-                  valueStyle={{
-                    color: "#16a34a",
-                    fontSize: 22,
-                    fontWeight: 700,
-                  }}
-                  formatter={(v) => `${fmt(v)}`}
+                  title={<span className="text-gray-500 text-sm font-medium">Total Income</span>}
+                  value={totalIncome}
+                  formatter={(value) => `Rs. ${formatCurrency(value)}`}
+                  prefix={<ArrowUpOutlined style={{ color: "#16a34a" }} />}
+                  valueStyle={{ color: "#16a34a", fontSize: 24, fontWeight: 700 }}
                 />
-                <p className="text-xs text-gray-400 mt-1 mb-0">
-                  {data?.incomeBreakdown?.reduce((s, r) => s + r.count, 0) || 0}{" "}
-                  transaction(s)
-                </p>
+                <div className="mt-2 text-xs text-slate-400">{incomeEntries.length} income entries</div>
               </Card>
             </Col>
-            <Col xs={24} sm={8}>
-              <Card
-                bordered={false}
-                className="shadow-sm"
-                style={{ borderTop: "4px solid #dc2626" }}
-              >
+
+            <Col xs={24} md={8}>
+              <Card bordered={false} className="shadow-sm" style={{ borderTop: "4px solid #dc2626" }}>
                 <Statistic
-                  title={
-                    <span className="text-gray-500 text-sm font-medium">
-                      Total Expenses
-                    </span>
-                  }
-                  value={data?.totalExpense ?? 0}
-                  precision={2}
-                  prefix={
-                    <ArrowDownOutlined
-                      style={{ color: "#dc2626", fontSize: 14 }}
-                    />
-                  }
-                  suffix="Rs."
-                  valueStyle={{
-                    color: "#dc2626",
-                    fontSize: 22,
-                    fontWeight: 700,
-                  }}
-                  formatter={(v) => `${fmt(v)}`}
+                  title={<span className="text-gray-500 text-sm font-medium">Total Expense</span>}
+                  value={totalExpense}
+                  formatter={(value) => `Rs. ${formatCurrency(value)}`}
+                  prefix={<ArrowDownOutlined style={{ color: "#dc2626" }} />}
+                  valueStyle={{ color: "#dc2626", fontSize: 24, fontWeight: 700 }}
                 />
-                <p className="text-xs text-gray-400 mt-1 mb-0">
-                  {data?.expenseBreakdown?.reduce((s, r) => s + r.count, 0) ||
-                    0}{" "}
-                  transaction(s)
-                </p>
+                <div className="mt-2 text-xs text-slate-400">{expenseEntries.length} expense entries</div>
               </Card>
             </Col>
-            <Col xs={24} sm={8}>
+
+            <Col xs={24} md={8}>
               <Card
                 bordered={false}
                 className="shadow-sm"
-                style={{
-                  borderTop: `4px solid ${isProfit ? "#01134C" : "#f97316"}`,
-                }}
+                style={{ borderTop: `4px solid ${isProfit ? "#01134C" : "#f97316"}` }}
               >
                 <Statistic
                   title={
@@ -512,168 +622,222 @@ const ProfitLoss = () => {
                       Net {isProfit ? "Profit" : "Loss"}
                     </span>
                   }
-                  value={Math.abs(data?.netBalance ?? 0)}
-                  precision={2}
-                  suffix="Rs."
+                  value={Math.abs(netBalance)}
+                  formatter={(value) => `Rs. ${formatCurrency(value)}`}
                   valueStyle={{
                     color: isProfit ? "#01134C" : "#f97316",
-                    fontSize: 22,
+                    fontSize: 24,
                     fontWeight: 700,
                   }}
-                  formatter={(v) => `${isProfit ? "+" : "-"}${fmt(v)}`}
                 />
-                <p
-                  className="text-xs mt-1 mb-0"
-                  style={{ color: isProfit ? "#16a34a" : "#f97316" }}
-                >
-                  {isProfit ? "▲ Profitable period" : "▼ Loss period"}
-                </p>
+                <div className="mt-2 text-xs" style={{ color: isProfit ? "#15803d" : "#ea580c" }}>
+                  {isProfit ? "Profitable result for selected filters" : "Loss result for selected filters"}
+                </div>
               </Card>
             </Col>
           </Row>
 
-          {/* ── Income vs Expense Breakdown ────────────── */}
+          <Alert
+            type={isProfit ? "success" : "warning"}
+            showIcon
+            message={`${selectedYearLabel} | ${selectedMonthLabel} | ${selectedCourseLabel}`}
+            description={`Income: Rs. ${formatCurrency(totalIncome)} | Expense: Rs. ${formatCurrency(
+              totalExpense,
+            )} | ${isProfit ? "Profit" : "Loss"}: Rs. ${formatCurrency(Math.abs(netBalance))}`}
+          />
+
           <Row gutter={[16, 16]}>
-            {/* Income Breakdown */}
-            <Col xs={24} md={12}>
+            <Col xs={24} xl={12}>
               <Card
                 bordered={false}
-                className="shadow-sm h-full"
+                className="shadow-sm"
                 title={
-                  <div className="flex items-center gap-2">
+                  <Space>
                     <ArrowUpOutlined style={{ color: "#16a34a" }} />
-                    <span style={{ color: "#16a34a", fontWeight: 700 }}>
-                      Income Breakdown
-                    </span>
-                    <Tag
-                      color="green"
-                      style={{ marginLeft: "auto", fontWeight: 600 }}
-                    >
-                      Rs. {fmt(data?.totalIncome)}
+                    <span className="font-semibold text-emerald-700">Income Entries</span>
+                    <Tag color="green">
+                      {selectedIncomeHead ? visibleIncomeEntries.length : incomeHeadRows.length}
                     </Tag>
-                  </div>
+                  </Space>
                 }
               >
-                {(data?.incomeBreakdown || []).length === 0 ? (
-                  <p className="text-gray-400 text-sm text-center py-6">
-                    No income transactions in this period
-                  </p>
-                ) : (
-                  (data?.incomeBreakdown || []).map((r, i) => (
-                    <BreakdownRow
-                      key={i}
-                      name={r.headName}
-                      total={r.total}
-                      maxTotal={incomeMax}
-                      color="#16a34a"
-                      count={r.count}
+                {incomeEntries.length ? (
+                  <>
+                    <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+                      <div className="text-sm text-slate-500">
+                        {selectedIncomeHead
+                          ? `Showing only "${selectedIncomeHead.headName}" entries`
+                          : "Showing all income heads of account. Click a head to view its entries."}
+                      </div>
+                      {selectedIncomeHead ? (
+                        <Button onClick={() => setSelectedIncomeHeadKey(null)}>Back to all heads</Button>
+                      ) : null}
+                    </div>
+
+                    <Table
+                      rowKey={selectedIncomeHead ? "_id" : "key"}
+                      size="small"
+                      dataSource={selectedIncomeHead ? visibleIncomeEntries : incomeHeadRows}
+                      columns={
+                        selectedIncomeHead
+                          ? transactionColumns("income")
+                          : headSummaryColumns("income", setSelectedIncomeHeadKey)
+                      }
+                      scroll={{ x: "max-content" }}
+                      pagination={{ pageSize: 8, showSizeChanger: false }}
                     />
-                  ))
+                  </>
+                ) : (
+                  <Empty description="No income entries found for the selected filters" />
                 )}
               </Card>
             </Col>
 
-            {/* Expense Breakdown */}
-            <Col xs={24} md={12}>
+            <Col xs={24} xl={12}>
               <Card
                 bordered={false}
-                className="shadow-sm h-full"
+                className="shadow-sm"
                 title={
-                  <div className="flex items-center gap-2">
+                  <Space>
                     <ArrowDownOutlined style={{ color: "#dc2626" }} />
-                    <span style={{ color: "#dc2626", fontWeight: 700 }}>
-                      Expense Breakdown
-                    </span>
-                    <Tag
-                      color="red"
-                      style={{ marginLeft: "auto", fontWeight: 600 }}
-                    >
-                      Rs. {fmt(data?.totalExpense)}
+                    <span className="font-semibold text-rose-700">Expense Entries</span>
+                    <Tag color="red">
+                      {selectedExpenseHead ? visibleExpenseEntries.length : expenseHeadRows.length}
                     </Tag>
-                  </div>
+                  </Space>
                 }
               >
-                {(data?.expenseBreakdown || []).length === 0 ? (
-                  <p className="text-gray-400 text-sm text-center py-6">
-                    No expense transactions in this period
-                  </p>
-                ) : (
-                  (data?.expenseBreakdown || []).map((r, i) => (
-                    <BreakdownRow
-                      key={i}
-                      name={r.headName}
-                      total={r.total}
-                      maxTotal={expenseMax}
-                      color="#dc2626"
-                      count={r.count}
+                {expenseEntries.length ? (
+                  <>
+                    <div className="mb-4 flex items-center justify-between gap-3 flex-wrap">
+                      <div className="text-sm text-slate-500">
+                        {selectedExpenseHead
+                          ? `Showing only "${selectedExpenseHead.headName}" entries`
+                          : "Showing all expense heads of account. Click a head to view its entries."}
+                      </div>
+                      {selectedExpenseHead ? (
+                        <Button onClick={() => setSelectedExpenseHeadKey(null)}>Back to all heads</Button>
+                      ) : null}
+                    </div>
+
+                    <Table
+                      rowKey={selectedExpenseHead ? "_id" : "key"}
+                      size="small"
+                      dataSource={selectedExpenseHead ? visibleExpenseEntries : expenseHeadRows}
+                      columns={
+                        selectedExpenseHead
+                          ? transactionColumns("expense")
+                          : headSummaryColumns("expense", setSelectedExpenseHeadKey)
+                      }
+                      scroll={{ x: "max-content" }}
+                      pagination={{ pageSize: 8, showSizeChanger: false }}
                     />
-                  ))
+                  </>
+                ) : (
+                  <Empty description="No expense entries found for the selected filters" />
                 )}
               </Card>
             </Col>
           </Row>
 
-          {/* ── Transaction List ───────────────────────── */}
+          <Row gutter={[16, 16]}>
+            <Col xs={24} xl={12}>
+              <Card
+                bordered={false}
+                className="shadow-sm"
+                title={<span className="font-semibold text-slate-800">Income Breakdown</span>}
+              >
+                <Table
+                  rowKey={(record) => `income-${record.headName}`}
+                  size="small"
+                  dataSource={data?.incomeBreakdown || []}
+                  pagination={false}
+                  locale={{ emptyText: "No income heads found" }}
+                  columns={[
+                    {
+                      title: "Head",
+                      dataIndex: "headName",
+                      key: "headName",
+                    },
+                    {
+                      title: "Entries",
+                      dataIndex: "count",
+                      key: "count",
+                      width: 90,
+                      align: "center",
+                    },
+                    {
+                      title: "Amount",
+                      dataIndex: "total",
+                      key: "total",
+                      align: "right",
+                      render: (value) => (
+                        <span className="font-semibold text-emerald-700">
+                          Rs. {formatCurrency(value)}
+                        </span>
+                      ),
+                    },
+                  ]}
+                />
+              </Card>
+            </Col>
+
+            <Col xs={24} xl={12}>
+              <Card
+                bordered={false}
+                className="shadow-sm"
+                title={<span className="font-semibold text-slate-800">Expense Breakdown</span>}
+              >
+                <Table
+                  rowKey={(record) => `expense-${record.headName}`}
+                  size="small"
+                  dataSource={data?.expenseBreakdown || []}
+                  pagination={false}
+                  locale={{ emptyText: "No expense heads found" }}
+                  columns={[
+                    {
+                      title: "Head",
+                      dataIndex: "headName",
+                      key: "headName",
+                    },
+                    {
+                      title: "Entries",
+                      dataIndex: "count",
+                      key: "count",
+                      width: 90,
+                      align: "center",
+                    },
+                    {
+                      title: "Amount",
+                      dataIndex: "total",
+                      key: "total",
+                      align: "right",
+                      render: (value) => (
+                        <span className="font-semibold text-rose-700">
+                          Rs. {formatCurrency(value)}
+                        </span>
+                      ),
+                    },
+                  ]}
+                />
+              </Card>
+            </Col>
+          </Row>
+
           <Card
             bordered={false}
             className="shadow-sm"
-            title={
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <FileTextOutlined style={{ color: "#01134C" }} />
-                  <span style={{ color: "#01134C", fontWeight: 700 }}>
-                    Transaction List
-                  </span>
-                  <Tag
-                    style={{
-                      background: "#01134C",
-                      color: "#E8FC0A",
-                      border: "none",
-                      fontWeight: 600,
-                    }}
-                  >
-                    {filteredTxns.length} records
-                  </Tag>
-                </div>
-                <Select
-                  value={txnType}
-                  onChange={setTxnType}
-                  size="small"
-                  style={{ width: 140 }}
-                >
-                  <Option value="all">All Transactions</Option>
-                  <Option value="income">Income Only (IN)</Option>
-                  <Option value="expense">Expense Only (OUT)</Option>
-                </Select>
-              </div>
-            }
+            title={<span className="font-semibold text-slate-800">Final Statement</span>}
           >
-            <div className="overflow-x-auto w-full">
-              <Table
-                dataSource={filteredTxns}
-                columns={columns}
-                rowKey="_id"
-                size="small"
-                scroll={{ x: "max-content" }}
-                pagination={{
-                  defaultPageSize: 20,
-                  showSizeChanger: true,
-                  pageSizeOptions: [10, 20, 50, 100],
-                  showTotal: (total, range) =>
-                    `${range[0]}-${range[1]} of ${total} transactions`,
-                  style: { marginTop: "12px" },
-                }}
-                rowClassName={(r) =>
-                  r.type?.name === "Income"
-                    ? "bg-green-50/40 hover:bg-green-50"
-                    : "bg-red-50/40 hover:bg-red-50"
-                }
-              />
-            </div>
+            <Table
+              rowKey="label"
+              size="small"
+              pagination={false}
+              columns={statementColumns}
+              dataSource={statementRows}
+            />
           </Card>
         </>
-      )}
-      </>
       )}
     </div>
   );

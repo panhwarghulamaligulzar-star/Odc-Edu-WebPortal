@@ -705,6 +705,16 @@ export const calculateTeacherCompensationData = async (
           ),
         )
       : round2(parseSalaryAmount(monthlySalary));
+  const payrollDeductionAmount = round2(
+    Number(options.payrollAdjustments?.deductionAmount || 0),
+  );
+  const payrollBonusAmount = round2(
+    Number(options.payrollAdjustments?.bonusAmount || 0),
+  );
+  const finalMonthlySalary = round2(
+    Math.max(0, calculatedMonthlySalary - payrollDeductionAmount) +
+      payrollBonusAmount,
+  );
 
   return {
     teacher,
@@ -719,6 +729,10 @@ export const calculateTeacherCompensationData = async (
       monthlySalary: monthlySalary ?? null,
       salaryPerStudent: salaryType === "per_student" ? salaryPerStudent : null,
       attendanceThreshold,
+      deductionAmount: payrollDeductionAmount,
+      deductionNote: String(options.payrollAdjustments?.deductionNote || "").trim(),
+      bonusAmount: payrollBonusAmount,
+      bonusNote: String(options.payrollAdjustments?.bonusNote || "").trim(),
       isConfigured: salaryType === "per_student" ? isPerStudentMonthConfigured : true,
     },
     summary: {
@@ -726,6 +740,7 @@ export const calculateTeacherCompensationData = async (
       totalActiveStudents: uniqueStudentSummaries.length,
       eligibleStudents: eligibleStudents.length,
       calculatedMonthlySalary,
+      finalMonthlySalary,
     },
     studentsForSalary: uniqueStudentSummaries,
     courses: Array.from(courseSummariesMap.values()),
@@ -760,6 +775,12 @@ export const getTeacherCompensationDetails = async (req, res) => {
     const compensation = await calculateTeacherCompensationData(teacher, year, month, {
       studentAdjustments: payrollRecord?.studentAdjustments || [],
       salaryConfigOverride,
+      payrollAdjustments: {
+        deductionAmount: payrollRecord?.deductionAmount || 0,
+        deductionNote: payrollRecord?.deductionNote || "",
+        bonusAmount: payrollRecord?.bonusAmount || 0,
+        bonusNote: payrollRecord?.bonusNote || "",
+      },
     });
 
     res.status(200).json({
@@ -867,6 +888,12 @@ const applyTeacherStudentCompensationUpdate = async (teacherId, payload = {}) =>
           ? Number(payrollRecord.salaryPerStudent || 0) > 0
       : true,
     },
+    payrollAdjustments: {
+      deductionAmount: payrollRecord.deductionAmount || 0,
+      deductionNote: payrollRecord.deductionNote || "",
+      bonusAmount: payrollRecord.bonusAmount || 0,
+      bonusNote: payrollRecord.bonusNote || "",
+    },
   });
 
   const { carryForwardInAmount } = await getTeacherCarryForwardAmount(
@@ -875,7 +902,7 @@ const applyTeacherStudentCompensationUpdate = async (teacherId, payload = {}) =>
     selectedMonth,
   );
   const payrollTotals = calculatePayrollTotals({
-    baseDueAmount: Number(compensation.summary.calculatedMonthlySalary || 0),
+    baseDueAmount: Number(compensation.summary.finalMonthlySalary || compensation.summary.calculatedMonthlySalary || 0),
     carryForwardInAmount,
     paidAmount: Number(payrollRecord.paidAmount || 0),
   });
@@ -921,6 +948,20 @@ const applyTeacherMonthlySalaryConfigUpdate = async (teacherId, payload = {}) =>
     payload.attendanceThreshold !== ""
       ? Number(payload.attendanceThreshold)
       : 50;
+  const normalizedDeductionAmount =
+    payload.deductionAmount !== undefined &&
+    payload.deductionAmount !== null &&
+    payload.deductionAmount !== ""
+      ? round2(Number(payload.deductionAmount))
+      : 0;
+  const normalizedBonusAmount =
+    payload.bonusAmount !== undefined &&
+    payload.bonusAmount !== null &&
+    payload.bonusAmount !== ""
+      ? round2(Number(payload.bonusAmount))
+      : 0;
+  const normalizedDeductionNote = String(payload.deductionNote || "").trim();
+  const normalizedBonusNote = String(payload.bonusNote || "").trim();
   const normalizedSalaryPerStudent =
     payload.salaryPerStudent !== undefined &&
     payload.salaryPerStudent !== null &&
@@ -934,6 +975,12 @@ const applyTeacherMonthlySalaryConfigUpdate = async (teacherId, payload = {}) =>
 
   if (normalizedSalaryType === "per_student" && normalizedSalaryPerStudent < 0) {
     const error = new Error("Salary amount per student must be a valid non-negative number");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (normalizedDeductionAmount < 0 || normalizedBonusAmount < 0) {
+    const error = new Error("Deduction and bonus amounts must be non-negative numbers");
     error.statusCode = 400;
     throw error;
   }
@@ -961,6 +1008,10 @@ const applyTeacherMonthlySalaryConfigUpdate = async (teacherId, payload = {}) =>
       salaryPerStudent:
         normalizedSalaryType === "per_student" ? normalizedSalaryPerStudent : null,
       attendanceThreshold: normalizedAttendanceThreshold,
+      deductionAmount: normalizedDeductionAmount,
+      deductionNote: normalizedDeductionNote,
+      bonusAmount: normalizedBonusAmount,
+      bonusNote: normalizedBonusNote,
       dueAmount: 0,
       remainingAmount: 0,
       paidAmount: 0,
@@ -973,6 +1024,10 @@ const applyTeacherMonthlySalaryConfigUpdate = async (teacherId, payload = {}) =>
     payrollRecord.salaryPerStudent =
       normalizedSalaryType === "per_student" ? normalizedSalaryPerStudent : null;
     payrollRecord.attendanceThreshold = normalizedAttendanceThreshold;
+    payrollRecord.deductionAmount = normalizedDeductionAmount;
+    payrollRecord.deductionNote = normalizedDeductionNote;
+    payrollRecord.bonusAmount = normalizedBonusAmount;
+    payrollRecord.bonusNote = normalizedBonusNote;
   }
 
   const compensation = await calculateTeacherCompensationData(teacher, selectedYear, selectedMonth, {
@@ -987,6 +1042,12 @@ const applyTeacherMonthlySalaryConfigUpdate = async (teacherId, payload = {}) =>
           ? Number(payrollRecord.salaryPerStudent || 0) > 0
       : true,
     },
+    payrollAdjustments: {
+      deductionAmount: payrollRecord.deductionAmount || 0,
+      deductionNote: payrollRecord.deductionNote || "",
+      bonusAmount: payrollRecord.bonusAmount || 0,
+      bonusNote: payrollRecord.bonusNote || "",
+    },
   });
 
   const { carryForwardInAmount } = await getTeacherCarryForwardAmount(
@@ -995,7 +1056,7 @@ const applyTeacherMonthlySalaryConfigUpdate = async (teacherId, payload = {}) =>
     selectedMonth,
   );
   const payrollTotals = calculatePayrollTotals({
-    baseDueAmount: Number(compensation.summary.calculatedMonthlySalary || 0),
+    baseDueAmount: Number(compensation.summary.finalMonthlySalary || compensation.summary.calculatedMonthlySalary || 0),
     carryForwardInAmount,
     paidAmount: Number(payrollRecord.paidAmount || 0),
   });

@@ -106,6 +106,10 @@ const Teachers = () => {
   const [salaryConfigDraft, setSalaryConfigDraft] = useState({
     salaryPerStudent: null,
     attendanceThreshold: 50,
+    deductionAmount: 0,
+    deductionNote: "",
+    bonusAmount: 0,
+    bonusNote: "",
   });
   const [selectedCompensationMonth, setSelectedCompensationMonth] = useState(null);
   const [studentCompensationModalOpen, setStudentCompensationModalOpen] = useState(false);
@@ -128,6 +132,10 @@ const Teachers = () => {
     setSalaryConfigDraft({
       salaryPerStudent: null,
       attendanceThreshold: 50,
+      deductionAmount: 0,
+      deductionNote: "",
+      bonusAmount: 0,
+      bonusNote: "",
     });
     fetchTeacherCompensation(selectedTeacher._id, selectedCompensationMonth);
   }, [showIdCard, selectedTeacher?._id, selectedCompensationMonth]);
@@ -175,6 +183,10 @@ const Teachers = () => {
           salaryPerStudent: response.data?.salaryConfig?.salaryPerStudent ?? null,
           attendanceThreshold:
             response.data?.salaryConfig?.attendanceThreshold ?? 50,
+          deductionAmount: response.data?.salaryConfig?.deductionAmount ?? 0,
+          deductionNote: response.data?.salaryConfig?.deductionNote ?? "",
+          bonusAmount: response.data?.salaryConfig?.bonusAmount ?? 0,
+          bonusNote: response.data?.salaryConfig?.bonusNote ?? "",
         });
         return response.data;
       }
@@ -232,6 +244,10 @@ const Teachers = () => {
         salaryType: "per_student",
         salaryPerStudent: salaryConfigDraft.salaryPerStudent,
         attendanceThreshold: normalizedAttendanceThreshold,
+        deductionAmount: Number(salaryConfigDraft.deductionAmount || 0),
+        deductionNote: salaryConfigDraft.deductionNote || "",
+        bonusAmount: Number(salaryConfigDraft.bonusAmount || 0),
+        bonusNote: salaryConfigDraft.bonusNote || "",
       };
       const response = await updateTeacherMonthlySalaryConfig(
         selectedTeacher._id,
@@ -659,6 +675,10 @@ const Teachers = () => {
     setSalaryConfigDraft({
       salaryPerStudent: teacher.salaryPerStudent ?? null,
       attendanceThreshold: teacher.attendanceThreshold ?? 50,
+      deductionAmount: 0,
+      deductionNote: "",
+      bonusAmount: 0,
+      bonusNote: "",
     });
     const { hasCompletedMonth, lastMonth } = getSalaryMonthBounds(teacher);
     const defaultMonth = hasCompletedMonth ? lastMonth.format("YYYY-MM") : null;
@@ -922,6 +942,20 @@ const Teachers = () => {
     const projectedMonthlySalary = isMonthConfigured
       ? projectedEligibleStudents * effectiveRate
       : 0;
+    const payrollDeductionAmount = Math.max(
+      0,
+      Number(
+        salaryConfigDraft.deductionAmount ??
+          salaryConfig.deductionAmount ??
+          0,
+      ),
+    );
+    const payrollBonusAmount = Math.max(
+      0,
+      Number(
+        salaryConfigDraft.bonusAmount ?? salaryConfig.bonusAmount ?? 0,
+      ),
+    );
     const hasManualAdjustedStudents = studentsForSalary.some(
       (student) => student.hasManualAdjustment,
     );
@@ -934,6 +968,10 @@ const Teachers = () => {
           0,
         )
       : projectedMonthlySalary;
+    const displayedFinalMonthlySalary = Math.max(
+      0,
+      displayedProjectedMonthlySalary - payrollDeductionAmount,
+    ) + payrollBonusAmount;
 
     return (
       <div className="space-y-4">
@@ -961,13 +999,13 @@ const Teachers = () => {
           <Card size="small">
             <div className="text-xs text-slate-500">
               {salaryConfig.salaryType === "per_student"
-                ? `Calculated Salary (${selectedMonthLabel})`
+                ? `Final Salary (${selectedMonthLabel})`
                 : "Projected Salary"}
             </div>
             <div className="mt-1 text-xl font-bold text-[#01134C]">
               {formatCurrency(
                 salaryConfig.salaryType === "per_student"
-                  ? summary.calculatedMonthlySalary
+                  ? displayedFinalMonthlySalary
                   : projectedMonthlySalary,
               )}
             </div>
@@ -990,11 +1028,23 @@ const Teachers = () => {
               </span>{" "}
               {effectiveThreshold}%
             </div>
+            <div>
+              <span className="font-semibold text-[#01134C]">Deduction:</span>{" "}
+              {formatCurrency(payrollDeductionAmount)}
+            </div>
+            <div>
+              <span className="font-semibold text-[#01134C]">Bonus:</span>{" "}
+              {formatCurrency(payrollBonusAmount)}
+            </div>
+            <div>
+              <span className="font-semibold text-[#01134C]">Final Salary:</span>{" "}
+              {formatCurrency(displayedFinalMonthlySalary)}
+            </div>
           </div>
         </Card>
 
         <Card size="small" title="Admin Salary Setup">
-          <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-[minmax(220px,260px)_1fr_1fr_auto] md:items-end">
+          <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             <div>
               <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                 Salary Month
@@ -1061,23 +1111,94 @@ const Teachers = () => {
                 }
               />
             </div>
-            <Button
-              type="primary"
-              loading={savingSalaryConfig}
-              onClick={handleSaveSalaryConfig}
-              disabled={!permissions.update}
-              style={{
-                background: "#01134C",
-                borderColor: "#01134C",
-                height: "40px",
-                fontWeight: 600,
-              }}
-            >
-              Save Salary Rule
-            </Button>
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                Deduction Amount
+              </div>
+              <InputNumber
+                size="large"
+                min={0}
+                className="!w-full"
+                placeholder="Enter deduction amount"
+                value={salaryConfigDraft.deductionAmount}
+                onChange={(value) =>
+                  setSalaryConfigDraft((prev) => ({
+                    ...prev,
+                    deductionAmount: value ?? 0,
+                  }))
+                }
+              />
+            </div>
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                Bonus / Extra Amount
+              </div>
+              <InputNumber
+                size="large"
+                min={0}
+                className="!w-full"
+                placeholder="Enter bonus or extra amount"
+                value={salaryConfigDraft.bonusAmount}
+                onChange={(value) =>
+                  setSalaryConfigDraft((prev) => ({
+                    ...prev,
+                    bonusAmount: value ?? 0,
+                  }))
+                }
+              />
+            </div>
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                Deduction Note
+              </div>
+              <Input.TextArea
+                rows={2}
+                placeholder="Reason for deduction"
+                value={salaryConfigDraft.deductionNote}
+                onChange={(event) =>
+                  setSalaryConfigDraft((prev) => ({
+                    ...prev,
+                    deductionNote: event.target.value,
+                  }))
+                }
+              />
+            </div>
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                Bonus / Extra Note
+              </div>
+              <Input.TextArea
+                rows={2}
+                placeholder="Reason for bonus or extra amount"
+                value={salaryConfigDraft.bonusNote}
+                onChange={(event) =>
+                  setSalaryConfigDraft((prev) => ({
+                    ...prev,
+                    bonusNote: event.target.value,
+                  }))
+                }
+              />
+            </div>
+            <div className="flex items-end">
+              <Button
+                type="primary"
+                loading={savingSalaryConfig}
+                onClick={handleSaveSalaryConfig}
+                disabled={!permissions.update}
+                style={{
+                  background: "#01134C",
+                  borderColor: "#01134C",
+                  height: "40px",
+                  fontWeight: 600,
+                  width: "100%",
+                }}
+              >
+                Save Salary Rule
+              </Button>
+            </div>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
               <div className="text-xs text-slate-500">Total Students</div>
               <div className="mt-1 text-lg font-bold text-[#01134C]">
@@ -1094,6 +1215,12 @@ const Teachers = () => {
               <div className="text-xs text-slate-500">Projected Monthly Salary</div>
               <div className="mt-1 text-lg font-bold text-[#01134C]">
                 {formatCurrency(displayedProjectedMonthlySalary)}
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <div className="text-xs text-slate-500">Final Monthly Salary</div>
+              <div className="mt-1 text-lg font-bold text-[#01134C]">
+                {formatCurrency(displayedFinalMonthlySalary)}
               </div>
             </div>
           </div>

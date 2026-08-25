@@ -25,8 +25,6 @@ import {
   updatePaymentMethod,
   deletePaymentMethod,
 } from "../../../services/accountingService";
-import useZustandStore from "../../../stores/zustandStore";
-import { canViewAccountingBalances } from "../../../utils/accountingAccess";
 
 const Banks = () => {
   const [methods, setMethods] = useState([]);
@@ -34,7 +32,6 @@ const Banks = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingMethod, setEditingMethod] = useState(null);
   const [submitLoading, setSubmitLoading] = useState(false);
-  const { appSettings, isSuperAdmin, adminInfo } = useZustandStore();
 
   const [form] = Form.useForm();
 
@@ -155,11 +152,6 @@ const Banks = () => {
 
   // ── Total across all methods ───────────────────────────────
   const totalBalance = methods.reduce((sum, m) => sum + m.currentBalance, 0);
-  const balancesVisible = canViewAccountingBalances({
-    appSettings,
-    isSuperAdmin,
-    adminInfo,
-  });
 
   return (
     <div className="p-6">
@@ -196,7 +188,7 @@ const Banks = () => {
             Total Balance (All Accounts)
           </p>
           <p className={`text-2xl font-bold m-0 ${totalBalance >= 0 ? "text-white" : "text-red-400"}`}>
-            {balancesVisible ? formatCurrency(totalBalance) : "Hidden by Super Admin"}
+            {formatCurrency(totalBalance)}
           </p>
         </div>
         <WalletOutlined
@@ -292,7 +284,7 @@ const Banks = () => {
               <div className="border-t border-gray-100 pt-3">
                 <p className="text-xs text-muted m-0">Current Balance</p>
                 <p className={`text-lg font-bold m-0 ${balanceColor(method.currentBalance)}`}>
-                  {balancesVisible ? formatCurrency(method.currentBalance) : "Hidden"}
+                  {formatCurrency(method.currentBalance)}
                 </p>
               </div>
 
@@ -335,7 +327,7 @@ const Banks = () => {
               <p className="text-xs text-muted m-0 border-t border-gray-100 pt-2">
                 Opening Balance:{" "}
                 <span className="font-medium text-dark">
-                  {balancesVisible ? formatCurrency(method.openingBalance) : "Hidden"}
+                  {formatCurrency(method.openingBalance)}
                 </span>
               </p>
             </div>

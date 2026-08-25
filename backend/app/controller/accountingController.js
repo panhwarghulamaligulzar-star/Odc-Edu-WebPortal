@@ -11,6 +11,7 @@ import AppSettings from "../modules/appSettingsModule.js";
 import TeacherPayroll from "../modules/teacherPayrollModule.js";
 import TeacherSchema from "../modules/teacherModule.js";
 import ExpenseHeadEntry from "../modules/expenseHeadEntryModule.js";
+import CourseSchema from "../modules/courseModule.js";
 import { calculateTeacherCompensationData } from "../controller/teacherController.js";
 import PDFKit from "pdfkit";
 import XLSX from "xlsx";
@@ -725,23 +726,156 @@ export const deleteHeadOfAccount = async (req, res) => {
 // GET /accounting/payment-methods
 export const getPaymentMethods = async (req, res) => {
   try {
-    const balancesVisible = await canViewAccountingBalances(req);
-    const methods = await PaymentMethod.find({ isActive: true }).sort({
-      isDefault: -1,
-      name: 1,
-    });
-    const data = methods.map((method) => {
-      const methodData = method.toObject();
-      if (!balancesVisible) {
-        methodData.openingBalance = null;
-        methodData.currentBalance = null;
+    const methods = await PaymentMethod.find({ isActive: true })
+      .sort({
+        isDefault: -1,
+        name: 1,
+      })
+      .lean();
+
+    const methodIds = methods
+      .map((method) => String(method?._id || "").trim())
+      .filter(Boolean);
+
+    const [incomeType, expenseType, transactions, transfers, feePayments] =
+      await Promise.all([
+        AccountingType.findOne({ name: "Income" }).lean(),
+        AccountingType.findOne({ name: "Expense" }).lean(),
+        methodIds.length
+          ? AccountingTransaction.find({
+              paymentMethod: { $in: methodIds },
+            })
+              .select("paymentMethod type amount billReference")
+              .lean()
+          : [],
+        methodIds.length
+          ? FundTransfer.find({
+              $or: [
+                { fromMethod: { $in: methodIds } },
+                { toMethod: { $in: methodIds } },
+              ],
+            })
+              .select("fromMethod toMethod amount")
+              .lean()
+          : [],
+        FeePayment.find({
+          status: "Completed",
+        })
+          .select(
+            "receiptNo voucherNo amount paymentMethod accountingPaymentMethodId",
+          )
+          .lean(),
+      ]);
+
+    const methodsById = new Map(
+      methods.map((method) => [
+        String(method?._id || "").trim(),
+        {
+          ...method,
+          openingBalance: Number(method?.openingBalance || 0),
+          currentBalance: Number(method?.openingBalance || 0),
+          storedCurrentBalance: Number(method?.currentBalance || 0),
+          legacyReceiptAdjustments: 0,
+        },
+      ]),
+    );
+
+    const methodsByName = new Map(
+      methods.map((method) => [
+        String(method?.name || "").trim().toLowerCase(),
+        String(method?._id || "").trim(),
+      ]),
+    );
+
+    const incomeTypeId = String(incomeType?._id || "").trim();
+    const expenseTypeId = String(expenseType?._id || "").trim();
+
+    transactions.forEach((txn) => {
+      const methodId = String(txn?.paymentMethod || "").trim();
+      const targetMethod = methodsById.get(methodId);
+      if (!targetMethod) return;
+
+      const txnTypeId = String(txn?.type || "").trim();
+      const amount = Number(txn?.amount || 0);
+
+      if (txnTypeId && txnTypeId === incomeTypeId) {
+        targetMethod.currentBalance += amount;
+      } else if (txnTypeId && txnTypeId === expenseTypeId) {
+        targetMethod.currentBalance -= amount;
       }
-      return methodData;
     });
+
+    transfers.forEach((transfer) => {
+      const fromMethod = methodsById.get(String(transfer?.fromMethod || "").trim());
+      const toMethod = methodsById.get(String(transfer?.toMethod || "").trim());
+      const amount = Number(transfer?.amount || 0);
+
+      if (fromMethod) fromMethod.currentBalance -= amount;
+      if (toMethod) toMethod.currentBalance += amount;
+    });
+
+    const incomeTxnRefsByMethod = new Map();
+    transactions.forEach((txn) => {
+      const methodId = String(txn?.paymentMethod || "").trim();
+      const txnTypeId = String(txn?.type || "").trim();
+      const ref = String(txn?.billReference || "").trim();
+      if (!methodId || !ref || txnTypeId !== incomeTypeId) return;
+
+      if (!incomeTxnRefsByMethod.has(methodId)) {
+        incomeTxnRefsByMethod.set(methodId, new Set());
+      }
+      incomeTxnRefsByMethod.get(methodId).add(ref);
+    });
+
+    const resolveFeePaymentMethodId = (payment) => {
+      const accountingMethodId = String(
+        payment?.accountingPaymentMethodId || "",
+      ).trim();
+      if (accountingMethodId && methodsById.has(accountingMethodId)) {
+        return accountingMethodId;
+      }
+
+      const methodName = String(payment?.paymentMethod || "")
+        .trim()
+        .toLowerCase();
+      if (!methodName) return null;
+
+      return methodsByName.get(methodName) || null;
+    };
+
+    feePayments.forEach((payment) => {
+      const resolvedMethodId = resolveFeePaymentMethodId(payment);
+      if (!resolvedMethodId) return;
+
+      const knownRefs = incomeTxnRefsByMethod.get(resolvedMethodId) || new Set();
+      const receiptNo = String(payment?.receiptNo || "").trim();
+      const voucherNo = String(payment?.voucherNo || "").trim();
+      const hasAccountingTxn =
+        (receiptNo && knownRefs.has(receiptNo)) ||
+        (voucherNo && knownRefs.has(voucherNo));
+
+      if (hasAccountingTxn) return;
+
+      const targetMethod = methodsById.get(resolvedMethodId);
+      if (!targetMethod) return;
+
+      const amount = Number(payment?.amount || 0);
+      targetMethod.currentBalance += amount;
+      targetMethod.legacyReceiptAdjustments += amount;
+    });
+
+    const data = methods.map((method) => {
+      const reconciledMethod = methodsById.get(String(method?._id || "").trim());
+      return {
+        ...reconciledMethod,
+        currentBalance: Number(reconciledMethod?.currentBalance || 0),
+      };
+    });
+
     res.status(200).json({
       success: true,
       data,
-      meta: { balancesVisible },
+      meta: { balancesVisible: true, reconciled: true },
       message: "Payment methods retrieved successfully",
     });
   } catch (error) {
@@ -1071,24 +1205,43 @@ export const payTeacherPayroll = async (req, res) => {
       head,
       headId,
       amount,
+      baseAmount,
+      deductionAmount,
+      deductionNote,
+      bonusAmount,
+      bonusNote,
       paymentDate,
       details,
       year,
       month,
     } = req.body;
 
-    if (amount === undefined || !paymentDate) {
+    if ((amount === undefined && baseAmount === undefined) || !paymentDate) {
       return res.status(400).json({
         success: false,
-        message: "amount, paymentDate, year and month are required",
+        message: "salary amount and payment date are required",
       });
     }
 
-    const normalizedPaymentAmount = Number(amount);
+    const normalizedBaseAmount = Number(
+      baseAmount !== undefined ? baseAmount : amount,
+    );
+    const normalizedDeductionAmount = Math.max(0, Number(deductionAmount || 0));
+    const normalizedBonusAmount = Math.max(0, Number(bonusAmount || 0));
+    const normalizedPaymentAmount =
+      normalizedBaseAmount - normalizedDeductionAmount + normalizedBonusAmount;
+
+    if (!Number.isFinite(normalizedBaseAmount) || normalizedBaseAmount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Base salary amount must be greater than zero",
+      });
+    }
+
     if (!Number.isFinite(normalizedPaymentAmount) || normalizedPaymentAmount <= 0) {
       return res.status(400).json({
         success: false,
-        message: "Payment amount must be greater than zero",
+        message: "Final salary amount must be greater than zero",
       });
     }
 
@@ -1223,12 +1376,33 @@ export const payTeacherPayroll = async (req, res) => {
       });
     }
 
-    if (normalizedPaymentAmount > beforePaymentTotals.remainingAmount) {
+    if (normalizedBaseAmount > beforePaymentTotals.remainingAmount) {
       return res.status(400).json({
         success: false,
-        message: `Payment amount cannot exceed the remaining payroll balance of PKR ${beforePaymentTotals.remainingAmount.toLocaleString("en-PK")} for ${teacher.fullName}.`,
+        message: `Base salary amount cannot exceed the remaining payroll balance of PKR ${beforePaymentTotals.remainingAmount.toLocaleString("en-PK")} for ${teacher.fullName}.`,
       });
     }
+
+    if (normalizedDeductionAmount > normalizedBaseAmount) {
+      return res.status(400).json({
+        success: false,
+        message: "Deduction amount cannot be greater than the base salary amount.",
+      });
+    }
+
+    const paymentDetails = [
+      details?.trim() || `Salary payout for ${compensation.month.displayLabel}`,
+      normalizedDeductionAmount > 0
+        ? `Deduction: PKR ${normalizedDeductionAmount.toLocaleString("en-PK")}${deductionNote ? ` (${String(deductionNote).trim()})` : ""}`
+        : "",
+      normalizedBonusAmount > 0
+        ? `Bonus/Extra: PKR ${normalizedBonusAmount.toLocaleString("en-PK")}${bonusNote ? ` (${String(bonusNote).trim()})` : ""}`
+        : "",
+      `Base Salary: PKR ${normalizedBaseAmount.toLocaleString("en-PK")}`,
+      `Final Paid: PKR ${normalizedPaymentAmount.toLocaleString("en-PK")}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     const transactionNo = await generateTransactionNo();
     const txn = new AccountingTransaction({
@@ -1240,7 +1414,7 @@ export const payTeacherPayroll = async (req, res) => {
       paymentDate: new Date(paymentDate),
       amount: normalizedPaymentAmount,
       billReference: details?.trim() || `Salary payout for ${compensation.month.displayLabel}`,
-      details: details?.trim() || "",
+      details: paymentDetails,
       createdBy: req.user?._id,
     });
 
@@ -1279,8 +1453,13 @@ export const payTeacherPayroll = async (req, res) => {
             paymentMethod: method._id,
             paymentMethodName: method.name,
             amount: normalizedPaymentAmount,
+            baseAmount: normalizedBaseAmount,
+            deductionAmount: normalizedDeductionAmount,
+            deductionNote: String(deductionNote || "").trim(),
+            bonusAmount: normalizedBonusAmount,
+            bonusNote: String(bonusNote || "").trim(),
             transactionId: txn._id,
-            details: details?.trim() || "",
+            details: paymentDetails,
           },
         ],
       });
@@ -1312,8 +1491,13 @@ export const payTeacherPayroll = async (req, res) => {
         paymentMethod: method._id,
         paymentMethodName: method.name,
         amount: normalizedPaymentAmount,
+        baseAmount: normalizedBaseAmount,
+        deductionAmount: normalizedDeductionAmount,
+        deductionNote: String(deductionNote || "").trim(),
+        bonusAmount: normalizedBonusAmount,
+        bonusNote: String(bonusNote || "").trim(),
         transactionId: txn._id,
-        details: details?.trim() || "",
+        details: paymentDetails,
       });
 
       updatedPayroll = await payrollRecord.save();
@@ -2223,6 +2407,7 @@ const getReceiptOverviewBaseData = async () => {
             amount: 1,
             paymentDate: 1,
             paymentMethod: 1,
+            accountingPaymentMethodId: 1,
             paymentType: 1,
             status: 1,
             createdAt: 1,
@@ -2252,6 +2437,8 @@ const getReceiptOverviewBaseData = async () => {
             amount: latestPayment.amount || 0,
             paymentDate: latestPayment.paymentDate,
             paymentMethod: latestPayment.paymentMethod,
+            accountingPaymentMethodId:
+              latestPayment.accountingPaymentMethodId || null,
             paymentType: latestPayment.paymentType,
             status: latestPayment.status,
           }
@@ -2301,6 +2488,74 @@ const getReceiptOverviewBaseData = async () => {
     })
     .filter((row) => row.student?._id && row.course?._id && row.enrollment?._id);
 
+  const paymentMethods = await PaymentMethod.find(
+    { isActive: true },
+    { name: 1, type: 1 },
+  ).lean();
+  const paymentMethodsById = new Map(
+    paymentMethods.map((item) => [String(item._id || ""), item]),
+  );
+  const paymentMethodsByName = new Map(
+    paymentMethods.map((item) => [
+      String(item.name || "").trim().toLowerCase(),
+      item,
+    ]),
+  );
+
+  const resolveCollectedAccountType = (payment) => {
+    const accountingMethodId = String(
+      payment?.accountingPaymentMethodId || "",
+    ).trim();
+    if (accountingMethodId && paymentMethodsById.has(accountingMethodId)) {
+      return paymentMethodsById.get(accountingMethodId)?.type || null;
+    }
+
+    const rawMethodName = String(payment?.paymentMethod || "")
+      .trim()
+      .toLowerCase();
+    if (!rawMethodName) {
+      return null;
+    }
+
+    if (paymentMethodsByName.has(rawMethodName)) {
+      return paymentMethodsByName.get(rawMethodName)?.type || null;
+    }
+
+    if (rawMethodName.includes("cash")) return "cash";
+    if (
+      rawMethodName.includes("bank") ||
+      rawMethodName.includes("cheque") ||
+      rawMethodName.includes("online") ||
+      rawMethodName.includes("transfer")
+    ) {
+      return "bank";
+    }
+
+    return null;
+  };
+
+  const collectionBreakdown = payments.reduce(
+    (acc, payment) => {
+      const paymentAmount = Number(payment?.amount || 0);
+      const accountType = resolveCollectedAccountType(payment);
+
+      if (accountType === "cash") {
+        acc.cashCollected += paymentAmount;
+      } else if (accountType === "bank") {
+        acc.bankCollected += paymentAmount;
+      } else {
+        acc.unassignedCollected += paymentAmount;
+      }
+
+      return acc;
+    },
+    {
+      cashCollected: 0,
+      bankCollected: 0,
+      unassignedCollected: 0,
+    },
+  );
+
   const summary = mappedRows.reduce(
     (acc, row) => {
       acc.totalDues += row.amount || 0;
@@ -2320,7 +2575,16 @@ const getReceiptOverviewBaseData = async () => {
       paidCount: 0,
       partialCount: 0,
       pendingCount: 0,
+      cashCollected: 0,
+      bankCollected: 0,
+      unassignedCollected: 0,
     },
+  );
+
+  summary.cashCollected = Number(collectionBreakdown.cashCollected || 0);
+  summary.bankCollected = Number(collectionBreakdown.bankCollected || 0);
+  summary.unassignedCollected = Number(
+    collectionBreakdown.unassignedCollected || 0,
   );
 
   return {
@@ -2503,6 +2767,9 @@ export const getReceiptDuesOverview = async (req, res) => {
           paidCount: 0,
           partialCount: 0,
           pendingCount: 0,
+          cashCollected: 0,
+          bankCollected: 0,
+          unassignedCollected: 0,
         },
         pagination: {
           total: 0,
@@ -3385,12 +3652,11 @@ export const exportReceiptDues = async (req, res) => {
 // GET /accounting/profit-loss — P&L by head, with transactions list
 export const getProfitLoss = async (req, res) => {
   try {
-    const balancesVisible = await canViewAccountingBalances(req);
-    if (!balancesVisible) {
-      return denyRestrictedAccountingAccess(res);
-    }
+    const { dateFrom, dateTo, year, month, courseId } = req.query;
 
-    const { dateFrom, dateTo } = req.query;
+    const normalizedYear = Number(year || 0);
+    const normalizedMonth = Number(month || 0);
+    const normalizedCourseId = String(courseId || "").trim();
 
     const matchFilter = {};
     if (dateFrom || dateTo) {
@@ -3401,6 +3667,21 @@ export const getProfitLoss = async (req, res) => {
         end.setHours(23, 59, 59, 999);
         matchFilter.paymentDate.$lte = end;
       }
+    } else if (normalizedYear > 0) {
+      const rangeStart = new Date(
+        normalizedYear,
+        normalizedMonth > 0 ? normalizedMonth - 1 : 0,
+        1,
+      );
+      const rangeEnd =
+        normalizedMonth > 0
+          ? new Date(normalizedYear, normalizedMonth, 0, 23, 59, 59, 999)
+          : new Date(normalizedYear, 11, 31, 23, 59, 59, 999);
+
+      matchFilter.paymentDate = {
+        $gte: rangeStart,
+        $lte: rangeEnd,
+      };
     }
 
     const [incomeType, expenseType] = await Promise.all([
@@ -3408,84 +3689,542 @@ export const getProfitLoss = async (req, res) => {
       AccountingType.findOne({ name: "Expense" }),
     ]);
 
-    const [incomeAgg, expenseAgg, transactions] = await Promise.all([
-      // Income grouped by head
-      AccountingTransaction.aggregate([
-        { $match: { ...matchFilter, type: incomeType?._id } },
-        {
-          $group: {
-            _id: "$head",
-            total: { $sum: "$amount" },
-            count: { $sum: 1 },
-          },
-        },
-        {
-          $lookup: {
-            from: "headofaccounts",
-            localField: "_id",
-            foreignField: "_id",
-            as: "headInfo",
-          },
-        },
-        { $unwind: { path: "$headInfo", preserveNullAndEmptyArrays: true } },
-        {
-          $project: {
-            headName: { $ifNull: ["$headInfo.name", "Unknown"] },
-            total: 1,
-            count: 1,
-          },
-        },
-        { $sort: { total: -1 } },
-      ]),
-      // Expense grouped by head
-      AccountingTransaction.aggregate([
-        { $match: { ...matchFilter, type: expenseType?._id } },
-        {
-          $group: {
-            _id: "$head",
-            total: { $sum: "$amount" },
-            count: { $sum: 1 },
-          },
-        },
-        {
-          $lookup: {
-            from: "headofaccounts",
-            localField: "_id",
-            foreignField: "_id",
-            as: "headInfo",
-          },
-        },
-        { $unwind: { path: "$headInfo", preserveNullAndEmptyArrays: true } },
-        {
-          $project: {
-            headName: { $ifNull: ["$headInfo.name", "Unknown"] },
-            total: 1,
-            count: 1,
-          },
-        },
-        { $sort: { total: -1 } },
-      ]),
-      // All transactions in date range for the list section
+    const feePaymentFilter = {};
+    if (matchFilter.paymentDate) {
+      feePaymentFilter.paymentDate = matchFilter.paymentDate;
+    }
+    if (normalizedCourseId) {
+      feePaymentFilter.course = normalizedCourseId;
+    }
+
+    const payrollFilter = { isDeleted: { $ne: true } };
+    if (normalizedYear > 0) {
+      payrollFilter.year = normalizedYear;
+    }
+    if (normalizedMonth > 0) {
+      payrollFilter.month = normalizedMonth;
+    }
+
+    const [
+      transactions,
+      feePayments,
+      payrollRecords,
+      courses,
+      availableYearsAgg,
+      allHeads,
+    ] = await Promise.all([
       AccountingTransaction.find(matchFilter)
         .populate("type", "name")
         .populate("head", "name")
         .populate("paymentMethod", "name type")
-        .sort({ paymentDate: -1 })
-        .limit(1000),
+        .sort({ paymentDate: -1, createdAt: -1 })
+        .limit(5000),
+      FeePayment.find(feePaymentFilter)
+        .populate("course", "courseName courseId")
+        .lean(),
+      TeacherPayroll.find(payrollFilter)
+        .populate({
+          path: "teacher",
+          select: "fullName courseId",
+          populate: {
+            path: "courseId",
+            select: "courseName courseId",
+          },
+        })
+        .lean(),
+      CourseSchema.find({}, { courseName: 1, courseId: 1 }).lean(),
+      AccountingTransaction.aggregate([
+        {
+          $project: {
+            year: { $year: "$paymentDate" },
+          },
+        },
+        {
+          $group: {
+            _id: "$year",
+          },
+        },
+        { $sort: { _id: -1 } },
+      ]),
+      HeadOfAccount.find({}).populate("type", "name").lean(),
     ]);
 
-    const totalIncome = incomeAgg.reduce((sum, r) => sum + r.total, 0);
-    const totalExpense = expenseAgg.reduce((sum, r) => sum + r.total, 0);
+    const transactionIds = transactions
+      .map((txn) => String(txn?._id || "").trim())
+      .filter(Boolean);
+    const transactionBillReferences = transactions
+      .map((txn) => String(txn?.billReference || "").trim())
+      .filter(Boolean);
+
+    const linkedExpenseEntries =
+      transactionIds.length || transactionBillReferences.length
+        ? await ExpenseHeadEntry.find({
+            isActive: true,
+            $or: [
+              transactionIds.length
+                ? { transactionId: { $in: transactionIds } }
+                : null,
+              transactionBillReferences.length
+                ? { voucherNo: { $in: transactionBillReferences } }
+                : null,
+            ].filter(Boolean),
+          })
+            .populate("expenseCategory", "name")
+            .lean()
+        : [];
+
+    const normalizeKey = (value) =>
+      String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
+
+    const normalizeAlpha = (value) =>
+      normalizeKey(value).replace(/[^a-z0-9\s]/g, " ");
+
+    const buildSearchText = (...values) =>
+      normalizeAlpha(
+        values
+          .map((value) => String(value || "").trim())
+          .filter(Boolean)
+          .join(" "),
+      )
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const headTypeNameById = new Map();
+    [incomeType, expenseType].forEach((typeRecord) => {
+      if (typeRecord?._id) {
+        headTypeNameById.set(String(typeRecord._id), typeRecord.name);
+      }
+    });
+
+    const headsByTypeName = new Map();
+    allHeads.forEach((head) => {
+      const typeName =
+        head?.type?.name ||
+        headTypeNameById.get(String(head?.type?._id || head?.type || "")) ||
+        "";
+      if (!typeName) {
+        return;
+      }
+
+      const bucket = headsByTypeName.get(typeName) || [];
+      bucket.push({
+        _id: String(head?._id || ""),
+        name: head?.name || "",
+        isActive: head?.isActive !== false,
+        normalizedName: normalizeAlpha(head?.name || ""),
+      });
+      headsByTypeName.set(typeName, bucket);
+    });
+
+    const coursesByName = new Map();
+    const coursesById = new Map();
+    courses.forEach((course) => {
+      const record = {
+        _id: String(course?._id || ""),
+        courseName: course?.courseName || "",
+        courseId: course?.courseId || "",
+      };
+      if (record._id) {
+        coursesById.set(record._id, record);
+      }
+      if (record.courseName) {
+        coursesByName.set(normalizeKey(record.courseName), record);
+      }
+      if (record.courseId) {
+        coursesByName.set(normalizeKey(record.courseId), record);
+      }
+    });
+
+    const feePaymentByReference = new Map();
+    feePayments.forEach((payment) => {
+      const courseRecord = payment?.course
+        ? {
+            _id: String(payment.course?._id || payment.course || ""),
+            courseName: payment.course?.courseName || "",
+            courseId: payment.course?.courseId || "",
+          }
+        : null;
+      if (!courseRecord?._id) {
+        return;
+      }
+
+      [payment?.receiptNo, payment?.voucherNo].forEach((ref) => {
+        const normalizedRef = String(ref || "").trim();
+        if (normalizedRef) {
+          feePaymentByReference.set(normalizedRef, courseRecord);
+        }
+      });
+    });
+
+    const payrollTransactionCourseMap = new Map();
+    payrollRecords.forEach((payroll) => {
+      const teacher = payroll?.teacher || {};
+      const teacherCourses = Array.isArray(teacher?.courseId)
+        ? teacher.courseId
+        : teacher?.courseId
+          ? [teacher.courseId]
+          : [];
+
+      const courseRecords = teacherCourses
+        .map((course) => ({
+          _id: String(course?._id || course || ""),
+          courseName: course?.courseName || "",
+          courseId: course?.courseId || "",
+        }))
+        .filter((course) => course._id);
+
+      (payroll?.paymentEntries || []).forEach((entry) => {
+        const txnId = String(entry?.transactionId || "").trim();
+        if (!txnId) return;
+
+        payrollTransactionCourseMap.set(txnId, {
+          teacherName: teacher?.fullName || "",
+          courses: courseRecords,
+        });
+      });
+    });
+
+    const expenseHeadByTransactionId = new Map();
+    const expenseHeadByVoucherNo = new Map();
+    linkedExpenseEntries.forEach((entry) => {
+      const resolvedExpenseHead =
+        entry?.expenseCategory?.name
+          ? {
+              _id: String(
+                entry?.expenseCategory?._id || entry?.expenseCategory || "",
+              ),
+              name: entry.expenseCategory.name,
+            }
+          : null;
+
+      if (!resolvedExpenseHead?.name) {
+        return;
+      }
+
+      const transactionId = String(entry?.transactionId || "").trim();
+      const voucherNo = String(entry?.voucherNo || "").trim();
+
+      if (transactionId) {
+        expenseHeadByTransactionId.set(transactionId, resolvedExpenseHead);
+      }
+      if (voucherNo) {
+        expenseHeadByVoucherNo.set(voucherNo, resolvedExpenseHead);
+      }
+    });
+
+    const resolvedHeadCache = new Map();
+    const resolveHeadSnapshot = async (...candidates) => {
+      for (const candidate of candidates) {
+        const candidateValue =
+          candidate && typeof candidate === "object"
+            ? candidate?._id || candidate?.name || ""
+            : candidate;
+        const cacheKey = String(candidateValue || "").trim();
+        if (!cacheKey) {
+          continue;
+        }
+
+        if (resolvedHeadCache.has(cacheKey)) {
+          const cachedHead = resolvedHeadCache.get(cacheKey);
+          if (cachedHead) {
+            return cachedHead;
+          }
+          continue;
+        }
+
+        let resolvedHead = null;
+        if (candidate?.name) {
+          resolvedHead = {
+            _id: String(candidate?._id || ""),
+            name: candidate.name,
+          };
+        } else {
+          const headDoc = await findHeadOfAccountByAnyId(candidate);
+          resolvedHead = headDoc
+            ? {
+                _id: String(headDoc?._id || ""),
+                name: headDoc?.name || "",
+              }
+            : null;
+        }
+
+        resolvedHeadCache.set(cacheKey, resolvedHead);
+        if (resolvedHead) {
+          return resolvedHead;
+        }
+      }
+
+      return null;
+    };
+
+    const getTypedHeads = (typeName) => headsByTypeName.get(typeName) || [];
+
+    const findHeadByName = (typeName, ...names) => {
+      const typedHeads = getTypedHeads(typeName);
+      for (const name of names) {
+        const normalizedName = normalizeAlpha(name);
+        if (!normalizedName) continue;
+
+        const matchedHead = typedHeads.find(
+          (head) => head.normalizedName === normalizedName,
+        );
+        if (matchedHead) {
+          return matchedHead;
+        }
+      }
+      return null;
+    };
+
+    const findHeadBySearchText = (typeName, searchText) => {
+      const typedHeads = getTypedHeads(typeName)
+        .filter((head) => head.normalizedName)
+        .sort((a, b) => b.normalizedName.length - a.normalizedName.length);
+
+      return (
+        typedHeads.find((head) => searchText.includes(head.normalizedName)) || null
+      );
+    };
+
+    const inferHeadFromTransaction = ({
+      txn,
+      typeName,
+      linkedExpenseHead,
+      explicitHead,
+    }) => {
+      if (explicitHead?.name) {
+        return explicitHead;
+      }
+
+      if (linkedExpenseHead?.name) {
+        return linkedExpenseHead;
+      }
+
+      const searchText = buildSearchText(
+        txn?.name,
+        txn?.details,
+        txn?.billReference,
+      );
+
+      if (!searchText) {
+        return null;
+      }
+
+      if (typeName === "Income") {
+        const installmentHead = findHeadByName(
+          "Income",
+          "Installment",
+          "Installments",
+          "instamint",
+          "instalment",
+        );
+        const admissionHead = findHeadByName("Income", "Admission Fee");
+        const booksHead = findHeadByName("Income", "Books Fee");
+        const certificateHead = findHeadByName("Income", "Certificate Fee");
+        const examHead = findHeadByName("Income", "Exam Fee");
+        const courseFeesHead = findHeadByName("Income", "Course Fees", "Course Fee");
+
+        if (searchText.includes("admission")) return admissionHead || null;
+        if (searchText.includes("book")) return booksHead || null;
+        if (searchText.includes("certificate")) return certificateHead || null;
+        if (searchText.includes("exam")) return examHead || null;
+        if (
+          searchText.includes("installment") ||
+          searchText.includes("inst ") ||
+          searchText.includes("inst #")
+        ) {
+          return installmentHead || courseFeesHead || null;
+        }
+
+        return (
+          findHeadBySearchText("Income", searchText) || courseFeesHead || null
+        );
+      }
+
+      if (typeName === "Expense") {
+        const salaryHead = findHeadByName(
+          "Expense",
+          "Salary",
+          "Salaries Expenses",
+        );
+        if (
+          searchText.includes("salary") ||
+          searchText.includes("payroll") ||
+          searchText.includes("wages")
+        ) {
+          return salaryHead || null;
+        }
+
+        return findHeadBySearchText("Expense", searchText);
+      }
+
+      return findHeadBySearchText(typeName, searchText);
+    };
+
+    const getDetailsCourseRecord = (details = "") => {
+      const courseLine = String(details || "").match(/^Course\s*:\s*(.+)$/im);
+      const rawCourseValue = String(courseLine?.[1] || "").trim();
+      if (!rawCourseValue) {
+        return null;
+      }
+      return (
+        coursesByName.get(normalizeKey(rawCourseValue)) || {
+          _id: "",
+          courseName: rawCourseValue,
+          courseId: "",
+        }
+      );
+    };
+
+    const mappedTransactions = await Promise.all(transactions.map(async (txn) => {
+      const billRef = String(txn?.billReference || "").trim();
+      const feeCourse = billRef ? feePaymentByReference.get(billRef) : null;
+      const payrollCourseContext = payrollTransactionCourseMap.get(
+        String(txn?._id || ""),
+      );
+      const detailsCourse = getDetailsCourseRecord(txn?.details);
+      const linkedExpenseHead =
+        expenseHeadByTransactionId.get(String(txn?._id || "").trim()) ||
+        expenseHeadByVoucherNo.get(billRef) ||
+        null;
+      const explicitHead = await resolveHeadSnapshot(
+        txn?.head?._id,
+        txn?.head,
+        linkedExpenseHead?._id,
+        linkedExpenseHead?.name,
+      );
+      const typeName = txn?.type?.name || "";
+      const inferredHead = inferHeadFromTransaction({
+        txn,
+        typeName,
+        linkedExpenseHead,
+        explicitHead,
+      });
+      const resolvedHead = explicitHead || inferredHead || null;
+
+      const derivedCourses = feeCourse
+        ? [feeCourse]
+        : payrollCourseContext?.courses?.length
+          ? payrollCourseContext.courses
+          : detailsCourse
+            ? [detailsCourse]
+            : [];
+
+      return {
+        _id: txn._id,
+        transactionNo: txn.transactionNo,
+        name: txn.name,
+        amount: Number(txn.amount || 0),
+        billReference: txn.billReference || "",
+        details: txn.details || "",
+        paymentDate: txn.paymentDate,
+        createdAt: txn.createdAt,
+        type: txn.type,
+        head:
+          resolvedHead ||
+          linkedExpenseHead ||
+          (txn?.head?.name
+            ? {
+                _id: String(txn?.head?._id || ""),
+                name: txn.head.name,
+              }
+            : null),
+        paymentMethod: txn.paymentMethod,
+        courseIds: derivedCourses.map((course) => String(course?._id || "")).filter(Boolean),
+        courseNames: derivedCourses
+          .map((course) => course?.courseName || course?.courseId || "")
+          .filter(Boolean),
+        courseLabel: derivedCourses
+          .map((course) => course?.courseName || course?.courseId || "")
+          .filter(Boolean)
+          .join(", "),
+        teacherName: payrollCourseContext?.teacherName || "",
+      };
+    }));
+
+    const filteredTransactions = normalizedCourseId
+      ? mappedTransactions.filter((txn) =>
+          txn.courseIds.some((id) => String(id) === normalizedCourseId),
+        )
+      : mappedTransactions;
+
+    const incomeEntries = filteredTransactions.filter(
+      (txn) => txn.type?.name === "Income",
+    );
+    const expenseEntries = filteredTransactions.filter(
+      (txn) => txn.type?.name === "Expense",
+    );
+
+    const buildBreakdown = (rows = []) =>
+      Array.from(
+        rows.reduce((acc, row) => {
+          const headName = row?.head?.name || "Unknown";
+          const existing = acc.get(headName) || {
+            headName,
+            total: 0,
+            count: 0,
+          };
+          existing.total += Number(row?.amount || 0);
+          existing.count += 1;
+          acc.set(headName, existing);
+          return acc;
+        }, new Map()).values(),
+      ).sort((a, b) => b.total - a.total);
+
+    const incomeAgg = buildBreakdown(incomeEntries);
+    const expenseAgg = buildBreakdown(expenseEntries);
+    const totalIncome = incomeEntries.reduce(
+      (sum, row) => sum + Number(row.amount || 0),
+      0,
+    );
+    const totalExpense = expenseEntries.reduce(
+      (sum, row) => sum + Number(row.amount || 0),
+      0,
+    );
+    const netBalance = totalIncome - totalExpense;
 
     res.status(200).json({
       success: true,
       data: {
         totalIncome,
         totalExpense,
-        netBalance: totalIncome - totalExpense,
+        netBalance,
         incomeBreakdown: incomeAgg,
         expenseBreakdown: expenseAgg,
-        transactions,
+        incomeEntries,
+        expenseEntries,
+        transactions: filteredTransactions,
+        statementRows: [
+          {
+            label: "Total Income",
+            incomeAmount: totalIncome,
+            expenseAmount: null,
+          },
+          {
+            label: "Total Expense",
+            incomeAmount: null,
+            expenseAmount: totalExpense,
+          },
+          {
+            label: netBalance >= 0 ? "Net Profit" : "Net Loss",
+            incomeAmount: netBalance >= 0 ? Math.abs(netBalance) : null,
+            expenseAmount: netBalance < 0 ? Math.abs(netBalance) : null,
+          },
+        ],
+        filters: {
+          year: normalizedYear || null,
+          month: normalizedMonth || null,
+          courseId: normalizedCourseId || null,
+          dateFrom: dateFrom || null,
+          dateTo: dateTo || null,
+        },
+        meta: {
+          availableYears: availableYearsAgg
+            .map((item) => Number(item?._id || 0))
+            .filter((value) => value > 0),
+        },
       },
     });
   } catch (error) {
@@ -3593,7 +4332,7 @@ export const getTransactions = async (req, res) => {
         .populate("head", "name")
         .populate("paymentMethod", "name type")
         .populate("createdBy", "name email")
-        .sort({ paymentDate: -1, createdAt: -1 })
+        .sort({ createdAt: -1, paymentDate: -1 })
         .skip(skip)
         .limit(parseInt(limit)),
       AccountingTransaction.countDocuments(filter),
