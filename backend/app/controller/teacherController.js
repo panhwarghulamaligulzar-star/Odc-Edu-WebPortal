@@ -896,14 +896,9 @@ const applyTeacherStudentCompensationUpdate = async (teacherId, payload = {}) =>
     },
   });
 
-  const { carryForwardInAmount } = await getTeacherCarryForwardAmount(
-    teacher._id,
-    selectedYear,
-    selectedMonth,
-  );
   const payrollTotals = calculatePayrollTotals({
     baseDueAmount: Number(compensation.summary.finalMonthlySalary || compensation.summary.calculatedMonthlySalary || 0),
-    carryForwardInAmount,
+    carryForwardInAmount: 0,
     paidAmount: Number(payrollRecord.paidAmount || 0),
   });
   const paidAmount = Number(payrollRecord.paidAmount || 0);
@@ -1050,14 +1045,9 @@ const applyTeacherMonthlySalaryConfigUpdate = async (teacherId, payload = {}) =>
     },
   });
 
-  const { carryForwardInAmount } = await getTeacherCarryForwardAmount(
-    teacher._id,
-    selectedYear,
-    selectedMonth,
-  );
   const payrollTotals = calculatePayrollTotals({
     baseDueAmount: Number(compensation.summary.finalMonthlySalary || compensation.summary.calculatedMonthlySalary || 0),
-    carryForwardInAmount,
+    carryForwardInAmount: 0,
     paidAmount: Number(payrollRecord.paidAmount || 0),
   });
   const paidAmount = Number(payrollRecord.paidAmount || 0);

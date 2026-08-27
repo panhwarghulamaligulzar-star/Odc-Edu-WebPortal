@@ -242,11 +242,10 @@ const getMonthRange = (monthValue) => {
 
 const getDefaultPayrollPeriod = () => {
   const now = new Date();
-  const lastCompletedMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
   return {
-    year: lastCompletedMonth.getFullYear(),
-    month: lastCompletedMonth.getMonth() + 1,
+    year: now.getFullYear(),
+    month: now.getMonth() + 1,
   };
 };
 
@@ -1122,13 +1121,21 @@ export const getTeacherPayrollSummary = async (req, res) => {
           {
             studentAdjustments: existingPayroll?.studentAdjustments || [],
             salaryConfigOverride,
+            payrollAdjustments: {
+              deductionAmount: existingPayroll?.deductionAmount || 0,
+              deductionNote: existingPayroll?.deductionNote || "",
+              bonusAmount: existingPayroll?.bonusAmount || 0,
+              bonusNote: existingPayroll?.bonusNote || "",
+            },
           },
         );
-        const { previousPeriod, carryForwardInAmount } =
-          await getTeacherCarryForwardAmount(teacher._id, selectedYear, selectedMonth);
         const payrollTotals = calculatePayrollTotals({
-          baseDueAmount: Number(compensation.summary.calculatedMonthlySalary || 0),
-          carryForwardInAmount,
+          baseDueAmount: Number(
+            compensation.summary.finalMonthlySalary ||
+              compensation.summary.calculatedMonthlySalary ||
+              0,
+          ),
+          carryForwardInAmount: 0,
           paidAmount: Number(existingPayroll?.paidAmount || 0),
         });
 
@@ -1153,12 +1160,7 @@ export const getTeacherPayrollSummary = async (req, res) => {
             dueAmount: payrollTotals.totalDueAmount,
             baseDueAmount: payrollTotals.baseDueAmount,
             carryForwardInAmount: payrollTotals.carryForwardInAmount,
-            carryForwardSourceMonth: carryForwardInAmount
-              ? {
-                  year: previousPeriod.year,
-                  month: previousPeriod.month,
-                }
-              : null,
+            carryForwardSourceMonth: null,
             carryForwardEligibleAmount: payrollTotals.carryForwardEligibleAmount,
             paidAmount: payrollTotals.paidAmount,
             appliedToCarry: payrollTotals.appliedToCarry,
@@ -1309,20 +1311,25 @@ export const payTeacherPayroll = async (req, res) => {
     const compensation = await calculateTeacherCompensationData(teacher, selectedYear, selectedMonth, {
       studentAdjustments: payrollRecord?.studentAdjustments || [],
       salaryConfigOverride,
+      payrollAdjustments: {
+        deductionAmount: payrollRecord?.deductionAmount || 0,
+        deductionNote: payrollRecord?.deductionNote || "",
+        bonusAmount: payrollRecord?.bonusAmount || 0,
+        bonusNote: payrollRecord?.bonusNote || "",
+      },
     });
-    const { previousPeriod, carryForwardInAmount } = await getTeacherCarryForwardAmount(
-      teacher._id,
-      selectedYear,
-      selectedMonth,
+    const baseDueAmount = Number(
+      compensation.summary.finalMonthlySalary ||
+        compensation.summary.calculatedMonthlySalary ||
+        0,
     );
-    const baseDueAmount = Number(compensation.summary.calculatedMonthlySalary || 0);
     const currentPaidAmount =
       payrollRecord?.isDeleted === true
         ? 0
         : Number(payrollRecord?.paidAmount || 0);
     const beforePaymentTotals = calculatePayrollTotals({
       baseDueAmount,
-      carryForwardInAmount,
+      carryForwardInAmount: 0,
       paidAmount: currentPaidAmount,
     });
     const availableBalance = Number(method.currentBalance || 0);
@@ -1426,7 +1433,7 @@ export const payTeacherPayroll = async (req, res) => {
     if (!payrollRecord) {
       const afterPaymentTotals = calculatePayrollTotals({
         baseDueAmount,
-        carryForwardInAmount,
+        carryForwardInAmount: 0,
         paidAmount: normalizedPaymentAmount,
       });
       updatedPayroll = await TeacherPayroll.create({
@@ -1466,7 +1473,7 @@ export const payTeacherPayroll = async (req, res) => {
     } else {
       const afterPaymentTotals = calculatePayrollTotals({
         baseDueAmount,
-        carryForwardInAmount,
+        carryForwardInAmount: 0,
         paidAmount: currentPaidAmount + normalizedPaymentAmount,
       });
 
@@ -1507,9 +1514,7 @@ export const payTeacherPayroll = async (req, res) => {
       success: true,
       data: updatedPayroll,
       transaction: txn,
-      carryForwardSourceMonth: carryForwardInAmount
-        ? { year: previousPeriod.year, month: previousPeriod.month }
-        : null,
+      carryForwardSourceMonth: null,
       message: `Teacher salary recorded successfully in ${txnType.name} using ${method.name}.`,
     });
   } catch (error) {

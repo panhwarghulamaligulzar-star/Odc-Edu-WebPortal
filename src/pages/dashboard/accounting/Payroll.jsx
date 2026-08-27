@@ -34,7 +34,7 @@ import { DeleteOutlined } from "@ant-design/icons";
 const { Text } = Typography;
 
 const getDefaultPayrollMonth = () =>
-  dayjs().subtract(1, "month").startOf("month");
+  dayjs().startOf("month");
 const formatCurrency = (value) =>
   `Rs ${Number(value || 0).toLocaleString("en-PK")}`;
 const isSalaryHeadName = (name) => /^salary$/i.test(String(name || "").trim());

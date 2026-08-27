@@ -62,22 +62,12 @@ const TEACHERS_PER_PAGE = 10;
 const getSalaryMonthBounds = (teacher) => {
   const now = dayjs();
   const currentMonthStart = now.startOf("month");
-  const appointmentMonth = teacher?.appointmentDate
-    ? dayjs(teacher.appointmentDate).startOf("month")
-    : currentMonthStart;
-
-  if (!appointmentMonth.isValid() || !appointmentMonth.isBefore(currentMonthStart)) {
-    return {
-      hasCompletedMonth: false,
-      firstMonth: null,
-      lastMonth: null,
-    };
-  }
+  const nextMonthStart = currentMonthStart.add(1, "month");
 
   return {
-    hasCompletedMonth: true,
-    firstMonth: appointmentMonth,
-    lastMonth: currentMonthStart.subtract(1, "month"),
+    hasVisibleMonth: true,
+    firstMonth: null,
+    lastMonth: nextMonthStart,
   };
 };
 
@@ -170,7 +160,7 @@ const Teachers = () => {
     setLoadingTeacherCompensation(true);
     try {
       const resolvedMonthValue =
-        monthValue || selectedCompensationMonth || dayjs().subtract(1, "month").format("YYYY-MM");
+        monthValue || selectedCompensationMonth || dayjs().format("YYYY-MM");
       const selectedMonth = dayjs(`${resolvedMonthValue}-01`);
       const response = await getTeacherCompensationDetails(teacherId, {
         year: selectedMonth.year(),
@@ -233,7 +223,7 @@ const Teachers = () => {
         ? 50
         : Number(salaryConfigDraft.attendanceThreshold);
     const resolvedMonthValue =
-      selectedCompensationMonth || dayjs().subtract(1, "month").format("YYYY-MM");
+      selectedCompensationMonth || dayjs().format("YYYY-MM");
     const selectedMonth = dayjs(`${resolvedMonthValue}-01`);
 
     setSavingSalaryConfig(true);
@@ -680,8 +670,8 @@ const Teachers = () => {
       bonusAmount: 0,
       bonusNote: "",
     });
-    const { hasCompletedMonth, lastMonth } = getSalaryMonthBounds(teacher);
-    const defaultMonth = hasCompletedMonth ? lastMonth.format("YYYY-MM") : null;
+    const { hasVisibleMonth } = getSalaryMonthBounds(teacher);
+    const defaultMonth = hasVisibleMonth ? dayjs().startOf("month").format("YYYY-MM") : null;
     setSelectedCompensationMonth(defaultMonth);
     setShowIdCard(true);
   };
@@ -912,12 +902,12 @@ const Teachers = () => {
     }
 
     if (!isCompensationResponseShape(teacherCompensation)) {
-      const { hasCompletedMonth } = getSalaryMonthBounds(selectedTeacher);
+      const { hasVisibleMonth } = getSalaryMonthBounds(selectedTeacher);
       return (
         <Empty
           description={
-            !hasCompletedMonth
-              ? "Completed months will appear here after the teacher finishes their first full month."
+            !hasVisibleMonth
+              ? "Salary months will appear here once the employee appointment month becomes available."
               : "Course and attendance details are not available yet"
           }
         />
@@ -1063,11 +1053,8 @@ const Teachers = () => {
                 }
                 disabledDate={(current) => {
                   if (!current) return false;
-                  if (!firstMonth || !lastMonth) return true;
-                  return (
-                    current.isBefore(firstMonth, "month") ||
-                    current.isAfter(lastMonth, "month")
-                  );
+                  if (!lastMonth) return true;
+                  return current.isAfter(lastMonth, "month");
                 }}
                 onChange={(value) => {
                   const monthValue = value ? value.format("YYYY-MM") : null;
