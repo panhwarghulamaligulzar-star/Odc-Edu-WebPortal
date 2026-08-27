@@ -193,6 +193,9 @@ const StatusPicker = ({ value, onChange, disabled = false }) => (
   </div>
 );
 
+const isStudentAttendanceEligible = (student) =>
+  student?.attendanceEligible !== false;
+
 // ─── Legend ───────────────────────────────────────────────────────────────────
 const Legend = () => (
   <div className="flex gap-3 flex-wrap text-xs">
@@ -885,7 +888,9 @@ function MarkAttendancePanel({ batches }) {
     setSaving(true);
     try {
       const list = activeTab === "student" ? members.students : members.teachers;
-      const records = list.map((p) => ({
+      const records = list
+        .filter((p) => p.personType !== "student" || isStudentAttendanceEligible(p))
+        .map((p) => ({
         personId: p._id, personType: p.personType,
         status: attendanceMap[p._id] || "Absent", notes: "",
       }));
@@ -1037,8 +1042,9 @@ function MarkAttendancePanel({ batches }) {
   }, [members.teachers, selectedPersonId]);
 
   const areAllVisibleStudentsPresent = useMemo(() => {
-    if (filteredStudents.length === 0) return false;
-    return filteredStudents.every(
+    const eligibleStudents = filteredStudents.filter(isStudentAttendanceEligible);
+    if (eligibleStudents.length === 0) return false;
+    return eligibleStudents.every(
       (student) => (attendanceMap[student._id] || "Absent") === "Present",
     );
   }, [attendanceMap, filteredStudents]);
@@ -1055,9 +1061,11 @@ function MarkAttendancePanel({ batches }) {
 
     setAttendanceMap((prev) => {
       const next = { ...prev };
-      filteredStudents.forEach((student) => {
+      filteredStudents
+        .filter(isStudentAttendanceEligible)
+        .forEach((student) => {
         next[student._id] = shouldMarkPresent ? "Present" : "Absent";
-      });
+        });
       return next;
     });
     setDirty(true);
@@ -1102,16 +1110,46 @@ function MarkAttendancePanel({ batches }) {
     {
       title: "Enrollment",
       dataIndex: "enrollmentStatus",
-      render: (status) => {
+      render: (status, record) => {
         const color =
           status === "Active" ? "green" :
           status === "On Hold" ? "orange" :
           status === "Completed" ? "blue" :
           status === "Dropped" ? "red" : "default";
-        return <Tag color={color}>{status || "Unknown"}</Tag>;
+        return (
+          <div className="flex flex-col gap-1">
+            <Tag color={color}>{status || "Unknown"}</Tag>
+            {!isStudentAttendanceEligible(record) && (
+              <span className="text-[11px] font-medium text-amber-700">
+                Attendance locked
+              </span>
+            )}
+          </div>
+        );
       },
     },
-    { title: "Mark Attendance", render: (_, r) => <StatusPicker disabled={isAcademyHoliday} value={attendanceMap[r._id]} onChange={(s) => handleStatusChange(r._id, s)} /> },
+    {
+      title: "Mark Attendance",
+      render: (_, r) => (
+        <StatusPicker
+          disabled={isAcademyHoliday || !isStudentAttendanceEligible(r)}
+          value={attendanceMap[r._id]}
+          onChange={(s) => handleStatusChange(r._id, s)}
+        />
+      ),
+    },
+    {
+      title: "Note",
+      dataIndex: "enrollmentNotes",
+      render: (note, record) =>
+        !isStudentAttendanceEligible(record) ? (
+          <span className="text-xs text-slate-600">
+            {note || "No note added"}
+          </span>
+        ) : (
+          <span className="text-xs text-slate-400">-</span>
+        ),
+    },
     {
       title: "Status", width: 130,
       render: (_, r) => (

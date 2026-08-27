@@ -576,6 +576,7 @@ const Students = () => {
   const [selectedStatusEnrollmentIds, setSelectedStatusEnrollmentIds] = useState(
     [],
   );
+  const [statusChangeNote, setStatusChangeNote] = useState("");
   const fileInputRef = useRef(null);
   const profileUploadInputRef = useRef(null);
   const profileCameraInputRef = useRef(null);
@@ -1098,6 +1099,7 @@ const Students = () => {
         .map((enrollment) => enrollment?._id)
         .filter(Boolean),
     );
+    setStatusChangeNote("");
     setStatusModalVisible(true);
   };
 
@@ -1107,6 +1109,7 @@ const Students = () => {
     setStudentStatusRecord(null);
     setSelectedStudentStatus("Dropped");
     setSelectedStatusEnrollmentIds([]);
+    setStatusChangeNote("");
   };
 
   const handleStudentStatusUpdate = async () => {
@@ -1132,6 +1135,14 @@ const Students = () => {
       return;
     }
 
+    if (
+      (selectedStudentStatus === "Dropped" || selectedStudentStatus === "Completed") &&
+      !String(statusChangeNote || "").trim()
+    ) {
+      message.warning("Please add a note for dropout or passout status.");
+      return;
+    }
+
     setStatusLoading(true);
     try {
       await Promise.all(
@@ -1142,6 +1153,10 @@ const Students = () => {
               selectedStudentStatus === "Completed"
                 ? dayjs().format("YYYY-MM-DD")
                 : null,
+            notes:
+              selectedStudentStatus === "Active"
+                ? String(statusChangeNote || "").trim()
+                : String(statusChangeNote || "").trim(),
           }),
         ),
       );
@@ -4450,6 +4465,43 @@ const Students = () => {
                 )?.helper
               }
             </div>
+
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: "#0F172A",
+                marginTop: 16,
+                marginBottom: 8,
+              }}
+            >
+              Admin note
+            </div>
+            <TextArea
+              value={statusChangeNote}
+              onChange={(event) => setStatusChangeNote(event.target.value)}
+              rows={4}
+              placeholder={
+                selectedStudentStatus === "Dropped"
+                  ? "Add reason for dropout"
+                  : selectedStudentStatus === "Completed"
+                    ? "Add passout / completion note"
+                    : "Optional note for re-activating this student"
+              }
+            />
+            {(selectedStudentStatus === "Dropped" ||
+              selectedStudentStatus === "Completed") && (
+              <div
+                style={{
+                  marginTop: 8,
+                  fontSize: 12,
+                  color: "#B91C1C",
+                  fontWeight: 500,
+                }}
+              >
+                A note is required for dropout and passout status changes.
+              </div>
+            )}
           </div>
         </div>
       </Modal>

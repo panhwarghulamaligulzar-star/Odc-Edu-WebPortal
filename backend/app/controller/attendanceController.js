@@ -40,6 +40,12 @@ const isWithinBatchDateRange = (date, batch) => {
   return true;
 };
 
+const normalizeEnrollmentStatus = (status) =>
+  String(status || "").trim().toLowerCase();
+
+const isAttendanceEligibleEnrollmentStatus = (status) =>
+  ["active", "enrolled", "on hold"].includes(normalizeEnrollmentStatus(status));
+
 // ─── Helper: check if date is a holiday for the batch ────────────────────────
 const checkHoliday = async (date, batchId) => {
   const d = new Date(date);
@@ -402,6 +408,8 @@ const getBatchMembers = async (req, res) => {
         profilePicture: e.student.profilePicture || "",
         mobileNumber: e.student.mobileNumber || "",
         enrollmentStatus: e.status,
+        enrollmentNotes: e.notes || "",
+        attendanceEligible: isAttendanceEligibleEnrollmentStatus(e.status),
         personType: "student",
       }));
 
