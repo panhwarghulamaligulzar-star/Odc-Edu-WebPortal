@@ -288,6 +288,29 @@ const matchesStudentCategory = (student, category) => {
   return getEnrollmentsForCategory(student, category).length > 0;
 };
 
+const getExportEnrollmentsForStudent = ({
+  student,
+  category,
+  courseFilter,
+  batchFilter,
+}) => {
+  let enrollments = getEnrollmentsForCategory(student, category);
+
+  if (courseFilter !== "all") {
+    enrollments = enrollments.filter(
+      (enrollment) => String(enrollment?.course?._id || "") === String(courseFilter),
+    );
+  }
+
+  if (batchFilter !== "all") {
+    enrollments = enrollments.filter(
+      (enrollment) => String(enrollment?.batch?._id || "") === String(batchFilter),
+    );
+  }
+
+  return enrollments;
+};
+
 const getStudentLifecycleStatus = (student) => {
   if (hasActiveEnrollment(student)) {
     return {
@@ -2006,9 +2029,12 @@ const Students = () => {
     try {
       setExportingWorkbook(true);
 
-      const studentIds = new Set(students.map((student) => student._id));
+      const studentsToExport = filteredStudents;
+      const exportCategory =
+        activeStudentCategory === "all" ? "all" : activeStudentCategory;
+      const studentIds = new Set(studentsToExport.map((student) => student._id));
       const studentsById = new Map(
-        students.map((student) => [student._id, student]),
+        studentsToExport.map((student) => [student._id, student]),
       );
       const feeStructureIds = new Set();
       const studentRows = [];
@@ -2016,7 +2042,7 @@ const Students = () => {
       const installmentRows = [];
       const additionalFeeRows = [];
 
-      students.forEach((student) => {
+      studentsToExport.forEach((student) => {
         const visibleRegistrationNo = getVisibleRegistrationNo(student);
 
         studentRows.push({
@@ -2042,9 +2068,12 @@ const Students = () => {
           Reference: student.reference || "",
         });
 
-        const enrollments = Array.isArray(student.enrollments)
-          ? student.enrollments
-          : [];
+        const enrollments = getExportEnrollmentsForStudent({
+          student,
+          category: exportCategory,
+          courseFilter,
+          batchFilter,
+        });
 
         enrollments.forEach((enrollment) => {
           const feeStructure = enrollment.feeStructure || {};
@@ -2187,7 +2216,7 @@ const Students = () => {
 
       XLSX.writeFile(
         workbook,
-        `students-complete-export-${dayjs().format("YYYY-MM-DD")}.xlsx`,
+        `students-${exportCategory}-export-${dayjs().format("YYYY-MM-DD")}.xlsx`,
       );
 
       message.success("Excel workbook downloaded successfully");
