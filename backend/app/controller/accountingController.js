@@ -4306,6 +4306,7 @@ export const getTransactions = async (req, res) => {
       paymentMethod,
       dateFrom,
       dateTo,
+      search,
       page = 1,
       limit = 20,
     } = req.query;
@@ -4328,6 +4329,16 @@ export const getTransactions = async (req, res) => {
         end.setHours(23, 59, 59, 999);
         filter.paymentDate.$lte = end;
       }
+    }
+    if (String(search || "").trim()) {
+      const escapedSearch = String(search)
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const searchRegex = new RegExp(escapedSearch, "i");
+      filter.$or = [
+        { name: searchRegex },
+        { transactionNo: searchRegex },
+      ];
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);

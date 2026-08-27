@@ -123,6 +123,7 @@ const Transactions = () => {
   const [filterHead, setFilterHead] = useState(null);
   const [filterMethods, setFilterMethods] = useState([]);
   const [filterDates, setFilterDates] = useState(null);
+  const [filterSearch, setFilterSearch] = useState("");
 
   // Reference data
   const [types, setTypes] = useState([]);
@@ -410,6 +411,7 @@ const Transactions = () => {
           params.paymentMethod = filterMethods.join(",");
         if (filterDates?.[0]) params.dateFrom = filterDates[0].toISOString();
         if (filterDates?.[1]) params.dateTo = filterDates[1].toISOString();
+        if (String(filterSearch || "").trim()) params.search = filterSearch.trim();
 
         const txnPromise = getTransactions(params);
         const sumPromise = balancesVisible
@@ -443,12 +445,12 @@ const Transactions = () => {
         setLoading(false);
       }
     },
-    [filterType, filterHead, filterMethods, filterDates, pagination.pageSize, balancesVisible],
+    [filterType, filterHead, filterMethods, filterDates, filterSearch, pagination.pageSize, balancesVisible],
   );
 
   useEffect(() => {
     fetchTransactions(1);
-  }, [filterType, filterHead, filterMethods, filterDates]);
+  }, [filterType, filterHead, filterMethods, filterDates, filterSearch]);
 
   // ── Form type change → filter heads ───────────────────────
   const handleFormTypeChange = (typeId) => {
@@ -698,6 +700,7 @@ const Transactions = () => {
       if (filterMethods.length) params.paymentMethod = filterMethods.join(",");
       if (filterDates?.[0]) params.dateFrom = filterDates[0].toISOString();
       if (filterDates?.[1]) params.dateTo = filterDates[1].toISOString();
+      if (String(filterSearch || "").trim()) params.search = filterSearch.trim();
       if (typeKey === "income") {
         const t = types.find((x) => x.name === "Income");
         if (t) params.type = t._id;
@@ -1161,6 +1164,14 @@ const Transactions = () => {
 
       {/* ── Filters ───────────────────────────────────────── */}
       <div className="bg-white rounded-xl shadow-soft p-4 mb-4 flex flex-wrap gap-3 items-center">
+        <Input
+          allowClear
+          value={filterSearch}
+          onChange={(e) => setFilterSearch(e.target.value)}
+          placeholder="Search name or Txn No"
+          style={{ width: 240 }}
+        />
+
         <Select
           placeholder="All Types"
           allowClear
