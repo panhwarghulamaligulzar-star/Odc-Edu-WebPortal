@@ -129,6 +129,79 @@ const findHeadOfAccountByAnyId = async (headId) => {
   });
 };
 
+const coerceValidDate = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  const normalizedDate = new Date(value);
+  return Number.isNaN(normalizedDate.getTime()) ? null : normalizedDate;
+};
+
+const buildReportDateFilter = ({ dateFrom, dateTo, year, month }) => {
+  const normalizedYear = Number(year || 0);
+  const normalizedMonth = Number(month || 0);
+
+  if (dateFrom || dateTo) {
+    const start = dateFrom ? coerceValidDate(dateFrom) : null;
+    const end = dateTo ? coerceValidDate(dateTo) : null;
+
+    if (end) {
+      end.setHours(23, 59, 59, 999);
+    }
+
+    return { start, end, normalizedYear, normalizedMonth };
+  }
+
+  if (normalizedYear > 0) {
+    return {
+      start: new Date(
+        normalizedYear,
+        normalizedMonth > 0 ? normalizedMonth - 1 : 0,
+        1,
+      ),
+      end:
+        normalizedMonth > 0
+          ? new Date(normalizedYear, normalizedMonth, 0, 23, 59, 59, 999)
+          : new Date(normalizedYear, 11, 31, 23, 59, 59, 999),
+      normalizedYear,
+      normalizedMonth,
+    };
+  }
+
+  return {
+    start: null,
+    end: null,
+    normalizedYear,
+    normalizedMonth,
+  };
+};
+
+const matchesReportDateFilter = (value, dateFilter) => {
+  if (!dateFilter?.start && !dateFilter?.end) {
+    return true;
+  }
+
+  const normalizedDate = coerceValidDate(value);
+  if (!normalizedDate) {
+    return false;
+  }
+
+  if (dateFilter.start && normalizedDate < dateFilter.start) {
+    return false;
+  }
+
+  if (dateFilter.end && normalizedDate > dateFilter.end) {
+    return false;
+  }
+
+  return true;
+};
+
 const serializeTransactionRecord = async (transactionDoc) => {
   const data =
     typeof transactionDoc?.toObject === "function"
@@ -3659,35 +3732,14 @@ export const getProfitLoss = async (req, res) => {
   try {
     const { dateFrom, dateTo, year, month, courseId } = req.query;
 
-    const normalizedYear = Number(year || 0);
-    const normalizedMonth = Number(month || 0);
+    const reportDateFilter = buildReportDateFilter({
+      dateFrom,
+      dateTo,
+      year,
+      month,
+    });
+    const { normalizedYear, normalizedMonth } = reportDateFilter;
     const normalizedCourseId = String(courseId || "").trim();
-
-    const matchFilter = {};
-    if (dateFrom || dateTo) {
-      matchFilter.paymentDate = {};
-      if (dateFrom) matchFilter.paymentDate.$gte = new Date(dateFrom);
-      if (dateTo) {
-        const end = new Date(dateTo);
-        end.setHours(23, 59, 59, 999);
-        matchFilter.paymentDate.$lte = end;
-      }
-    } else if (normalizedYear > 0) {
-      const rangeStart = new Date(
-        normalizedYear,
-        normalizedMonth > 0 ? normalizedMonth - 1 : 0,
-        1,
-      );
-      const rangeEnd =
-        normalizedMonth > 0
-          ? new Date(normalizedYear, normalizedMonth, 0, 23, 59, 59, 999)
-          : new Date(normalizedYear, 11, 31, 23, 59, 59, 999);
-
-      matchFilter.paymentDate = {
-        $gte: rangeStart,
-        $lte: rangeEnd,
-      };
-    }
 
     const [incomeType, expenseType] = await Promise.all([
       AccountingType.findOne({ name: "Income" }),
@@ -3695,9 +3747,6 @@ export const getProfitLoss = async (req, res) => {
     ]);
 
     const feePaymentFilter = {};
-    if (matchFilter.paymentDate) {
-      feePaymentFilter.paymentDate = matchFilter.paymentDate;
-    }
     if (normalizedCourseId) {
       feePaymentFilter.course = normalizedCourseId;
     }
@@ -3718,11 +3767,10 @@ export const getProfitLoss = async (req, res) => {
       availableYearsAgg,
       allHeads,
     ] = await Promise.all([
-      AccountingTransaction.find(matchFilter)
+      AccountingTransaction.find({})
         .populate("type", "name")
         .populate("head", "name")
         .populate("paymentMethod", "name type")
-        .sort({ paymentDate: -1, createdAt: -1 })
         .limit(5000),
       FeePayment.find(feePaymentFilter)
         .populate("course", "courseName courseId")
@@ -3740,8 +3788,25 @@ export const getProfitLoss = async (req, res) => {
       CourseSchema.find({}, { courseName: 1, courseId: 1 }).lean(),
       AccountingTransaction.aggregate([
         {
+          $addFields: {
+            normalizedPaymentDate: {
+              $convert: {
+                input: "$paymentDate",
+                to: "date",
+                onError: null,
+                onNull: null,
+              },
+            },
+          },
+        },
+        {
+          $match: {
+            normalizedPaymentDate: { $ne: null },
+          },
+        },
+        {
           $project: {
-            year: { $year: "$paymentDate" },
+            year: { $year: "$normalizedPaymentDate" },
           },
         },
         {
@@ -3844,7 +3909,11 @@ export const getProfitLoss = async (req, res) => {
     });
 
     const feePaymentByReference = new Map();
-    feePayments.forEach((payment) => {
+    feePayments
+      .filter((payment) =>
+        matchesReportDateFilter(payment?.paymentDate, reportDateFilter),
+      )
+      .forEach((payment) => {
       const courseRecord = payment?.course
         ? {
             _id: String(payment.course?._id || payment.course || ""),
@@ -4083,71 +4152,91 @@ export const getProfitLoss = async (req, res) => {
       );
     };
 
-    const mappedTransactions = await Promise.all(transactions.map(async (txn) => {
-      const billRef = String(txn?.billReference || "").trim();
-      const feeCourse = billRef ? feePaymentByReference.get(billRef) : null;
-      const payrollCourseContext = payrollTransactionCourseMap.get(
-        String(txn?._id || ""),
-      );
-      const detailsCourse = getDetailsCourseRecord(txn?.details);
-      const linkedExpenseHead =
-        expenseHeadByTransactionId.get(String(txn?._id || "").trim()) ||
-        expenseHeadByVoucherNo.get(billRef) ||
-        null;
-      const explicitHead = await resolveHeadSnapshot(
-        txn?.head?._id,
-        txn?.head,
-        linkedExpenseHead?._id,
-        linkedExpenseHead?.name,
-      );
-      const typeName = txn?.type?.name || "";
-      const inferredHead = inferHeadFromTransaction({
-        txn,
-        typeName,
-        linkedExpenseHead,
-        explicitHead,
-      });
-      const resolvedHead = explicitHead || inferredHead || null;
+    const mappedTransactions = await Promise.all(
+      transactions
+        .filter((txn) =>
+          matchesReportDateFilter(txn?.paymentDate, reportDateFilter),
+        )
+        .map(async (txn) => {
+          const billRef = String(txn?.billReference || "").trim();
+          const feeCourse = billRef ? feePaymentByReference.get(billRef) : null;
+          const payrollCourseContext = payrollTransactionCourseMap.get(
+            String(txn?._id || ""),
+          );
+          const detailsCourse = getDetailsCourseRecord(txn?.details);
+          const linkedExpenseHead =
+            expenseHeadByTransactionId.get(String(txn?._id || "").trim()) ||
+            expenseHeadByVoucherNo.get(billRef) ||
+            null;
+          const explicitHead = await resolveHeadSnapshot(
+            txn?.head?._id,
+            txn?.head,
+            linkedExpenseHead?._id,
+            linkedExpenseHead?.name,
+          );
+          const typeName = txn?.type?.name || "";
+          const inferredHead = inferHeadFromTransaction({
+            txn,
+            typeName,
+            linkedExpenseHead,
+            explicitHead,
+          });
+          const resolvedHead = explicitHead || inferredHead || null;
 
-      const derivedCourses = feeCourse
-        ? [feeCourse]
-        : payrollCourseContext?.courses?.length
-          ? payrollCourseContext.courses
-          : detailsCourse
-            ? [detailsCourse]
-            : [];
+          const derivedCourses = feeCourse
+            ? [feeCourse]
+            : payrollCourseContext?.courses?.length
+              ? payrollCourseContext.courses
+              : detailsCourse
+                ? [detailsCourse]
+                : [];
 
-      return {
-        _id: txn._id,
-        transactionNo: txn.transactionNo,
-        name: txn.name,
-        amount: Number(txn.amount || 0),
-        billReference: txn.billReference || "",
-        details: txn.details || "",
-        paymentDate: txn.paymentDate,
-        createdAt: txn.createdAt,
-        type: txn.type,
-        head:
-          resolvedHead ||
-          linkedExpenseHead ||
-          (txn?.head?.name
-            ? {
-                _id: String(txn?.head?._id || ""),
-                name: txn.head.name,
-              }
-            : null),
-        paymentMethod: txn.paymentMethod,
-        courseIds: derivedCourses.map((course) => String(course?._id || "")).filter(Boolean),
-        courseNames: derivedCourses
-          .map((course) => course?.courseName || course?.courseId || "")
-          .filter(Boolean),
-        courseLabel: derivedCourses
-          .map((course) => course?.courseName || course?.courseId || "")
-          .filter(Boolean)
-          .join(", "),
-        teacherName: payrollCourseContext?.teacherName || "",
-      };
-    }));
+          return {
+            _id: txn._id,
+            transactionNo: txn.transactionNo,
+            name: txn.name,
+            amount: Number(txn.amount || 0),
+            billReference: txn.billReference || "",
+            details: txn.details || "",
+            paymentDate: coerceValidDate(txn?.paymentDate) || txn?.paymentDate,
+            createdAt: txn.createdAt,
+            type: txn.type,
+            head:
+              resolvedHead ||
+              linkedExpenseHead ||
+              (txn?.head?.name
+                ? {
+                    _id: String(txn?.head?._id || ""),
+                    name: txn.head.name,
+                  }
+                : null),
+            paymentMethod: txn.paymentMethod,
+            courseIds: derivedCourses
+              .map((course) => String(course?._id || ""))
+              .filter(Boolean),
+            courseNames: derivedCourses
+              .map((course) => course?.courseName || course?.courseId || "")
+              .filter(Boolean),
+            courseLabel: derivedCourses
+              .map((course) => course?.courseName || course?.courseId || "")
+              .filter(Boolean)
+              .join(", "),
+            teacherName: payrollCourseContext?.teacherName || "",
+          };
+        }),
+    );
+
+    mappedTransactions.sort((a, b) => {
+      const dateA = coerceValidDate(a?.paymentDate)?.getTime() || 0;
+      const dateB = coerceValidDate(b?.paymentDate)?.getTime() || 0;
+      if (dateB !== dateA) {
+        return dateB - dateA;
+      }
+
+      const createdA = coerceValidDate(a?.createdAt)?.getTime() || 0;
+      const createdB = coerceValidDate(b?.createdAt)?.getTime() || 0;
+      return createdB - createdA;
+    });
 
     const filteredTransactions = normalizedCourseId
       ? mappedTransactions.filter((txn) =>

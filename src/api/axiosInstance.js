@@ -1,10 +1,21 @@
 import axios from "axios";
 import useZustandStore from "../stores/zustandStore";
 
-const baseURL =
-  import.meta.env.VITE_API_URL ||
-  import.meta.env.VITE_BACKEND_URL ||
-  (import.meta.env.DEV ? "http://localhost:5028" : window.location.origin);
+const getApiBaseUrl = () => {
+  if (import.meta.env.DEV) {
+    // Use Vite's local proxy during development so local pages call the
+    // local backend even when production env values exist in `.env`.
+    return "";
+  }
+
+  return (
+    import.meta.env.VITE_API_URL ||
+    import.meta.env.VITE_BACKEND_URL ||
+    window.location.origin
+  );
+};
+
+const baseURL = getApiBaseUrl();
 
 console.log("Axios baseURL:", baseURL);
 console.log("Mode:", import.meta.env.MODE);
