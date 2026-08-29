@@ -886,17 +886,25 @@ export const getPaymentMethods = async (req, res) => {
 // POST /accounting/payment-methods — create a new bank
 export const createPaymentMethod = async (req, res) => {
   try {
-    const { name, bankDetails, openingBalance } = req.body;
+    const { name, bankDetails, openingBalance, type } = req.body;
 
     if (!name) {
       return res.status(400).json({
         success: false,
-        message: "Bank name is required",
+        message: "Payment method name is required",
+      });
+    }
+
+    const cleanedName = String(name).trim();
+    if (!cleanedName) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment method name is required",
       });
     }
 
     const existing = await PaymentMethod.findOne({
-      name: { $regex: new RegExp(`^${name.trim()}$`, "i") },
+      name: { $regex: new RegExp(`^${cleanedName}$`, "i") },
       isActive: true,
     });
     if (existing) {
@@ -906,11 +914,14 @@ export const createPaymentMethod = async (req, res) => {
       });
     }
 
+    const normalizedType = ["cash", "bank", "other"].includes(type)
+      ? type
+      : "bank";
     const opening = Number(openingBalance) || 0;
 
     const method = new PaymentMethod({
-      name: name.trim(),
-      type: "bank",
+      name: cleanedName,
+      type: normalizedType,
       bankDetails: bankDetails || {},
       openingBalance: opening,
       currentBalance: opening,
@@ -922,7 +933,7 @@ export const createPaymentMethod = async (req, res) => {
     res.status(201).json({
       success: true,
       data: method,
-      message: "Bank created successfully",
+      message: "Payment method created successfully",
     });
   } catch (error) {
     console.error("Error creating payment method:", error);
@@ -2458,6 +2469,12 @@ const getReceiptOverviewBaseData = async () => {
                 payment.installmentNumber === entry.installmentNumber),
           ) || null;
 
+        const paymentMethodLabel =
+          matchedPayment?.paymentMethod ||
+          latestPayment?.paymentMethod ||
+          item?.latestPayment?.paymentMethod ||
+          null;
+
         return {
           _id: entry.dueEntryId,
           feeStructureId: item._id,
@@ -2485,6 +2502,8 @@ const getReceiptOverviewBaseData = async () => {
           installments: item.installments || [],
           receiptNo: entry.receiptNo,
           voucherNo: entry.voucherNo,
+          paymentMethod: paymentMethodLabel,
+          paymentMethodLabel: paymentMethodLabel,
           paymentId: matchedPayment?._id || latestPaymentMeta?._id || null,
           latestPayment: latestPaymentMeta,
           paymentCount: rowPayments.length,
@@ -2756,6 +2775,7 @@ export const getReceiptDuesOverview = async (req, res) => {
       sortOrder = "asc",
       page = 1,
       limit = 50,
+      paymentMethod = "all",
     } = req.query;
 
     const { rows: allRows } = await getReceiptOverviewBaseData();
@@ -2818,6 +2838,30 @@ export const getReceiptDuesOverview = async (req, res) => {
       }
       if (dueDateTo && !rowDueDate) return false;
 
+      const normalizedPaymentMethod = String(
+        paymentMethod || "all",
+      ).trim().toLowerCase();
+      if (normalizedPaymentMethod && normalizedPaymentMethod !== "all") {
+        const paymentMethodLabel = String(
+          row.paymentMethod || row.latestPayment?.paymentMethod || "",
+        )
+          .trim()
+          .toLowerCase();
+
+        if (normalizedPaymentMethod === "other") {
+          const isCustomOther =
+            !!paymentMethodLabel &&
+            paymentMethodLabel !== "cash" &&
+            paymentMethodLabel !== "bank" &&
+            !paymentMethodLabel.includes("online") &&
+            !paymentMethodLabel.includes("cheque");
+
+          if (!isCustomOther) return false;
+        } else if (!paymentMethodLabel.includes(normalizedPaymentMethod)) {
+          return false;
+        }
+      }
+
       if (!searchValue) return true;
 
       return [
@@ -2833,6 +2877,7 @@ export const getReceiptDuesOverview = async (req, res) => {
         row.voucherNo,
         row.latestPayment?.receiptNo,
         row.latestPayment?.voucherNo,
+        row.paymentMethod,
       ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(searchValue));

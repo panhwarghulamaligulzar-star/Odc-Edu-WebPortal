@@ -239,6 +239,12 @@ const normalizeInstallments = ({
       : addMonths(startDate, index),
     status: item?.status || "Pending",
     paidAmount: round2(item?.paidAmount || 0),
+    paidDate: item?.paidDate ? new Date(item.paidDate) : undefined,
+    receiptNumber: (item?.receiptNumber || "").trim(),
+    voucherNo: (item?.voucherNo || "").trim(),
+    originalInstallmentNumber:
+      Number(item?.originalInstallmentNumber ?? item?.installmentNumber) ||
+      index + 1,
   }));
 
   if (preserveExactAmounts) {
@@ -247,6 +253,60 @@ const normalizeInstallments = ({
 
   const targetTotal = round2(totalAmount);
   return rebalanceInstallmentsToTarget(normalized, targetTotal);
+};
+
+const mergeInstallmentPaymentState = (existingInstallments = [], incomingInstallments = []) => {
+  const existingByOriginalNumber = new Map(
+    (Array.isArray(existingInstallments) ? existingInstallments : []).map((item) => [
+      Number(item?.originalInstallmentNumber ?? item?.installmentNumber) ||
+        Number(item?.installmentNumber),
+      item,
+    ]),
+  );
+
+  return (Array.isArray(incomingInstallments) ? incomingInstallments : []).map((item, index) => {
+    const originalNumber =
+      Number(item?.originalInstallmentNumber ?? item?.installmentNumber) ||
+      index + 1;
+    const existingItem = existingByOriginalNumber.get(originalNumber);
+
+    if (!existingItem) {
+      return {
+        ...item,
+        installmentNumber: index + 1,
+      };
+    }
+
+    const incomingPaidAmount = round2(item?.paidAmount || 0);
+    const incomingStatus = String(item?.status || "").trim();
+    const existingPaidAmount = round2(existingItem?.paidAmount || 0);
+    const existingStatus = String(existingItem?.status || "").trim();
+
+    const shouldPreserveExistingPaymentState =
+      incomingPaidAmount <= 0 &&
+      !["Paid", "Partial"].includes(incomingStatus) &&
+      (existingPaidAmount > 0 || ["Paid", "Partial"].includes(existingStatus));
+
+    return {
+      ...item,
+      installmentNumber: index + 1,
+      status: shouldPreserveExistingPaymentState
+        ? existingStatus || item?.status || "Pending"
+        : item?.status || "Pending",
+      paidAmount: shouldPreserveExistingPaymentState
+        ? existingPaidAmount
+        : incomingPaidAmount,
+      paidDate: shouldPreserveExistingPaymentState
+        ? existingItem?.paidDate || item?.paidDate
+        : item?.paidDate,
+      receiptNumber: shouldPreserveExistingPaymentState
+        ? existingItem?.receiptNumber || item?.receiptNumber || ""
+        : item?.receiptNumber || "",
+      voucherNo: shouldPreserveExistingPaymentState
+        ? existingItem?.voucherNo || item?.voucherNo || ""
+        : item?.voucherNo || "",
+    };
+  });
 };
 
 // Create enrollment for a student
@@ -759,6 +819,10 @@ export const updateEnrollmentStatus = async (req, res) => {
     if (discountPercentage !== undefined) feeStructureUpdate.discountPercentage = clamp(discountPercentage, 0, 100);
     if (discountOnCourseFee !== undefined) feeStructureUpdate.discountOnCourseFee = round2(discountOnCourseFee);
 
+    const existingFeeStructure = await FeeStructureSchema.findOne({
+      enrollment: enrollmentId,
+    }).lean();
+
     const normalizedInstallments = installments?.length
       ? normalizeInstallments({
           installments,
@@ -767,8 +831,14 @@ export const updateEnrollmentStatus = async (req, res) => {
           preserveExactAmounts: true,
         })
       : [];
-    const resolvedTotal = normalizedInstallments.length
-      ? getInstallmentsTotal(normalizedInstallments)
+    const mergedInstallments = normalizedInstallments.length
+      ? mergeInstallmentPaymentState(
+          existingFeeStructure?.installments || [],
+          normalizedInstallments,
+        ).map(({ originalInstallmentNumber, ...item }) => item)
+      : [];
+    const resolvedTotal = mergedInstallments.length
+      ? getInstallmentsTotal(mergedInstallments)
       : round2(finalFee ?? totalFee ?? 0);
     if (finalFee !== undefined || totalFee !== undefined) {
       feeStructureUpdate.totalFee = resolvedTotal;
@@ -778,10 +848,10 @@ export const updateEnrollmentStatus = async (req, res) => {
       feeStructureUpdate.numberOfInstallments = numberOfInstallments;
       feeStructureUpdate.installmentEnabled = numberOfInstallments > 1;
     }
-    if (normalizedInstallments.length > 0) {
-      feeStructureUpdate.installments = normalizedInstallments;
-      feeStructureUpdate.numberOfInstallments = normalizedInstallments.length;
-      feeStructureUpdate.installmentEnabled = normalizedInstallments.length > 1;
+    if (mergedInstallments.length > 0) {
+      feeStructureUpdate.installments = mergedInstallments;
+      feeStructureUpdate.numberOfInstallments = mergedInstallments.length;
+      feeStructureUpdate.installmentEnabled = mergedInstallments.length > 1;
       feeStructureUpdate.totalFee = resolvedTotal;
     }
 
@@ -789,8 +859,7 @@ export const updateEnrollmentStatus = async (req, res) => {
       feeStructureUpdate.systemGrantedNumber = syncedRegistrationNo;
       // Recalculate remainingAmount = totalFee - paidAmount
       if (feeStructureUpdate.totalFee !== undefined) {
-        const existingFs = await FeeStructureSchema.findOne({ enrollment: enrollmentId }).lean();
-        const paidAmount = round2(existingFs?.paidAmount || 0);
+        const paidAmount = round2(existingFeeStructure?.paidAmount || 0);
         feeStructureUpdate.remainingAmount = round2(feeStructureUpdate.totalFee - paidAmount);
       }
       await FeeStructureSchema.findOneAndUpdate(
