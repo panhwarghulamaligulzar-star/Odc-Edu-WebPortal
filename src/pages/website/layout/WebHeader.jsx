@@ -253,7 +253,7 @@ const WebHeader = () => {
 
           {/* MOBILE MENU WITH DROPDOWN FIXED */}
           {menuOpen && (
-            <ul className="lg:hidden bg-blue-600 border-t border-blue-500">
+            <ul className="lg:hidden bg-blue-600  border-t border-blue-500">
 
               {navigationLinks.map(({ id, label, href, hasDropdown }) => (
                 <li key={id} className="border-b border-blue-500">
