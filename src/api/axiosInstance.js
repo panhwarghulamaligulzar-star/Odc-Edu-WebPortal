@@ -2,17 +2,19 @@ import axios from "axios";
 import useZustandStore from "../stores/zustandStore";
 
 const getApiBaseUrl = () => {
+  // Check environment variables first (works in both DEV and PROD)
+  const envUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL;
+  
+  if (envUrl) {
+    return envUrl;
+  }
+
+  // Fallback for local development if no env URL is set
   if (import.meta.env.DEV) {
-    // Use Vite's local proxy during development so local pages call the
-    // local backend even when production env values exist in `.env`.
     return "";
   }
 
-  return (
-    import.meta.env.VITE_API_URL ||
-    import.meta.env.VITE_BACKEND_URL ||
-    window.location.origin
-  );
+  return window.location.origin;
 };
 
 const baseURL = getApiBaseUrl();
