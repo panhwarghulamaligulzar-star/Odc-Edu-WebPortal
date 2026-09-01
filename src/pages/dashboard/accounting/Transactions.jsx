@@ -511,6 +511,11 @@ const Transactions = () => {
   };
 
   useEffect(() => {
+    if (editingTxn) {
+      setSelectedPartyMeta(null);
+      return;
+    }
+
     if (!watchedFormType) {
       setSelectedPartyMeta(null);
       return;
@@ -527,12 +532,12 @@ const Transactions = () => {
     );
 
     setSelectedPartyMeta(matchedParty || null);
-  }, [watchedFormType, watchedFormName, getPartyOptionsForType]);
+  }, [editingTxn, watchedFormType, watchedFormName, getPartyOptionsForType]);
 
   useEffect(() => {
-    if (!selectedPartyMeta) return;
+    if (editingTxn || !selectedPartyMeta) return;
     applyPartySelection(selectedPartyMeta);
-  }, [selectedPartyMeta, applyPartySelection]);
+  }, [editingTxn, selectedPartyMeta, applyPartySelection]);
 
   // ── Submit ─────────────────────────────────────────────────
   const handleSubmit = async () => {

@@ -18,6 +18,19 @@ import XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
 
+const escapeRegex = (value) =>
+  String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const normalizeTextKey = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+
+const headResolverTypeCache = new Map();
+const headResolverHeadCache = new Map();
+const paymentMethodResolverCache = new Map();
+
 const getAccountingVisibilitySettings = async () => {
   const settings = await AppSettings.findOne().lean();
   return settings || { showAccountingBalancesToUsers: false };
@@ -129,7 +142,358 @@ const findHeadOfAccountByAnyId = async (headId) => {
   });
 };
 
-const serializeTransactionRecord = async (transactionDoc) => {
+const getAccountingTypeByName = async (typeName) => {
+  const normalizedTypeName = normalizeTextKey(typeName);
+  if (!normalizedTypeName) {
+    return null;
+  }
+
+  if (headResolverTypeCache.has(normalizedTypeName)) {
+    return headResolverTypeCache.get(normalizedTypeName);
+  }
+
+  const typeRecord = await AccountingType.findOne({
+    name: { $regex: new RegExp(`^${escapeRegex(typeName)}$`, "i") },
+  }).lean();
+
+  headResolverTypeCache.set(normalizedTypeName, typeRecord || null);
+  return typeRecord || null;
+};
+
+const findHeadOfAccountByTypeAndNames = async (typeName, candidateNames = []) => {
+  const accountingType = await getAccountingTypeByName(typeName);
+  if (!accountingType?._id) {
+    return null;
+  }
+
+  for (const rawName of candidateNames) {
+    const candidateName = String(rawName || "").trim();
+    if (!candidateName) {
+      continue;
+    }
+
+    const cacheKey = `${String(accountingType._id)}::${normalizeTextKey(candidateName)}`;
+    if (headResolverHeadCache.has(cacheKey)) {
+      const cachedHead = headResolverHeadCache.get(cacheKey);
+      if (cachedHead) {
+        return cachedHead;
+      }
+      continue;
+    }
+
+    const headRecord = await HeadOfAccount.findOne({
+      type: accountingType._id,
+      name: { $regex: new RegExp(`^${escapeRegex(candidateName)}$`, "i") },
+      isActive: { $ne: false },
+    }).lean();
+
+    headResolverHeadCache.set(cacheKey, headRecord || null);
+    if (headRecord) {
+      return headRecord;
+    }
+  }
+
+  return null;
+};
+
+const getSinglePositiveFeeHeadName = (feeComponents = {}) => {
+  const headCandidates = [
+    { key: "admissionFee", label: "Admission Fee" },
+    { key: "courseFee", label: "Course Fees" },
+    { key: "certificateFee", label: "Certificate Fee" },
+    { key: "examFee", label: "Exam Fee" },
+    { key: "registrationFee", label: "Registration Fee" },
+    { key: "practicalFee", label: "Practical Fee" },
+    { key: "otherFee", label: "Other Fee" },
+  ].filter((item) => Number(feeComponents?.[item.key] || 0) > 0);
+
+  return headCandidates.length === 1 ? headCandidates[0].label : null;
+};
+
+const inferIncomeHeadNameFromFeeStructure = (feeStructure, installmentNumber) => {
+  const normalizedInstallmentNumber = Number(installmentNumber || 0);
+  const targetInstallment = Array.isArray(feeStructure?.installments)
+    ? feeStructure.installments.find(
+        (item) => Number(item?.installmentNumber) === normalizedInstallmentNumber,
+      )
+    : null;
+
+  const componentHead = getSinglePositiveFeeHeadName(
+    targetInstallment?.feeComponents || {},
+  );
+  if (componentHead) {
+    return componentHead;
+  }
+
+  const description = String(targetInstallment?.description || "").toLowerCase();
+  if (description.includes("admission")) return "Admission Fee";
+  if (description.includes("certificate")) return "Certificate Fee";
+  if (description.includes("exam")) return "Exam Fee";
+  if (description.includes("registration")) return "Registration Fee";
+  if (description.includes("practical")) return "Practical Fee";
+  if (description.includes("other")) return "Other Fee";
+
+  return "Course Fees";
+};
+
+const buildLegacyHeadResolutionContext = async (transactions = []) => {
+  const transactionIds = transactions
+    .map((txn) => String(txn?._id || "").trim())
+    .filter(Boolean);
+  const billReferences = Array.from(
+    new Set(
+      transactions
+        .map((txn) => String(txn?.billReference || "").trim())
+        .filter(Boolean),
+    ),
+  );
+
+  const [feePayments, expenseHeadEntries] = await Promise.all([
+    billReferences.length
+      ? FeePayment.find({
+          $or: [
+            { receiptNo: { $in: billReferences } },
+            { voucherNo: { $in: billReferences } },
+          ],
+        })
+          .populate("feeStructure")
+          .lean()
+      : [],
+    transactionIds.length || billReferences.length
+      ? ExpenseHeadEntry.find({
+          isActive: true,
+          $or: [
+            transactionIds.length ? { transactionId: { $in: transactionIds } } : null,
+            billReferences.length ? { voucherNo: { $in: billReferences } } : null,
+          ].filter(Boolean),
+        })
+          .populate("expenseCategory", "name type")
+          .populate("paymentMethod", "name type")
+          .lean()
+      : [],
+  ]);
+
+  const feePaymentByReference = new Map();
+  feePayments.forEach((payment) => {
+    [payment?.receiptNo, payment?.voucherNo].forEach((ref) => {
+      const key = String(ref || "").trim();
+      if (key && !feePaymentByReference.has(key)) {
+        feePaymentByReference.set(key, payment);
+      }
+    });
+  });
+
+  const expenseHeadByTransactionId = new Map();
+  const expenseHeadByVoucherNo = new Map();
+  expenseHeadEntries.forEach((entry) => {
+    const resolvedHead =
+      entry?.expenseCategory?.name
+        ? {
+            _id: String(entry.expenseCategory?._id || entry.expenseCategory || ""),
+            name: entry.expenseCategory.name,
+          }
+        : null;
+
+    if (!resolvedHead?._id || !resolvedHead?.name) {
+      return;
+    }
+
+    const transactionId = String(entry?.transactionId || "").trim();
+    const voucherNo = String(entry?.voucherNo || "").trim();
+
+    if (transactionId) {
+      expenseHeadByTransactionId.set(transactionId, resolvedHead);
+    }
+    if (voucherNo) {
+      expenseHeadByVoucherNo.set(voucherNo, resolvedHead);
+    }
+  });
+
+  return {
+    feePaymentByReference,
+    expenseHeadByTransactionId,
+    expenseHeadByVoucherNo,
+    expenseEntryByTransactionId: new Map(
+      expenseHeadEntries
+        .map((entry) => [String(entry?.transactionId || "").trim(), entry])
+        .filter(([key]) => key),
+    ),
+    expenseEntryByVoucherNo: new Map(
+      expenseHeadEntries
+        .map((entry) => [String(entry?.voucherNo || "").trim(), entry])
+        .filter(([key]) => key),
+    ),
+  };
+};
+
+const resolveStoredOrLegacyTransactionHead = async (transactionDoc, context = {}) => {
+  const data =
+    typeof transactionDoc?.toObject === "function"
+      ? transactionDoc.toObject()
+      : { ...transactionDoc };
+
+  const explicitHead =
+    data?.head?.name
+      ? data.head
+      : await findHeadOfAccountByAnyId(data?.head?._id || data?.head || "");
+  if (explicitHead?._id && explicitHead?.name) {
+    return explicitHead;
+  }
+
+  const transactionId = String(data?._id || "").trim();
+  const billReference = String(data?.billReference || "").trim();
+
+  const linkedExpenseHead =
+    context.expenseHeadByTransactionId?.get(transactionId) ||
+    context.expenseHeadByVoucherNo?.get(billReference) ||
+    null;
+  if (linkedExpenseHead?._id && linkedExpenseHead?.name) {
+    return linkedExpenseHead;
+  }
+
+  const linkedFeePayment = context.feePaymentByReference?.get(billReference) || null;
+  const typeName = String(data?.type?.name || data?.typeName || "").trim();
+  if (linkedFeePayment && typeName.toLowerCase() === "income") {
+    const preferredHeadName = inferIncomeHeadNameFromFeeStructure(
+      linkedFeePayment?.feeStructure,
+      linkedFeePayment?.installmentNumber,
+    );
+    const feeHead = await findHeadOfAccountByTypeAndNames("Income", [
+      preferredHeadName,
+      "Course Fees",
+    ]);
+    if (feeHead?._id && feeHead?.name) {
+      return feeHead;
+    }
+  }
+
+  const searchText = normalizeTextKey(
+    [data?.name, data?.details, data?.billReference].filter(Boolean).join(" "),
+  );
+
+  if (typeName.toLowerCase() === "expense") {
+    if (searchText.includes("salary") || searchText.includes("payroll")) {
+      const salaryHead = await findHeadOfAccountByTypeAndNames("Expense", [
+        "Teacher Salary",
+        "Salary",
+      ]);
+      if (salaryHead?._id && salaryHead?.name) {
+        return salaryHead;
+      }
+    }
+
+    if (searchText.includes("fee refund") || searchText.includes("refund")) {
+      const refundHead = await findHeadOfAccountByTypeAndNames("Expense", [
+        "Fees Refund",
+        "Fee Refund",
+      ]);
+      if (refundHead?._id && refundHead?.name) {
+        return refundHead;
+      }
+    }
+  }
+
+  return null;
+};
+
+const repairTransactionHeadIfNeeded = async (transactionDoc, resolvedHead) => {
+  const transactionId = String(transactionDoc?._id || "").trim();
+  if (!transactionId || !resolvedHead?._id) {
+    return;
+  }
+
+  const currentHeadValue = String(
+    transactionDoc?.head?._id || transactionDoc?.head || "",
+  ).trim();
+  if (currentHeadValue === String(resolvedHead._id)) {
+    return;
+  }
+
+  await AccountingTransaction.updateOne(
+    { _id: transactionId },
+    { $set: { head: String(resolvedHead._id) } },
+  );
+};
+
+const resolveStoredOrLegacyTransactionPaymentMethod = async (
+  transactionDoc,
+  context = {},
+) => {
+  const data =
+    typeof transactionDoc?.toObject === "function"
+      ? transactionDoc.toObject()
+      : { ...transactionDoc };
+
+  const explicitPaymentMethod =
+    data?.paymentMethod?.name
+      ? data.paymentMethod
+      : await findPaymentMethodByAnyId(
+          data?.paymentMethod?._id || data?.paymentMethod || "",
+        );
+  if (explicitPaymentMethod?._id && explicitPaymentMethod?.name) {
+    return explicitPaymentMethod;
+  }
+
+  const transactionId = String(data?._id || "").trim();
+  const billReference = String(data?.billReference || "").trim();
+  const linkedFeePayment = context.feePaymentByReference?.get(billReference) || null;
+  const linkedExpenseEntry =
+    context.expenseEntryByTransactionId?.get(transactionId) ||
+    context.expenseEntryByVoucherNo?.get(billReference) ||
+    null;
+
+  const paymentMethodCandidates = [
+    linkedExpenseEntry?.paymentMethod?._id,
+    linkedExpenseEntry?.paymentMethod,
+    linkedFeePayment?.accountingPaymentMethodId,
+    linkedFeePayment?.paymentMethod,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  for (const candidate of paymentMethodCandidates) {
+    const cacheKey = normalizeTextKey(candidate);
+    if (paymentMethodResolverCache.has(cacheKey)) {
+      const cachedMethod = paymentMethodResolverCache.get(cacheKey);
+      if (cachedMethod) {
+        return cachedMethod;
+      }
+      continue;
+    }
+
+    const resolvedMethod = await findPaymentMethodByAnyId(candidate);
+    paymentMethodResolverCache.set(cacheKey, resolvedMethod || null);
+    if (resolvedMethod?._id && resolvedMethod?.name) {
+      return resolvedMethod;
+    }
+  }
+
+  return null;
+};
+
+const repairTransactionPaymentMethodIfNeeded = async (
+  transactionDoc,
+  resolvedPaymentMethod,
+) => {
+  const transactionId = String(transactionDoc?._id || "").trim();
+  if (!transactionId || !resolvedPaymentMethod?._id) {
+    return;
+  }
+
+  const currentMethodValue = String(
+    transactionDoc?.paymentMethod?._id || transactionDoc?.paymentMethod || "",
+  ).trim();
+  if (currentMethodValue === String(resolvedPaymentMethod._id)) {
+    return;
+  }
+
+  await AccountingTransaction.updateOne(
+    { _id: transactionId },
+    { $set: { paymentMethod: String(resolvedPaymentMethod._id) } },
+  );
+};
+
+const serializeTransactionRecord = async (transactionDoc, context = {}) => {
   const data =
     typeof transactionDoc?.toObject === "function"
       ? transactionDoc.toObject()
@@ -139,16 +503,24 @@ const serializeTransactionRecord = async (transactionDoc) => {
     data?.type?.name
       ? data.type
       : await findAccountingTypeByAnyId(data?.type?._id || data?.type || "");
-  const resolvedHead =
-    data?.head?.name
-      ? data.head
-      : await findHeadOfAccountByAnyId(data?.head?._id || data?.head || "");
-  const resolvedPaymentMethod =
-    data?.paymentMethod?.name
-      ? data.paymentMethod
-      : await findPaymentMethodByAnyId(
-          data?.paymentMethod?._id || data?.paymentMethod || "",
-        );
+  const resolvedHead = await resolveStoredOrLegacyTransactionHead(
+    {
+      ...data,
+      typeName: resolvedType?.name || "",
+    },
+    context,
+  );
+  const resolvedPaymentMethod = await resolveStoredOrLegacyTransactionPaymentMethod(
+    data,
+    context,
+  );
+
+  if (context.repairResolvedHead !== false && resolvedHead?._id) {
+    await repairTransactionHeadIfNeeded(data, resolvedHead);
+  }
+  if (context.repairResolvedPaymentMethod !== false && resolvedPaymentMethod?._id) {
+    await repairTransactionPaymentMethodIfNeeded(data, resolvedPaymentMethod);
+  }
 
   return {
     ...data,
@@ -169,7 +541,7 @@ const serializeTransactionRecord = async (transactionDoc) => {
           _id: resolvedHead._id,
           name: resolvedHead.name,
         }
-      : data?.head || null,
+      : null,
     paymentMethod: resolvedPaymentMethod
       ? {
           _id: resolvedPaymentMethod._id,
@@ -3734,11 +4106,6 @@ export const getProfitLoss = async (req, res) => {
       };
     }
 
-    const [incomeType, expenseType] = await Promise.all([
-      AccountingType.findOne({ name: "Income" }),
-      AccountingType.findOne({ name: "Expense" }),
-    ]);
-
     const feePaymentFilter = {};
     if (matchFilter.paymentDate) {
       feePaymentFilter.paymentDate = matchFilter.paymentDate;
@@ -3761,16 +4128,14 @@ export const getProfitLoss = async (req, res) => {
       payrollRecords,
       courses,
       availableYearsAgg,
-      allHeads,
     ] = await Promise.all([
       AccountingTransaction.find(matchFilter)
         .populate("type", "name")
-        .populate("head", "name")
-        .populate("paymentMethod", "name type")
         .sort({ paymentDate: -1, createdAt: -1 })
         .limit(5000),
       FeePayment.find(feePaymentFilter)
         .populate("course", "courseName courseId")
+        .populate("feeStructure")
         .lean(),
       TeacherPayroll.find(payrollFilter)
         .populate({
@@ -3796,32 +4161,9 @@ export const getProfitLoss = async (req, res) => {
         },
         { $sort: { _id: -1 } },
       ]),
-      HeadOfAccount.find({}).populate("type", "name").lean(),
     ]);
 
-    const transactionIds = transactions
-      .map((txn) => String(txn?._id || "").trim())
-      .filter(Boolean);
-    const transactionBillReferences = transactions
-      .map((txn) => String(txn?.billReference || "").trim())
-      .filter(Boolean);
-
-    const linkedExpenseEntries =
-      transactionIds.length || transactionBillReferences.length
-        ? await ExpenseHeadEntry.find({
-            isActive: true,
-            $or: [
-              transactionIds.length
-                ? { transactionId: { $in: transactionIds } }
-                : null,
-              transactionBillReferences.length
-                ? { voucherNo: { $in: transactionBillReferences } }
-                : null,
-            ].filter(Boolean),
-          })
-            .populate("expenseCategory", "name")
-            .lean()
-        : [];
+    const legacyHeadContext = await buildLegacyHeadResolutionContext(transactions);
 
     const normalizeKey = (value) =>
       String(value || "")
@@ -3829,57 +4171,13 @@ export const getProfitLoss = async (req, res) => {
         .toLowerCase()
         .replace(/\s+/g, " ");
 
-    const normalizeAlpha = (value) =>
-      normalizeKey(value).replace(/[^a-z0-9\s]/g, " ");
-
-    const buildSearchText = (...values) =>
-      normalizeAlpha(
-        values
-          .map((value) => String(value || "").trim())
-          .filter(Boolean)
-          .join(" "),
-      )
-        .replace(/\s+/g, " ")
-        .trim();
-
-    const headTypeNameById = new Map();
-    [incomeType, expenseType].forEach((typeRecord) => {
-      if (typeRecord?._id) {
-        headTypeNameById.set(String(typeRecord._id), typeRecord.name);
-      }
-    });
-
-    const headsByTypeName = new Map();
-    allHeads.forEach((head) => {
-      const typeName =
-        head?.type?.name ||
-        headTypeNameById.get(String(head?.type?._id || head?.type || "")) ||
-        "";
-      if (!typeName) {
-        return;
-      }
-
-      const bucket = headsByTypeName.get(typeName) || [];
-      bucket.push({
-        _id: String(head?._id || ""),
-        name: head?.name || "",
-        isActive: head?.isActive !== false,
-        normalizedName: normalizeAlpha(head?.name || ""),
-      });
-      headsByTypeName.set(typeName, bucket);
-    });
-
     const coursesByName = new Map();
-    const coursesById = new Map();
     courses.forEach((course) => {
       const record = {
         _id: String(course?._id || ""),
         courseName: course?.courseName || "",
         courseId: course?.courseId || "",
       };
-      if (record._id) {
-        coursesById.set(record._id, record);
-      }
       if (record.courseName) {
         coursesByName.set(normalizeKey(record.courseName), record);
       }
@@ -3937,182 +4235,6 @@ export const getProfitLoss = async (req, res) => {
       });
     });
 
-    const expenseHeadByTransactionId = new Map();
-    const expenseHeadByVoucherNo = new Map();
-    linkedExpenseEntries.forEach((entry) => {
-      const resolvedExpenseHead =
-        entry?.expenseCategory?.name
-          ? {
-              _id: String(
-                entry?.expenseCategory?._id || entry?.expenseCategory || "",
-              ),
-              name: entry.expenseCategory.name,
-            }
-          : null;
-
-      if (!resolvedExpenseHead?.name) {
-        return;
-      }
-
-      const transactionId = String(entry?.transactionId || "").trim();
-      const voucherNo = String(entry?.voucherNo || "").trim();
-
-      if (transactionId) {
-        expenseHeadByTransactionId.set(transactionId, resolvedExpenseHead);
-      }
-      if (voucherNo) {
-        expenseHeadByVoucherNo.set(voucherNo, resolvedExpenseHead);
-      }
-    });
-
-    const resolvedHeadCache = new Map();
-    const resolveHeadSnapshot = async (...candidates) => {
-      for (const candidate of candidates) {
-        const candidateValue =
-          candidate && typeof candidate === "object"
-            ? candidate?._id || candidate?.name || ""
-            : candidate;
-        const cacheKey = String(candidateValue || "").trim();
-        if (!cacheKey) {
-          continue;
-        }
-
-        if (resolvedHeadCache.has(cacheKey)) {
-          const cachedHead = resolvedHeadCache.get(cacheKey);
-          if (cachedHead) {
-            return cachedHead;
-          }
-          continue;
-        }
-
-        let resolvedHead = null;
-        if (candidate?.name) {
-          resolvedHead = {
-            _id: String(candidate?._id || ""),
-            name: candidate.name,
-          };
-        } else {
-          const headDoc = await findHeadOfAccountByAnyId(candidate);
-          resolvedHead = headDoc
-            ? {
-                _id: String(headDoc?._id || ""),
-                name: headDoc?.name || "",
-              }
-            : null;
-        }
-
-        resolvedHeadCache.set(cacheKey, resolvedHead);
-        if (resolvedHead) {
-          return resolvedHead;
-        }
-      }
-
-      return null;
-    };
-
-    const getTypedHeads = (typeName) => headsByTypeName.get(typeName) || [];
-
-    const findHeadByName = (typeName, ...names) => {
-      const typedHeads = getTypedHeads(typeName);
-      for (const name of names) {
-        const normalizedName = normalizeAlpha(name);
-        if (!normalizedName) continue;
-
-        const matchedHead = typedHeads.find(
-          (head) => head.normalizedName === normalizedName,
-        );
-        if (matchedHead) {
-          return matchedHead;
-        }
-      }
-      return null;
-    };
-
-    const findHeadBySearchText = (typeName, searchText) => {
-      const typedHeads = getTypedHeads(typeName)
-        .filter((head) => head.normalizedName)
-        .sort((a, b) => b.normalizedName.length - a.normalizedName.length);
-
-      return (
-        typedHeads.find((head) => searchText.includes(head.normalizedName)) || null
-      );
-    };
-
-    const inferHeadFromTransaction = ({
-      txn,
-      typeName,
-      linkedExpenseHead,
-      explicitHead,
-    }) => {
-      if (explicitHead?.name) {
-        return explicitHead;
-      }
-
-      if (linkedExpenseHead?.name) {
-        return linkedExpenseHead;
-      }
-
-      const searchText = buildSearchText(
-        txn?.name,
-        txn?.details,
-        txn?.billReference,
-      );
-
-      if (!searchText) {
-        return null;
-      }
-
-      if (typeName === "Income") {
-        const installmentHead = findHeadByName(
-          "Income",
-          "Installment",
-          "Installments",
-          "instamint",
-          "instalment",
-        );
-        const admissionHead = findHeadByName("Income", "Admission Fee");
-        const booksHead = findHeadByName("Income", "Books Fee");
-        const certificateHead = findHeadByName("Income", "Certificate Fee");
-        const examHead = findHeadByName("Income", "Exam Fee");
-        const courseFeesHead = findHeadByName("Income", "Course Fees", "Course Fee");
-
-        if (searchText.includes("admission")) return admissionHead || null;
-        if (searchText.includes("book")) return booksHead || null;
-        if (searchText.includes("certificate")) return certificateHead || null;
-        if (searchText.includes("exam")) return examHead || null;
-        if (
-          searchText.includes("installment") ||
-          searchText.includes("inst ") ||
-          searchText.includes("inst #")
-        ) {
-          return installmentHead || courseFeesHead || null;
-        }
-
-        return (
-          findHeadBySearchText("Income", searchText) || courseFeesHead || null
-        );
-      }
-
-      if (typeName === "Expense") {
-        const salaryHead = findHeadByName(
-          "Expense",
-          "Salary",
-          "Salaries Expenses",
-        );
-        if (
-          searchText.includes("salary") ||
-          searchText.includes("payroll") ||
-          searchText.includes("wages")
-        ) {
-          return salaryHead || null;
-        }
-
-        return findHeadBySearchText("Expense", searchText);
-      }
-
-      return findHeadBySearchText(typeName, searchText);
-    };
-
     const getDetailsCourseRecord = (details = "") => {
       const courseLine = String(details || "").match(/^Course\s*:\s*(.+)$/im);
       const rawCourseValue = String(courseLine?.[1] || "").trim();
@@ -4135,24 +4257,32 @@ export const getProfitLoss = async (req, res) => {
         String(txn?._id || ""),
       );
       const detailsCourse = getDetailsCourseRecord(txn?.details);
-      const linkedExpenseHead =
-        expenseHeadByTransactionId.get(String(txn?._id || "").trim()) ||
-        expenseHeadByVoucherNo.get(billRef) ||
-        null;
-      const explicitHead = await resolveHeadSnapshot(
-        txn?.head?._id,
-        txn?.head,
-        linkedExpenseHead?._id,
-        linkedExpenseHead?.name,
+      const resolvedHeadDoc = await resolveStoredOrLegacyTransactionHead(
+        {
+          ...txn.toObject(),
+          typeName: txn?.type?.name || "",
+        },
+        legacyHeadContext,
       );
-      const typeName = txn?.type?.name || "";
-      const inferredHead = inferHeadFromTransaction({
+      const resolvedPaymentMethodDoc = await resolveStoredOrLegacyTransactionPaymentMethod(
         txn,
-        typeName,
-        linkedExpenseHead,
-        explicitHead,
-      });
-      const resolvedHead = explicitHead || inferredHead || null;
+        legacyHeadContext,
+      );
+      if (resolvedHeadDoc?._id) {
+        await repairTransactionHeadIfNeeded(txn, resolvedHeadDoc);
+      }
+      if (resolvedPaymentMethodDoc?._id) {
+        await repairTransactionPaymentMethodIfNeeded(txn, resolvedPaymentMethodDoc);
+      }
+      const resolvedHead = resolvedHeadDoc
+        ? {
+            _id: String(resolvedHeadDoc?._id || ""),
+            name: resolvedHeadDoc?.name || "",
+          }
+        : {
+        _id: "unassigned",
+        name: "Unassigned",
+      };
 
       const derivedCourses = feeCourse
         ? [feeCourse]
@@ -4172,16 +4302,14 @@ export const getProfitLoss = async (req, res) => {
         paymentDate: txn.paymentDate,
         createdAt: txn.createdAt,
         type: txn.type,
-        head:
-          resolvedHead ||
-          linkedExpenseHead ||
-          (txn?.head?.name
-            ? {
-                _id: String(txn?.head?._id || ""),
-                name: txn.head.name,
-              }
-            : null),
-        paymentMethod: txn.paymentMethod,
+        head: resolvedHead,
+        paymentMethod: resolvedPaymentMethodDoc
+          ? {
+              _id: String(resolvedPaymentMethodDoc?._id || ""),
+              name: resolvedPaymentMethodDoc?.name || "",
+              type: resolvedPaymentMethodDoc?.type || "",
+            }
+          : null,
         courseIds: derivedCourses.map((course) => String(course?._id || "")).filter(Boolean),
         courseNames: derivedCourses
           .map((course) => course?.courseName || course?.courseId || "")
@@ -4210,15 +4338,17 @@ export const getProfitLoss = async (req, res) => {
     const buildBreakdown = (rows = []) =>
       Array.from(
         rows.reduce((acc, row) => {
-          const headName = row?.head?.name || "Unknown";
-          const existing = acc.get(headName) || {
+          const headId = String(row?.head?._id || "unassigned");
+          const headName = row?.head?.name || "Unassigned";
+          const existing = acc.get(headId) || {
+            key: headId,
             headName,
             total: 0,
             count: 0,
           };
           existing.total += Number(row?.amount || 0);
           existing.count += 1;
-          acc.set(headName, existing);
+          acc.set(headId, existing);
           return acc;
         }, new Map()).values(),
       ).sort((a, b) => b.total - a.total);
@@ -4390,8 +4520,6 @@ export const getTransactions = async (req, res) => {
     const [transactions, total] = await Promise.all([
       AccountingTransaction.find(filter)
         .populate("type", "name")
-        .populate("head", "name")
-        .populate("paymentMethod", "name type")
         .populate("createdBy", "name email")
         .sort({ createdAt: -1, paymentDate: -1 })
         .skip(skip)
@@ -4399,8 +4527,14 @@ export const getTransactions = async (req, res) => {
       AccountingTransaction.countDocuments(filter),
     ]);
 
+    const legacyHeadContext = await buildLegacyHeadResolutionContext(transactions);
+
     const [serializedTransactions, partyNames] = await Promise.all([
-      Promise.all(transactions.map(serializeTransactionRecord)),
+      Promise.all(
+        transactions.map((transaction) =>
+          serializeTransactionRecord(transaction, legacyHeadContext),
+        ),
+      ),
       getSharedPartyNames(),
     ]);
 
@@ -4421,8 +4555,6 @@ export const getTransactionById = async (req, res) => {
   try {
     const txn = await AccountingTransaction.findById(req.params.id)
       .populate("type", "name")
-      .populate("head", "name")
-      .populate("paymentMethod", "name type currentBalance")
       .populate("createdBy", "name email");
 
     if (!txn)
@@ -4430,9 +4562,11 @@ export const getTransactionById = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Transaction not found" });
 
+    const legacyHeadContext = await buildLegacyHeadResolutionContext([txn]);
+
     res.status(200).json({
       success: true,
-      data: await serializeTransactionRecord(txn),
+      data: await serializeTransactionRecord(txn, legacyHeadContext),
     });
   } catch (error) {
     console.error("Error fetching transaction:", error);
@@ -4505,15 +4639,13 @@ export const createTransaction = async (req, res) => {
 
     await txn.save();
     await adjustBalance(method._id, Number(amount), direction);
-    await txn.populate([
-      "type",
-      "head",
-      { path: "paymentMethod", select: "name type" },
-    ]);
+    await txn.populate("type", "name");
+
+    const legacyHeadContext = await buildLegacyHeadResolutionContext([txn]);
 
     res.status(201).json({
       success: true,
-      data: await serializeTransactionRecord(txn),
+      data: await serializeTransactionRecord(txn, legacyHeadContext),
       message: "Transaction created successfully",
     });
   } catch (error) {
@@ -4596,15 +4728,13 @@ export const updateTransaction = async (req, res) => {
     const newDirection = newType?.name === "Income" ? 1 : -1;
     await adjustBalance(txn.paymentMethod, txn.amount, newDirection);
 
-    await txn.populate([
-      "type",
-      "head",
-      { path: "paymentMethod", select: "name type" },
-    ]);
+    await txn.populate("type", "name");
+
+    const legacyHeadContext = await buildLegacyHeadResolutionContext([txn]);
 
     res.status(200).json({
       success: true,
-      data: await serializeTransactionRecord(txn),
+      data: await serializeTransactionRecord(txn, legacyHeadContext),
       message: "Transaction updated successfully",
     });
   } catch (error) {
