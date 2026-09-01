@@ -689,6 +689,79 @@ const inferPreferredIncomeHeadName = (feeStructure, installmentNumber) => {
   return "Course Fees";
 };
 
+const buildIncomeHeadBreakdown = (feeStructure, installmentNumber, paidAmount) => {
+  const normalizedPaidAmount = round2(paidAmount);
+  const normalizedInstallmentNumber = Number(installmentNumber || 0);
+  const targetInstallment = Array.isArray(feeStructure?.installments)
+    ? feeStructure.installments.find(
+        (item) => Number(item?.installmentNumber) === normalizedInstallmentNumber,
+      )
+    : null;
+
+  const feeComponents = targetInstallment?.feeComponents || {};
+  const componentRows = [
+    { key: "admissionFee", headName: "Admission Fee" },
+    { key: "courseFee", headName: "Course Fees" },
+    { key: "certificateFee", headName: "Certificate Fee" },
+    { key: "examFee", headName: "Exam Fee" },
+    { key: "registrationFee", headName: "Registration Fee" },
+    { key: "practicalFee", headName: "Practical Fee" },
+    { key: "otherFee", headName: "Other Fee" },
+  ]
+    .map((item) => ({
+      ...item,
+      componentAmount: round2(feeComponents?.[item.key] || 0),
+    }))
+    .filter((item) => item.componentAmount > 0);
+
+  if (!componentRows.length) {
+    return [
+      {
+        headName: inferPreferredIncomeHeadName(feeStructure, installmentNumber),
+        amount: normalizedPaidAmount,
+      },
+    ];
+  }
+
+  if (componentRows.length === 1) {
+    return [
+      {
+        headName: componentRows[0].headName,
+        amount: normalizedPaidAmount,
+      },
+    ];
+  }
+
+  const totalComponentAmount = round2(
+    componentRows.reduce((sum, item) => sum + item.componentAmount, 0),
+  );
+  if (totalComponentAmount <= 0) {
+    return [
+      {
+        headName: inferPreferredIncomeHeadName(feeStructure, installmentNumber),
+        amount: normalizedPaidAmount,
+      },
+    ];
+  }
+
+  let allocatedAmount = 0;
+  return componentRows.map((item, index) => {
+    const isLast = index === componentRows.length - 1;
+    const amountForHead = isLast
+      ? round2(normalizedPaidAmount - allocatedAmount)
+      : round2((normalizedPaidAmount * item.componentAmount) / totalComponentAmount);
+
+    allocatedAmount = round2(allocatedAmount + amountForHead);
+
+    return {
+      headName: item.headName,
+      amount: Math.max(0, amountForHead),
+      labelSuffix: item.headName,
+      detailsSuffix: item.headName,
+    };
+  });
+};
+
 // Record a fee payment
 export const recordFeePayment = async (req, res) => {
   try {
@@ -843,6 +916,11 @@ export const recordFeePayment = async (req, res) => {
       preferredHeadName: inferPreferredIncomeHeadName(
         feeStructure,
         installmentNumber,
+      ),
+      entryBreakdown: buildIncomeHeadBreakdown(
+        feeStructure,
+        installmentNumber,
+        normalizedAmount,
       ),
       amount: normalizedAmount,
       paymentDate: resolvedPaymentDate,
