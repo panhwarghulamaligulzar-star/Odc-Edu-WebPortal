@@ -4150,6 +4150,17 @@ export const getProfitLoss = async (req, res) => {
       CourseSchema.find({}, { courseName: 1, courseId: 1 }).lean(),
       AccountingTransaction.aggregate([
         {
+          $addFields: {
+            paymentDate: {
+              $cond: [
+                { $eq: [{ $type: "$paymentDate" }, "string"] },
+                { $dateFromString: { dateString: "$paymentDate" } },
+                "$paymentDate"
+              ]
+            }
+          }
+        },
+        {
           $project: {
             year: { $year: "$paymentDate" },
           },
@@ -4408,8 +4419,12 @@ export const getProfitLoss = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Error fetching profit/loss:", error);
-    res.status(500).json({ success: false, message: "Internal server error" });
+    console.error("Error fetching profit/loss:", error.message, error.stack);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal server error",
+      error: error.message 
+    });
   }
 };
 
