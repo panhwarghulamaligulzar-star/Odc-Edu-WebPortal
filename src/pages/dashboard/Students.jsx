@@ -180,6 +180,24 @@ const getIdCardDisplayEnrollment = (student, preferredCourseId = "all") => {
   })[0];
 };
 
+const getIdCardCourseIds = (student, preferredCourseId = "all") => {
+  const activeEnrollments = getActiveEnrollments(student);
+
+  const filteredEnrollments =
+    preferredCourseId !== "all"
+      ? activeEnrollments.filter(
+          (enrollment) =>
+            String(enrollment?.course?._id || "") === String(preferredCourseId),
+        )
+      : activeEnrollments;
+
+  const courseIds = filteredEnrollments
+    .map((enrollment) => String(enrollment?.course?.courseId || "").trim())
+    .filter(Boolean);
+
+  return courseIds.length ? Array.from(new Set(courseIds)).join(", ") : "N/A";
+};
+
 const getStudentCardAddress = (student) => {
   const addressParts = [
     student?.address,
@@ -891,10 +909,7 @@ const Students = () => {
 
   const renderStudentIdFront = (student, preferredCourseId = "all") => {
     const displayEnrollment = getIdCardDisplayEnrollment(student, preferredCourseId);
-    const courseName =
-      displayEnrollment?.course?.courseName ||
-      student?.lastClassAttended ||
-      "Student";
+    const courseIds = getIdCardCourseIds(student, preferredCourseId);
     const studentCode = student?.registrationNo || "N/A";
     const cnicNumber = student?.cnicOrBForm || "N/A";
     const address = getStudentCardAddress(student);
@@ -952,8 +967,8 @@ const Students = () => {
             <strong>{guardianName}</strong>
           </div>
           <div className="bulk-id-detail-row">
-            <span>CLASS</span>
-            <strong>{courseName}</strong>
+            <span>COURSE ID</span>
+            <strong>{courseIds}</strong>
           </div>
           <div className="bulk-id-detail-row">
             <span>CNIC / B-FORM</span>
