@@ -65,7 +65,7 @@ import {
 import api from "../../api/axiosInstance";
 import dayjs from "dayjs";
 import jsPDF from "jspdf";
-import "jspdf-autotable";
+import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 import { MdPeople } from "react-icons/md";
 import academyConfig from "../../config/academyConfig";
@@ -178,6 +178,24 @@ const getIdCardDisplayEnrollment = (student, preferredCourseId = "all") => {
       dayjs(getEnrollmentStartDate(b)).valueOf()
     );
   })[0];
+};
+
+const getIdCardCourseIds = (student, preferredCourseId = "all") => {
+  const activeEnrollments = getActiveEnrollments(student);
+
+  const filteredEnrollments =
+    preferredCourseId !== "all"
+      ? activeEnrollments.filter(
+          (enrollment) =>
+            String(enrollment?.course?._id || "") === String(preferredCourseId),
+        )
+      : activeEnrollments;
+
+  const courseIds = filteredEnrollments
+    .map((enrollment) => String(enrollment?.course?.courseId || "").trim())
+    .filter(Boolean);
+
+  return courseIds.length ? Array.from(new Set(courseIds)).join(", ") : "N/A";
 };
 
 const getStudentCardAddress = (student) => {
@@ -891,10 +909,7 @@ const Students = () => {
 
   const renderStudentIdFront = (student, preferredCourseId = "all") => {
     const displayEnrollment = getIdCardDisplayEnrollment(student, preferredCourseId);
-    const courseName =
-      displayEnrollment?.course?.courseName ||
-      student?.lastClassAttended ||
-      "Student";
+    const courseIds = getIdCardCourseIds(student, preferredCourseId);
     const studentCode = student?.registrationNo || "N/A";
     const cnicNumber = student?.cnicOrBForm || "N/A";
     const address = getStudentCardAddress(student);
@@ -952,8 +967,8 @@ const Students = () => {
             <strong>{guardianName}</strong>
           </div>
           <div className="bulk-id-detail-row">
-            <span>CLASS</span>
-            <strong>{courseName}</strong>
+            <span>COURSE ID</span>
+            <strong>{courseIds}</strong>
           </div>
           <div className="bulk-id-detail-row">
             <span>CNIC / B-FORM</span>
@@ -2004,6 +2019,73 @@ const Students = () => {
           }
 
           y += 26;
+
+          const feeStructure = enr.feeStructure || {};
+          const feeSummaryFields = [
+            ["Batch", enr.batch?.batchName || "N/A"],
+            ["Batch Shift", enr.batch?.shift || "N/A"],
+            ["Enrollment Status", enr.status || "N/A"],
+            ["Payment Plan", feeStructure.paymentPlanType || "N/A"],
+            ["Total Fee", `PKR ${Number(feeStructure.totalFee || 0).toLocaleString("en-PK")}`],
+            ["Paid Amount", `PKR ${Number(feeStructure.paidAmount || 0).toLocaleString("en-PK")}`],
+            ["Remaining", `PKR ${Number(feeStructure.remainingAmount || 0).toLocaleString("en-PK")}`],
+            ["Discount", `PKR ${Number(feeStructure.discount || feeStructure.discountOnCourseFee || 0).toLocaleString("en-PK")}`],
+          ];
+
+          y = drawFields(doc, feeSummaryFields, margin + 6, y - 2, colW - 12);
+
+          const installments = Array.isArray(feeStructure.installments)
+            ? feeStructure.installments
+            : [];
+
+          if (installments.length) {
+            if (y > pageH - 60) { doc.addPage(); y = 20; }
+            y = drawSectionHeading(
+              doc,
+              `Installments - ${enr.course?.courseName || `Course ${idx + 1}`}`,
+              margin,
+              y,
+              colW,
+            );
+
+            const installmentRows = installments.map((item) => [
+              String(item.installmentNumber || "-"),
+              item.description || "-",
+              item.dueDate ? dayjs(item.dueDate).format("DD MMM YYYY") : "-",
+              `PKR ${Number(item.amount || 0).toLocaleString("en-PK")}`,
+              item.status || "Pending",
+            ]);
+
+            autoTable(doc, {
+              startY: y,
+              margin: { left: margin, right: margin },
+              head: [["#", "Description", "Due Date", "Amount", "Status"]],
+              body: installmentRows,
+              theme: "grid",
+              styles: {
+                fontSize: 7.5,
+                cellPadding: 2.2,
+                textColor: PDF_COLORS.dark,
+              },
+              headStyles: {
+                fillColor: PDF_COLORS.headerBg,
+                textColor: PDF_COLORS.white,
+                fontStyle: "bold",
+              },
+              alternateRowStyles: {
+                fillColor: PDF_COLORS.rowAlt,
+              },
+              columnStyles: {
+                0: { cellWidth: 12 },
+                1: { cellWidth: 78 },
+                2: { cellWidth: 28 },
+                3: { cellWidth: 28, halign: "right" },
+                4: { cellWidth: 24, halign: "center" },
+              },
+            });
+
+            y = doc.lastAutoTable.finalY + 6;
+          }
         });
       }
 
@@ -3453,6 +3535,22 @@ const Students = () => {
                             size="small"
                           />
                         </Tooltip>
+                        {permissions.print && (
+                          <Tooltip title="Download Student PDF">
+                            <Button
+                              icon={<FaFileDownload />}
+                              onClick={() => downloadStudentPDF(record)}
+                              style={{
+                                borderColor: "#BFDBFE",
+                                color: "#1D4ED8",
+                                background: "#EFF6FF",
+                                borderRadius: "8px",
+                                fontWeight: 600,
+                              }}
+                              size="small"
+                            />
+                          </Tooltip>
+                        )}
                         {showStatusAction && (
                           <Tooltip title="Change Student Status">
                             <Button
