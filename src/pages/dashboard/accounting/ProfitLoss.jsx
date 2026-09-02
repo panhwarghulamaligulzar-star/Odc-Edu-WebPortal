@@ -51,17 +51,14 @@ const MONTH_OPTIONS = [
   { value: 12, label: "December" },
 ];
 
-const DEFAULT_YEAR = dayjs().year();
-const DEFAULT_MONTH = dayjs().month() + 1;
-
 const ProfitLoss = () => {
   const [loading, setLoading] = useState(false);
   const [bootLoading, setBootLoading] = useState(true);
   const [data, setData] = useState(null);
   const [courses, setCourses] = useState([]);
   const [heads, setHeads] = useState([]);
-  const [selectedYear, setSelectedYear] = useState(DEFAULT_YEAR);
-  const [selectedMonth, setSelectedMonth] = useState(DEFAULT_MONTH);
+  const [selectedYear, setSelectedYear] = useState("all");
+  const [selectedMonth, setSelectedMonth] = useState("all");
   const [selectedCourse, setSelectedCourse] = useState("all");
   const [selectedIncomeHeadKey, setSelectedIncomeHeadKey] = useState(null);
   const [selectedExpenseHeadKey, setSelectedExpenseHeadKey] = useState(null);
@@ -151,7 +148,7 @@ const ProfitLoss = () => {
       if (id) {
         lookup.set(id, {
           _id: id,
-          name: name || "Unassigned",
+          name: name || "Unassigned Head",
         });
       }
 
@@ -186,12 +183,12 @@ const ProfitLoss = () => {
 
     return {
       _id: "unassigned",
-      name: "Unassigned",
+      name: "Unassigned Head",
     };
   };
 
   const getHeadKey = (record) => String(resolveHead(record)?._id || "unassigned");
-  const getHeadLabel = (record) => String(resolveHead(record)?.name || "Unassigned");
+  const getHeadLabel = (record) => String(resolveHead(record)?.name || "Unassigned Head");
 
   const incomeHeadRows = useMemo(() => {
     const groups = incomeEntries.reduce((acc, entry) => {

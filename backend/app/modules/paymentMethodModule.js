@@ -10,7 +10,7 @@ const PaymentMethodSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ["cash", "bank", "other"],
+      enum: ["cash", "bank"],
       default: "bank",
     },
     bankDetails: {

@@ -115,27 +115,13 @@ const getFeeComponentKey = (feeType) => {
   return "otherFee";
 };
 
-const getInstallmentMetaSnapshot = (installment = {}, fallbackNumber = 1) => ({
-  originalInstallmentNumber:
-    Number(
-      installment?.originalInstallmentNumber ?? installment?.installmentNumber,
-    ) || fallbackNumber,
-  status: installment?.status || "Pending",
-  paidAmount: round2(installment?.paidAmount || 0),
-  paidDate: installment?.paidDate ? dayjs(installment.paidDate) : null,
-  receiptNumber: installment?.receiptNumber || "",
-  voucherNo: installment?.voucherNo || "",
-});
-
 const buildInstallments = (
   count,
   feeConfig,
   startDate,
   existing = [],
   additionalFees = [],
-  options = {},
 ) => {
-  const { forceRecalculateDates = false } = options;
   const safeCount = Math.max(1, Math.min(24, Number(count) || 1));
   const effectiveCourseFee = round2(
     feeConfig.discountedCourseFee ?? feeConfig.courseFee,
@@ -159,14 +145,9 @@ const buildInstallments = (
         feeComponents.courseFee +
         feeComponents.certificateFee,
     );
-    const preservedMeta = getInstallmentMetaSnapshot(
-      existing[index],
-      index + 1,
-    );
 
     return {
       installmentNumber: index + 1,
-      originalInstallmentNumber: preservedMeta.originalInstallmentNumber,
       description:
         safeCount === 1
           ? "Full Payment"
@@ -177,16 +158,11 @@ const buildInstallments = (
               : `Course Fee Installment ${index + 1}`,
       amount,
       dueDate:
-        !forceRecalculateDates &&
-        existing[index]?.dueDate &&
-        dayjs(existing[index].dueDate).isValid()
+        existing[index]?.dueDate && dayjs(existing[index].dueDate).isValid()
           ? dayjs(existing[index].dueDate)
           : addMonths(startDate, index),
-      status: preservedMeta.status,
-      paidAmount: preservedMeta.paidAmount,
-      paidDate: preservedMeta.paidDate,
-      receiptNumber: preservedMeta.receiptNumber,
-      voucherNo: preservedMeta.voucherNo,
+      status: existing[index]?.status || "Pending",
+      paidAmount: existing[index]?.paidAmount || 0,
       feeComponents,
     };
   });
@@ -199,26 +175,13 @@ const buildInstallments = (
     if (fee.paymentMode === "one_time") {
       const componentKey = getFeeComponentKey(fee.feeType);
       const baseIndex = safeCount + extraOffset;
-      const preservedMeta = getInstallmentMetaSnapshot(
-        existing[baseIndex],
-        baseIndex + 1,
-      );
       extraInstallments.push({
         installmentNumber: baseIndex + 1,
-        originalInstallmentNumber: preservedMeta.originalInstallmentNumber,
         description: `${fee.title}`,
         amount: fee.amount,
-        dueDate:
-          !forceRecalculateDates &&
-          existing[baseIndex]?.dueDate &&
-          dayjs(existing[baseIndex].dueDate).isValid()
-            ? dayjs(existing[baseIndex].dueDate)
-            : addMonths(startDate, baseIndex),
-        status: preservedMeta.status,
-        paidAmount: preservedMeta.paidAmount,
-        paidDate: preservedMeta.paidDate,
-        receiptNumber: preservedMeta.receiptNumber,
-        voucherNo: preservedMeta.voucherNo,
+        dueDate: addMonths(startDate, baseIndex),
+        status: "Pending",
+        paidAmount: 0,
         feeComponents: {
           admissionFee: 0,
           courseFee: 0,
@@ -237,31 +200,14 @@ const buildInstallments = (
     const first = round2(Math.floor((fee.amount / 2) * 100) / 100);
     const second = round2(fee.amount - first);
     const baseIndex = safeCount + extraOffset;
-    const firstMeta = getInstallmentMetaSnapshot(
-      existing[baseIndex],
-      baseIndex + 1,
-    );
-    const secondMeta = getInstallmentMetaSnapshot(
-      existing[baseIndex + 1],
-      baseIndex + 2,
-    );
 
     extraInstallments.push({
       installmentNumber: baseIndex + 1,
-      originalInstallmentNumber: firstMeta.originalInstallmentNumber,
       description: `${fee.title} - Installment 1/2`,
       amount: first,
-      dueDate:
-        !forceRecalculateDates &&
-        existing[baseIndex]?.dueDate &&
-        dayjs(existing[baseIndex].dueDate).isValid()
-          ? dayjs(existing[baseIndex].dueDate)
-          : addMonths(startDate, baseIndex),
-      status: firstMeta.status,
-      paidAmount: firstMeta.paidAmount,
-      paidDate: firstMeta.paidDate,
-      receiptNumber: firstMeta.receiptNumber,
-      voucherNo: firstMeta.voucherNo,
+      dueDate: addMonths(startDate, baseIndex),
+      status: "Pending",
+      paidAmount: 0,
       feeComponents: {
         admissionFee: 0,
         courseFee: 0,
@@ -275,20 +221,11 @@ const buildInstallments = (
 
     extraInstallments.push({
       installmentNumber: baseIndex + 2,
-      originalInstallmentNumber: secondMeta.originalInstallmentNumber,
       description: `${fee.title} - Installment 2/2`,
       amount: second,
-      dueDate:
-        !forceRecalculateDates &&
-        existing[baseIndex + 1]?.dueDate &&
-        dayjs(existing[baseIndex + 1].dueDate).isValid()
-          ? dayjs(existing[baseIndex + 1].dueDate)
-          : addMonths(startDate, baseIndex + 1),
-      status: secondMeta.status,
-      paidAmount: secondMeta.paidAmount,
-      paidDate: secondMeta.paidDate,
-      receiptNumber: secondMeta.receiptNumber,
-      voucherNo: secondMeta.voucherNo,
+      dueDate: addMonths(startDate, baseIndex + 1),
+      status: "Pending",
+      paidAmount: 0,
       feeComponents: {
         admissionFee: 0,
         courseFee: 0,
@@ -572,11 +509,7 @@ const CourseAssignmentForm = ({
         setInstallments(
           fs.installments.map((inst) => ({
             ...inst,
-            originalInstallmentNumber:
-              Number(inst.originalInstallmentNumber || inst.installmentNumber) ||
-              1,
             dueDate: inst.dueDate ? dayjs(inst.dueDate) : null,
-            paidDate: inst.paidDate ? dayjs(inst.paidDate) : null,
           })),
         );
         skipInstallmentInitRef.current = true;
@@ -592,12 +525,7 @@ const CourseAssignmentForm = ({
               setInstallments(
                 feeResponse.data.installments.map((inst) => ({
                   ...inst,
-                  originalInstallmentNumber:
-                    Number(
-                      inst.originalInstallmentNumber || inst.installmentNumber,
-                    ) || 1,
                   dueDate: inst.dueDate ? dayjs(inst.dueDate) : null,
-                  paidDate: inst.paidDate ? dayjs(inst.paidDate) : null,
                 })),
               );
               skipInstallmentInitRef.current = true;
@@ -738,9 +666,8 @@ const CourseAssignmentForm = ({
         numberOfInstallments,
         baseFee,
         enrollmentDate,
-        prev,
+        dateChanged ? [] : prev,
         additionalFees,
-        { forceRecalculateDates: dateChanged },
       ),
     );
   }, [selectedCourse, enrollmentDate, numberOfInstallments, baseFee, additionalFees, editingEnrollment, installments.length]);
@@ -958,17 +885,11 @@ const CourseAssignmentForm = ({
     // Format installments properly for backend
     const formattedInstallments = installments.map((inst) => ({
       installmentNumber: inst.installmentNumber,
-      originalInstallmentNumber:
-        Number(inst.originalInstallmentNumber || inst.installmentNumber) ||
-        inst.installmentNumber,
       description: inst.description,
       amount: round2(inst.amount),
       dueDate: inst.dueDate?.format("YYYY-MM-DD") || inst.dueDate,
       status: inst.status || "Pending",
       paidAmount: inst.paidAmount || 0,
-      paidDate: inst.paidDate?.format("YYYY-MM-DD") || inst.paidDate || null,
-      receiptNumber: inst.receiptNumber || "",
-      voucherNo: inst.voucherNo || "",
       feeComponents: {
         admissionFee: round2(inst.feeComponents?.admissionFee || 0),
         courseFee: round2(inst.feeComponents?.courseFee || 0),

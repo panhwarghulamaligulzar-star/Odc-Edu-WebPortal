@@ -97,14 +97,6 @@ const getIdCardDisplayEnrollment = (enrollments = []) =>
     );
   })[0] || null;
 
-const getIdCardCourseIds = (enrollments = []) => {
-  const courseIds = enrollments
-    .map((enrollment) => String(enrollment?.course?.courseId || "").trim())
-    .filter(Boolean);
-
-  return courseIds.length ? Array.from(new Set(courseIds)).join(", ") : "N/A";
-};
-
 const getStudentCardAddress = (student) => {
   const addressParts = [
     student?.address,
@@ -1149,7 +1141,10 @@ const StudentProfile = () => {
       );
     }
 
-    const courseIds = getIdCardCourseIds(activeEnrollmentRecords);
+    const courseName =
+      primaryEnrollment?.course?.courseName ||
+      student?.lastClassAttended ||
+      "Student";
     const studentCode = student?.registrationNo || "N/A";
     const joinBaseDate =
       getEnrollmentStartDate(primaryEnrollment) ||
@@ -1242,8 +1237,8 @@ const StudentProfile = () => {
                   <strong>{guardianName}</strong>
                 </div>
                 <div className="id-card-detail-row">
-                  <span>COURSE ID</span>
-                  <strong>{courseIds}</strong>
+                  <span>CLASS</span>
+                  <strong>{courseName}</strong>
                 </div>
                 <div className="id-card-detail-row">
                   <span>CNIC / B-FORM</span>

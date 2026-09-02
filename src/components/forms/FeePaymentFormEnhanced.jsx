@@ -27,10 +27,7 @@ import {
   recordFeePayment,
   getNextVoucherNumber,
 } from "../../services/feeService";
-import {
-  getPaymentMethods,
-  createPaymentMethod,
-} from "../../services/accountingService";
+import { getPaymentMethods } from "../../services/accountingService";
 import academyConfig from "../../config/academyConfig";
 import PaymentReceipt from "./PaymentReceipt";
 import dayjs from "dayjs";
@@ -64,8 +61,6 @@ const FeePaymentFormEnhanced = ({
   const [payMultiple, setPayMultiple] = useState(false);
   const [accountingMethods, setAccountingMethods] = useState([]);
   const [methodsLoading, setMethodsLoading] = useState(false);
-  const [customPaymentMethodValue, setCustomPaymentMethodValue] = useState("");
-  const CUSTOM_PAYMENT_METHOD_ID = "__custom_payment_method__";
   const hasMixedCourseSelection = initialSelectedPaymentRows.length > 0;
   const selectedInstallmentsKey = useMemo(
     () => initialSelectedInstallments.join(","),
@@ -249,64 +244,13 @@ const FeePaymentFormEnhanced = ({
     };
   };
 
-  const ensureSelectedPaymentMethod = async () => {
-    const selectedMethodId = form.getFieldValue("accountingPaymentMethodId");
-    const customName = String(
-      form.getFieldValue("customPaymentMethodName") || customPaymentMethodValue || "",
-    )
-      .trim();
-
-    if (selectedMethodId && selectedMethodId !== CUSTOM_PAYMENT_METHOD_ID) {
-      return {
-        id: selectedMethodId,
-        name: getMethodName(selectedMethodId),
-      };
-    }
-
-    if (!customName) {
-      throw new Error("Please enter a custom payment method name");
-    }
-
-    const existingMethod = accountingMethods.find(
-      (method) =>
-        String(method?.name || "").trim().toLowerCase() === customName.toLowerCase(),
-    );
-
-    if (existingMethod) {
-      form.setFieldValue("accountingPaymentMethodId", existingMethod._id);
-      setCustomPaymentMethodValue(existingMethod.name);
-      return { id: existingMethod._id, name: existingMethod.name };
-    }
-
-    const res = await createPaymentMethod({
-      name: customName,
-      type: "other",
-      openingBalance: 0,
-      bankDetails: {},
-    });
-
-    if (res?.success && res.data) {
-      setAccountingMethods((prev) => {
-        const next = prev.filter((item) => item._id !== res.data._id);
-        return [...next, res.data];
-      });
-      form.setFieldValue("accountingPaymentMethodId", res.data._id);
-      setCustomPaymentMethodValue(res.data.name);
-      return { id: res.data._id, name: res.data.name };
-    }
-
-    return { id: null, name: customName };
-  };
-
   const handleSubmit = async (values) => {
     setLoading(true);
     try {
-      const paymentMethodResult = await ensureSelectedPaymentMethod();
+      let paymentPayload;
       const normalizedPaymentDate =
         formatDateOnlyForApi(values.paymentDate) ||
         formatDateOnlyForApi(dayjs());
-
-      let paymentPayload;
 
       if (hasMixedCourseSelection) {
         const payableRows = initialSelectedPaymentRows.filter(
@@ -338,8 +282,8 @@ const FeePaymentFormEnhanced = ({
             feeStructureId: row.feeStructureId,
             amount: Number(row.remainingAmount || 0),
             paymentDate: normalizedPaymentDate,
-            paymentMethod: paymentMethodResult.name,
-            accountingPaymentMethodId: paymentMethodResult.id || null,
+            paymentMethod: getMethodName(values.accountingPaymentMethodId),
+            accountingPaymentMethodId: values.accountingPaymentMethodId || null,
             transactionId: values.transactionId,
             chequeNo: values.chequeNo,
             bankName: values.bankName,
@@ -397,8 +341,8 @@ const FeePaymentFormEnhanced = ({
               getOverallRemaining() || getInstallmentRemaining(inst),
             ),
             paymentDate: normalizedPaymentDate,
-            paymentMethod: paymentMethodResult.name,
-            accountingPaymentMethodId: paymentMethodResult.id || null,
+            paymentMethod: getMethodName(values.accountingPaymentMethodId),
+            accountingPaymentMethodId: values.accountingPaymentMethodId || null,
             transactionId: values.transactionId,
             chequeNo: values.chequeNo,
             bankName: values.bankName,
@@ -454,8 +398,8 @@ const FeePaymentFormEnhanced = ({
         feeStructureId: feeStructure._id,
         amount: values.amount,
         paymentDate: normalizedPaymentDate,
-        paymentMethod: paymentMethodResult.name,
-        accountingPaymentMethodId: paymentMethodResult.id || null,
+        paymentMethod: getMethodName(values.accountingPaymentMethodId),
+        accountingPaymentMethodId: values.accountingPaymentMethodId || null,
         transactionId: values.transactionId,
         chequeNo: values.chequeNo,
         bankName: values.bankName,
@@ -500,7 +444,6 @@ const FeePaymentFormEnhanced = ({
     form.resetFields();
     setSelectedInstallments([]);
     setPayMultiple(false);
-    setCustomPaymentMethodValue("");
     onClose();
   };
 
@@ -968,11 +911,6 @@ const FeePaymentFormEnhanced = ({
               loading={methodsLoading}
               className="w-full"
               optionLabelProp="label"
-              onChange={(value) => {
-                if (value === CUSTOM_PAYMENT_METHOD_ID) {
-                  form.setFieldValue("customPaymentMethodName", customPaymentMethodValue);
-                }
-              }}
             >
               {accountingMethods.map((m) => (
                 <Select.Option key={m._id} value={m._id} label={m.name}>
@@ -981,54 +919,20 @@ const FeePaymentFormEnhanced = ({
                     <span className="text-xs ml-2">
                       <span
                         className={`px-2 py-0.5 rounded text-white text-xs ${
-                          m.type === "cash"
-                            ? "bg-green-500"
-                            : m.type === "other"
-                              ? "bg-purple-500"
-                              : "bg-blue-500"
+                          m.type === "cash" ? "bg-green-500" : "bg-blue-500"
                         }`}
                       >
-                        {m.type === "cash"
-                          ? "Cash"
-                          : m.type === "other"
-                            ? "Other"
-                            : "Bank"}
+                        {m.type === "cash" ? "Cash" : "Bank"}
                       </span>
-                      {m.currentBalance !== undefined && (
-                        <span className="ml-2 text-gray-500">
-                          Balance: Rs. {(m.currentBalance || 0).toLocaleString()}
-                        </span>
-                      )}
+                      <span className="ml-2 text-gray-500">
+                        Balance: Rs. {(m.currentBalance || 0).toLocaleString()}
+                      </span>
                     </span>
                   </div>
                 </Select.Option>
               ))}
-              <Select.Option value={CUSTOM_PAYMENT_METHOD_ID} label="Other (custom)">
-                <span className="font-medium text-purple-700">Other (custom)</span>
-              </Select.Option>
             </Select>
           </Form.Item>
-
-          {form.getFieldValue("accountingPaymentMethodId") === CUSTOM_PAYMENT_METHOD_ID && (
-            <Form.Item
-              name="customPaymentMethodName"
-              label="Custom Payment Method"
-              rules={[
-                { required: true, message: "Please type the custom payment method" },
-              ]}
-            >
-              <Input
-                size="large"
-                placeholder="Type method name like Scholarship, Academy Support, etc."
-                value={customPaymentMethodValue}
-                onChange={(e) => {
-                  const nextValue = e.target.value;
-                  setCustomPaymentMethodValue(nextValue);
-                  form.setFieldValue("customPaymentMethodName", nextValue);
-                }}
-              />
-            </Form.Item>
-          )}
 
           {accountingMethods.find(
             (m) => m._id === form.getFieldValue("accountingPaymentMethodId"),

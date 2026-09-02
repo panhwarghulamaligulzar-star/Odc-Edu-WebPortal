@@ -294,7 +294,6 @@ export default function Receipt() {
     dueDateFrom: undefined,
     dueDateTo: undefined,
     sortOrder: "asc",
-    paymentMethod: "all",
   });
   const [quickRange, setQuickRange] = useState(undefined);
   const [pagination, setPagination] = useState({
@@ -350,16 +349,11 @@ export default function Receipt() {
       });
 
       if (response?.success) {
-        const filteredByPaymentMethod = (response.data || []).filter(customPaymentMethodFilter);
-        setRows(filteredByPaymentMethod);
-        setSummary(
-          filters.paymentMethod && filters.paymentMethod !== "all"
-            ? summarizeRows(filteredByPaymentMethod)
-            : response.summary || {},
-        );
+        setRows(response.data || []);
+        setSummary(response.summary || {});
         setPagination((prev) => ({
           ...prev,
-          total: filteredByPaymentMethod.length || response.pagination?.total || 0,
+          total: response.pagination?.total || 0,
         }));
       }
     } catch (error) {
@@ -486,51 +480,9 @@ export default function Receipt() {
     }
   };
 
-  const summarizeRows = (data = []) =>
-    data.reduce(
-      (acc, row) => {
-        acc.totalDues += Number(row.amount || 0);
-        acc.collected += Number(row.paidAmount || 0);
-        acc.remaining += Number(row.remainingAmount || 0);
-        acc.studentCount += 1;
-        if (row.dueStatus === "Paid") acc.paidCount += 1;
-        if (row.dueStatus === "Partial") acc.partialCount += 1;
-        if (row.dueStatus === "Pending") acc.pendingCount += 1;
-        return acc;
-      },
-      {
-        totalDues: 0,
-        collected: 0,
-        remaining: 0,
-        studentCount: 0,
-        paidCount: 0,
-        partialCount: 0,
-        pendingCount: 0,
-      },
-    );
-
   const handleFilterChange = (key, value) => {
     setPagination((prev) => ({ ...prev, current: 1 }));
     setFilters((prev) => ({ ...prev, [key]: value || undefined }));
-  };
-
-  const customPaymentMethodFilter = (record) => {
-    if (!filters.paymentMethod || filters.paymentMethod === "all") {
-      return true;
-    }
-
-    const label = String(record?.paymentMethod || record?.latestPayment?.paymentMethod || "")
-      .trim()
-      .toLowerCase();
-
-    if (filters.paymentMethod === "other") {
-      return (
-        !!label &&
-        (label !== "cash" && label !== "bank" && !label.includes("online") && !label.includes("cheque"))
-      );
-    }
-
-    return label.includes(filters.paymentMethod);
   };
 
   const handleDueDateChange = (dates) => {
@@ -816,26 +768,6 @@ export default function Receipt() {
       dataIndex: "dueStatus",
       key: "dueStatus",
       render: (status) => <Tag color={statusConfig[status]?.color}>{status}</Tag>,
-    },
-    {
-      title: "Payment Source",
-      dataIndex: "paymentMethod",
-      key: "paymentMethod",
-      render: (value, record) => {
-        const paymentLabel = value || record?.latestPayment?.paymentMethod || "-";
-        const isOther =
-          String(paymentLabel).trim().toLowerCase() !== "cash" &&
-          String(paymentLabel).trim().toLowerCase() !== "bank" &&
-          paymentLabel !== "-";
-
-        return isOther ? (
-          <Tag color="purple">{paymentLabel}</Tag>
-        ) : (
-          <Tag color={paymentLabel === "Cash" ? "green" : "blue"}>
-            {paymentLabel || "-"}
-          </Tag>
-        );
-      },
     },
     {
       title: "Voucher No",
@@ -1287,7 +1219,6 @@ export default function Receipt() {
                 dueDateFrom: undefined,
                 dueDateTo: undefined,
                 sortOrder: "asc",
-                paymentMethod: "all",
               });
               setQuickRange(undefined);
             }}
@@ -1327,19 +1258,6 @@ export default function Receipt() {
               { label: "Partial", value: "Partial" },
               { label: "Pending", value: "Pending" },
               { label: "Unpaid", value: "Unpaid" },
-            ]}
-          />
-          <Select
-            allowClear
-            placeholder="All payment sources"
-            className="!h-11"
-            value={filters.paymentMethod}
-            onChange={(value) => handleFilterChange("paymentMethod", value)}
-            options={[
-              { label: "All sources", value: "all" },
-              { label: "Cash", value: "cash" },
-              { label: "Bank", value: "bank" },
-              { label: "Other / Scholarship", value: "other" },
             ]}
           />
           <RangePicker

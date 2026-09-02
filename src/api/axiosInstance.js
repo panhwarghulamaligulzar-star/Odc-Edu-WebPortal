@@ -1,10 +1,23 @@
 import axios from "axios";
 import useZustandStore from "../stores/zustandStore";
 
-const baseURL =
-  import.meta.env.VITE_API_URL ||
-  import.meta.env.VITE_BACKEND_URL ||
-  (import.meta.env.DEV ? "http://localhost:5028" : window.location.origin);
+const getApiBaseUrl = () => {
+  // Check environment variables first (works in both DEV and PROD)
+  const envUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL;
+  
+  if (envUrl) {
+    return envUrl;
+  }
+
+  // Fallback for local development if no env URL is set
+  if (import.meta.env.DEV) {
+    return "";
+  }
+
+  return window.location.origin;
+};
+
+const baseURL = getApiBaseUrl();
 
 console.log("Axios baseURL:", baseURL);
 console.log("Mode:", import.meta.env.MODE);
