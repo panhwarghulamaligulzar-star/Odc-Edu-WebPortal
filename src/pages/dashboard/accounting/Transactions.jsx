@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   AutoComplete,
   Table,
@@ -152,6 +152,7 @@ const Transactions = () => {
   const [previewTitle, setPreviewTitle] = useState("");
   const [exportData, setExportData] = useState([]);
   const [exportLoading, setExportLoading] = useState(false);
+  const fetchRequestIdRef = useRef(0);
   const { appSettings, isSuperAdmin, adminInfo } = useZustandStore();
   const balancesVisible = canViewAccountingBalances({
     appSettings,
@@ -383,6 +384,94 @@ const Transactions = () => {
     [form, getPartyOptionsForType, applyPartySelection],
   );
 
+  const upsertTransactionRow = useCallback(
+    (nextRow, fallbackPage = 1) => {
+      if (!nextRow?._id) return;
+
+      setTransactions((currentRows) => {
+        const existingIndex = currentRows.findIndex(
+          (row) => String(row?._id) === String(nextRow._id),
+        );
+
+        if (existingIndex === -1) {
+          if (fallbackPage !== 1) return currentRows;
+          return [nextRow, ...currentRows].slice(0, pagination.pageSize);
+        }
+
+        return currentRows.map((row) =>
+          String(row?._id) === String(nextRow._id) ? nextRow : row,
+        );
+      });
+    },
+    [pagination.pageSize],
+  );
+
+  const buildUpdatedTransactionRow = useCallback(
+    (existingRow, submittedValues, serverRow) => {
+      const resolvedType =
+        types.find(
+          (item) => String(item?._id || "") === String(submittedValues?.type || ""),
+        ) ||
+        serverRow?.type ||
+        existingRow?.type ||
+        null;
+
+      const resolvedHead =
+        heads.find(
+          (item) => String(item?._id || "") === String(submittedValues?.head || ""),
+        ) ||
+        serverRow?.head ||
+        existingRow?.head ||
+        null;
+
+      const resolvedMethod =
+        methods.find(
+          (item) =>
+            String(item?._id || "") === String(submittedValues?.paymentMethod || ""),
+        ) ||
+        serverRow?.paymentMethod ||
+        existingRow?.paymentMethod ||
+        null;
+
+      return {
+        ...existingRow,
+        ...serverRow,
+        name: submittedValues?.name ?? serverRow?.name ?? existingRow?.name,
+        type: resolvedType,
+        head: resolvedHead,
+        headLabel:
+          resolvedHead?.name ||
+          serverRow?.headLabel ||
+          existingRow?.headLabel ||
+          "",
+        paymentMethod: resolvedMethod,
+        paymentMethodLabel:
+          resolvedMethod?.name ||
+          serverRow?.paymentMethodLabel ||
+          existingRow?.paymentMethodLabel ||
+          "",
+        paymentDate:
+          submittedValues?.paymentDate?.toDate?.() ||
+          serverRow?.paymentDate ||
+          existingRow?.paymentDate,
+        amount: Number(
+          submittedValues?.amount ?? serverRow?.amount ?? existingRow?.amount ?? 0,
+        ),
+        billReference:
+          submittedValues?.billReference ??
+          serverRow?.billReference ??
+          existingRow?.billReference ??
+          "",
+        details:
+          submittedValues?.details ??
+          serverRow?.details ??
+          existingRow?.details ??
+          "",
+      };
+    },
+    [types, heads, methods],
+  );
+
   // ── Load reference data on mount ──────────────────────────
   useEffect(() => {
     Promise.all([
@@ -402,6 +491,8 @@ const Transactions = () => {
   // ── Fetch transactions ─────────────────────────────────────
   const fetchTransactions = useCallback(
     async (page = 1) => {
+      const requestId = fetchRequestIdRef.current + 1;
+      fetchRequestIdRef.current = requestId;
       setLoading(true);
       try {
         const params = { page, limit: pagination.pageSize };
@@ -429,6 +520,8 @@ const Transactions = () => {
 
         const [txnRes, sumRes] = await Promise.all([txnPromise, sumPromise]);
 
+        if (requestId !== fetchRequestIdRef.current) return;
+
         if (txnRes?.success) {
           setTransactions(txnRes.data);
           setPagination((p) => ({
@@ -439,10 +532,13 @@ const Transactions = () => {
         }
         if (sumRes?.success) setSummary(sumRes.data);
       } catch (err) {
+        if (requestId !== fetchRequestIdRef.current) return;
         console.error(err);
         message.error(err?.message || "Failed to load transactions");
       } finally {
-        setLoading(false);
+        if (requestId === fetchRequestIdRef.current) {
+          setLoading(false);
+        }
       }
     },
     [filterType, filterHead, filterMethods, filterDates, filterSearch, pagination.pageSize, balancesVisible],
@@ -511,6 +607,11 @@ const Transactions = () => {
   };
 
   useEffect(() => {
+    if (editingTxn) {
+      setSelectedPartyMeta(null);
+      return;
+    }
+
     if (!watchedFormType) {
       setSelectedPartyMeta(null);
       return;
@@ -527,12 +628,12 @@ const Transactions = () => {
     );
 
     setSelectedPartyMeta(matchedParty || null);
-  }, [watchedFormType, watchedFormName, getPartyOptionsForType]);
+  }, [editingTxn, watchedFormType, watchedFormName, getPartyOptionsForType]);
 
   useEffect(() => {
-    if (!selectedPartyMeta) return;
+    if (editingTxn || !selectedPartyMeta) return;
     applyPartySelection(selectedPartyMeta);
-  }, [selectedPartyMeta, applyPartySelection]);
+  }, [editingTxn, selectedPartyMeta, applyPartySelection]);
 
   // ── Submit ─────────────────────────────────────────────────
   const handleSubmit = async () => {
@@ -639,14 +740,16 @@ const Transactions = () => {
       if (editingTxn) {
         const res = await updateTransaction(editingTxn._id, payload);
         if (res?.success) {
+          const nextRow = buildUpdatedTransactionRow(editingTxn, values, res.data);
+          upsertTransactionRow(nextRow, pagination.current);
           message.success("Transaction updated");
           closeModal();
           loadPartyReferenceData();
-          fetchTransactions(pagination.current);
         } else message.error(res?.message || "Update failed");
       } else {
         const res = await createTransaction(payload);
         if (res?.success) {
+          upsertTransactionRow(res.data, 1);
           message.success("Transaction created");
           closeModal();
           loadPartyReferenceData();

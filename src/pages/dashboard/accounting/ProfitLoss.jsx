@@ -148,7 +148,7 @@ const ProfitLoss = () => {
       if (id) {
         lookup.set(id, {
           _id: id,
-          name: name || "Unassigned Head",
+          name: name || "Unassigned",
         });
       }
 
@@ -183,12 +183,12 @@ const ProfitLoss = () => {
 
     return {
       _id: "unassigned",
-      name: "Unassigned Head",
+      name: "Unassigned",
     };
   };
 
   const getHeadKey = (record) => String(resolveHead(record)?._id || "unassigned");
-  const getHeadLabel = (record) => String(resolveHead(record)?.name || "Unassigned Head");
+  const getHeadLabel = (record) => String(resolveHead(record)?.name || "Unassigned");
 
   const incomeHeadRows = useMemo(() => {
     const groups = incomeEntries.reduce((acc, entry) => {

@@ -79,11 +79,7 @@ define(['./workbox-21a80088'], (function (workbox) { 'use strict';
    */
   workbox.precacheAndRoute([{
     "url": "index.html",
-<<<<<<< HEAD
-    "revision": "0.g8bb9945et"
-=======
-    "revision": "0.0v5g9a3vb0o"
->>>>>>> parent of b29b86c (Merge branch 'Main-Branch-Fixes')
+    "revision": "0.84jh6s2t08"
   }], {});
   workbox.cleanupOutdatedCaches();
   workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html"), {

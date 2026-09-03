@@ -76,7 +76,11 @@ const findPaymentMethodByAnyId = async (paymentMethodId) => {
 
   const stringIdMatch = await collection.findOne({ _id: rawPaymentMethodId });
   if (stringIdMatch) {
-    return PaymentMethod.findOne({ name: stringIdMatch.name, isActive: true });
+    return (
+      (await PaymentMethod.findById(stringIdMatch._id)) ||
+      (await PaymentMethod.findOne({ name: stringIdMatch.name, isActive: true })) ||
+      stringIdMatch
+    );
   }
 
   if (mongoose.Types.ObjectId.isValid(rawPaymentMethodId)) {
@@ -84,7 +88,11 @@ const findPaymentMethodByAnyId = async (paymentMethodId) => {
       _id: new mongoose.Types.ObjectId(rawPaymentMethodId),
     });
     if (objectIdMatch) {
-      return PaymentMethod.findOne({ name: objectIdMatch.name, isActive: true });
+      return (
+        (await PaymentMethod.findOne({ _id: String(objectIdMatch._id) })) ||
+        (await PaymentMethod.findOne({ name: objectIdMatch.name, isActive: true })) ||
+        objectIdMatch
+      );
     }
   }
 
@@ -105,10 +113,14 @@ const findHeadOfAccountByAnyId = async (headId) => {
 
   const stringIdMatch = await collection.findOne({ _id: rawHeadId });
   if (stringIdMatch) {
-    return HeadOfAccount.findOne({
-      name: stringIdMatch.name,
-      isActive: { $ne: false },
-    });
+    return (
+      (await HeadOfAccount.findById(stringIdMatch._id)) ||
+      (await HeadOfAccount.findOne({
+        name: stringIdMatch.name,
+        isActive: { $ne: false },
+      })) ||
+      stringIdMatch
+    );
   }
 
   if (mongoose.Types.ObjectId.isValid(rawHeadId)) {
@@ -116,10 +128,14 @@ const findHeadOfAccountByAnyId = async (headId) => {
       _id: new mongoose.Types.ObjectId(rawHeadId),
     });
     if (objectIdMatch) {
-      return HeadOfAccount.findOne({
-        name: objectIdMatch.name,
-        isActive: { $ne: false },
-      });
+      return (
+        (await HeadOfAccount.findOne({ _id: String(objectIdMatch._id) })) ||
+        (await HeadOfAccount.findOne({
+          name: objectIdMatch.name,
+          isActive: { $ne: false },
+        })) ||
+        objectIdMatch
+      );
     }
   }
 
@@ -127,6 +143,119 @@ const findHeadOfAccountByAnyId = async (headId) => {
     name: { $regex: new RegExp(`^${rawHeadId}$`, "i") },
     isActive: { $ne: false },
   });
+};
+
+const normalizeTransactionText = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const inferPreferredIncomeHeadNameFromFeeStructure = (
+  feeStructure,
+  installmentNumber,
+) => {
+  const normalizedInstallmentNumber = Number(installmentNumber || 0);
+  const targetInstallment = Array.isArray(feeStructure?.installments)
+    ? feeStructure.installments.find(
+        (item) => Number(item?.installmentNumber) === normalizedInstallmentNumber,
+      )
+    : null;
+
+  const feeComponents = targetInstallment?.feeComponents || {};
+  const headCandidates = [
+    { key: "admissionFee", label: "Admission Fee" },
+    { key: "courseFee", label: "Course Fees" },
+    { key: "booksFee", label: "Books Fee" },
+    { key: "certificateFee", label: "Certificate Fee" },
+    { key: "examFee", label: "Exam Fee" },
+    { key: "registrationFee", label: "Registration Fee" },
+    { key: "practicalFee", label: "Practical Fee" },
+    { key: "otherFee", label: "Other Fee" },
+  ].filter((item) => Number(feeComponents?.[item.key] || 0) > 0);
+
+  if (headCandidates.length === 1) {
+    return headCandidates[0].label;
+  }
+
+  const description = normalizeTransactionText(targetInstallment?.description || "");
+  if (description.includes("admission")) return "Admission Fee";
+  if (description.includes("book")) return "Books Fee";
+  if (description.includes("certificate")) return "Certificate Fee";
+  if (description.includes("exam")) return "Exam Fee";
+  if (description.includes("registration")) return "Registration Fee";
+  if (description.includes("practical")) return "Practical Fee";
+  if (description.includes("other")) return "Other Fee";
+
+  return "Course Fees";
+};
+
+const inferTransactionHeadNameFromText = (typeName, transactionDoc) => {
+  const searchText = normalizeTransactionText(
+    [transactionDoc?.name, transactionDoc?.details, transactionDoc?.billReference].join(" "),
+  );
+
+  if (!searchText) {
+    return null;
+  }
+
+  if (typeName === "Income") {
+    if (searchText.includes("admission")) return "Admission Fee";
+    if (searchText.includes("book")) return "Books Fee";
+    if (searchText.includes("certificate")) return "Certificate Fee";
+    if (searchText.includes("exam")) return "Exam Fee";
+    if (searchText.includes("registration")) return "Registration Fee";
+    if (searchText.includes("practical")) return "Practical Fee";
+    if (searchText.includes("other")) return "Other Fee";
+    return "Course Fees";
+  }
+
+  if (typeName === "Expense") {
+    if (
+      searchText.includes("salary") ||
+      searchText.includes("teacher salary") ||
+      searchText.includes("payroll")
+    ) {
+      return "Salary";
+    }
+  }
+
+  return null;
+};
+
+const resolveLinkedFeePayment = async (transactionDoc) => {
+  const billReference = String(transactionDoc?.billReference || "").trim();
+  if (!billReference) {
+    return null;
+  }
+
+  return FeePayment.findOne({
+    $or: [{ receiptNo: billReference }, { voucherNo: billReference }],
+  }).lean();
+};
+
+const getRawReferenceValue = (doc, fieldName) => {
+  if (!doc) {
+    return "";
+  }
+
+  if (typeof doc.get === "function") {
+    const depopulatedValue = doc.get(fieldName, null, { depopulate: true });
+    if (depopulatedValue && typeof depopulatedValue === "object") {
+      return String(depopulatedValue?._id || "").trim();
+    }
+    if (depopulatedValue !== undefined && depopulatedValue !== null) {
+      return String(depopulatedValue || "").trim();
+    }
+  }
+
+  const directValue = doc?.[fieldName];
+  if (directValue && typeof directValue === "object") {
+    return String(directValue?._id || "").trim();
+  }
+
+  return String(directValue || "").trim();
 };
 
 const coerceValidDate = (value) => {
@@ -203,6 +332,9 @@ const matchesReportDateFilter = (value, dateFilter) => {
 };
 
 const serializeTransactionRecord = async (transactionDoc) => {
+  const rawTypeRef = getRawReferenceValue(transactionDoc, "type");
+  const rawHeadRef = getRawReferenceValue(transactionDoc, "head");
+  const rawPaymentMethodRef = getRawReferenceValue(transactionDoc, "paymentMethod");
   const data =
     typeof transactionDoc?.toObject === "function"
       ? transactionDoc.toObject()
@@ -211,17 +343,50 @@ const serializeTransactionRecord = async (transactionDoc) => {
   const resolvedType =
     data?.type?.name
       ? data.type
-      : await findAccountingTypeByAnyId(data?.type?._id || data?.type || "");
-  const resolvedHead =
+      : await findAccountingTypeByAnyId(
+          data?.type?._id || data?.type || rawTypeRef || "",
+        );
+  const linkedFeePayment = await resolveLinkedFeePayment(data);
+
+  let resolvedHead =
     data?.head?.name
       ? data.head
-      : await findHeadOfAccountByAnyId(data?.head?._id || data?.head || "");
-  const resolvedPaymentMethod =
+      : await findHeadOfAccountByAnyId(
+          data?.head?._id || data?.head || rawHeadRef || "",
+        );
+
+  if (!resolvedHead && linkedFeePayment?.feeStructure) {
+    const linkedFeeStructure = await FeeStructure.findById(
+      linkedFeePayment.feeStructure,
+    ).lean();
+    const inferredFeeHeadName = inferPreferredIncomeHeadNameFromFeeStructure(
+      linkedFeeStructure,
+      linkedFeePayment.installmentNumber,
+    );
+    resolvedHead = await findHeadOfAccountByAnyId(inferredFeeHeadName);
+  }
+
+  if (!resolvedHead) {
+    resolvedHead = await findHeadOfAccountByAnyId(
+      inferTransactionHeadNameFromText(resolvedType?.name, data),
+    );
+  }
+
+  let resolvedPaymentMethod =
     data?.paymentMethod?.name
       ? data.paymentMethod
       : await findPaymentMethodByAnyId(
-          data?.paymentMethod?._id || data?.paymentMethod || "",
+          data?.paymentMethod?._id ||
+            data?.paymentMethod ||
+            rawPaymentMethodRef ||
+            "",
         );
+
+  if (!resolvedPaymentMethod && linkedFeePayment) {
+    resolvedPaymentMethod = await findPaymentMethodByAnyId(
+      linkedFeePayment.accountingPaymentMethodId || linkedFeePayment.paymentMethod || "",
+    );
+  }
 
   return {
     ...data,
@@ -239,17 +404,20 @@ const serializeTransactionRecord = async (transactionDoc) => {
       : data?.type || null,
     head: resolvedHead
       ? {
-          _id: resolvedHead._id,
+          _id: String(resolvedHead._id || ""),
           name: resolvedHead.name,
         }
       : data?.head || null,
+    headLabel: resolvedHead?.name || data?.head?.name || "",
     paymentMethod: resolvedPaymentMethod
       ? {
-          _id: resolvedPaymentMethod._id,
+          _id: String(resolvedPaymentMethod._id || ""),
           name: resolvedPaymentMethod.name,
           type: resolvedPaymentMethod.type,
         }
       : data?.paymentMethod || null,
+    paymentMethodLabel:
+      resolvedPaymentMethod?.name || data?.paymentMethod?.name || "",
   };
 };
 
@@ -3768,10 +3936,9 @@ export const getProfitLoss = async (req, res) => {
       allHeads,
     ] = await Promise.all([
       AccountingTransaction.find({})
-        .populate("type", "name")
-        .populate("head", "name")
-        .populate("paymentMethod", "name type")
-        .limit(5000),
+        .sort({ createdAt: -1, paymentDate: -1 })
+        .limit(5000)
+        .lean(),
       FeePayment.find(feePaymentFilter)
         .populate("course", "courseName courseId")
         .lean(),
@@ -4158,6 +4325,7 @@ export const getProfitLoss = async (req, res) => {
           matchesReportDateFilter(txn?.paymentDate, reportDateFilter),
         )
         .map(async (txn) => {
+          const serializedTxn = await serializeTransactionRecord(txn);
           const billRef = String(txn?.billReference || "").trim();
           const feeCourse = billRef ? feePaymentByReference.get(billRef) : null;
           const payrollCourseContext = payrollTransactionCourseMap.get(
@@ -4169,14 +4337,19 @@ export const getProfitLoss = async (req, res) => {
             expenseHeadByVoucherNo.get(billRef) ||
             null;
           const explicitHead = await resolveHeadSnapshot(
+            serializedTxn?.head?._id,
+            serializedTxn?.head,
             txn?.head?._id,
             txn?.head,
             linkedExpenseHead?._id,
             linkedExpenseHead?.name,
           );
-          const typeName = txn?.type?.name || "";
+          const typeName = serializedTxn?.type?.name || txn?.type?.name || "";
           const inferredHead = inferHeadFromTransaction({
-            txn,
+            txn: {
+              ...txn,
+              ...serializedTxn,
+            },
             typeName,
             linkedExpenseHead,
             explicitHead,
@@ -4192,25 +4365,56 @@ export const getProfitLoss = async (req, res) => {
                 : [];
 
           return {
-            _id: txn._id,
-            transactionNo: txn.transactionNo,
-            name: txn.name,
-            amount: Number(txn.amount || 0),
-            billReference: txn.billReference || "",
-            details: txn.details || "",
-            paymentDate: coerceValidDate(txn?.paymentDate) || txn?.paymentDate,
-            createdAt: txn.createdAt,
-            type: txn.type,
+            _id: serializedTxn?._id || txn._id,
+            transactionNo: serializedTxn?.transactionNo || txn.transactionNo,
+            name: serializedTxn?.name || txn.name,
+            amount: Number(serializedTxn?.amount || txn.amount || 0),
+            billReference: serializedTxn?.billReference || txn.billReference || "",
+            details: serializedTxn?.details || txn.details || "",
+            paymentDate:
+              coerceValidDate(serializedTxn?.paymentDate) ||
+              serializedTxn?.paymentDate ||
+              coerceValidDate(txn?.paymentDate) ||
+              txn?.paymentDate,
+            createdAt: serializedTxn?.createdAt || txn.createdAt,
+            type: serializedTxn?.type || txn.type,
             head:
               resolvedHead ||
               linkedExpenseHead ||
-              (txn?.head?.name
+              (serializedTxn?.head?.name
+                ? {
+                    _id: String(serializedTxn?.head?._id || ""),
+                    name: serializedTxn.head.name,
+                  }
+                : txn?.head?.name
                 ? {
                     _id: String(txn?.head?._id || ""),
                     name: txn.head.name,
                   }
                 : null),
-            paymentMethod: txn.paymentMethod,
+            paymentMethod: serializedTxn?.paymentMethod || txn.paymentMethod,
+            headLabel:
+              resolvedHead?.name ||
+              serializedTxn?.headLabel ||
+              serializedTxn?.head?.name ||
+              "",
+            paymentMethodLabel:
+              serializedTxn?.paymentMethodLabel ||
+              serializedTxn?.paymentMethod?.name ||
+              txn?.paymentMethod?.name ||
+              "",
+            sourceHeadId:
+              String(
+                resolvedHead?._id ||
+                  serializedTxn?.head?._id ||
+                  txn?.head?._id ||
+                  "",
+              ) || null,
+            sourceHeadName:
+              resolvedHead?.name ||
+              serializedTxn?.head?.name ||
+              txn?.head?.name ||
+              "Unknown",
             courseIds: derivedCourses
               .map((course) => String(course?._id || ""))
               .filter(Boolean),
@@ -4254,18 +4458,29 @@ export const getProfitLoss = async (req, res) => {
     const buildBreakdown = (rows = []) =>
       Array.from(
         rows.reduce((acc, row) => {
-          const headName = row?.head?.name || "Unknown";
-          const existing = acc.get(headName) || {
+          const headKey = String(
+            row?.sourceHeadId || row?.head?._id || row?.head?.name || "unknown",
+          );
+          const headName =
+            row?.sourceHeadName ||
+            row?.head?.name ||
+            row?.headLabel ||
+            "Unknown";
+          const existing = acc.get(headKey) || {
+            headId: row?.sourceHeadId || row?.head?._id || null,
             headName,
             total: 0,
             count: 0,
           };
           existing.total += Number(row?.amount || 0);
           existing.count += 1;
-          acc.set(headName, existing);
+          acc.set(headKey, existing);
           return acc;
         }, new Map()).values(),
-      ).sort((a, b) => b.total - a.total);
+      ).sort((a, b) => {
+        if (b.total !== a.total) return b.total - a.total;
+        return String(a.headName || "").localeCompare(String(b.headName || ""));
+      });
 
     const incomeAgg = buildBreakdown(incomeEntries);
     const expenseAgg = buildBreakdown(expenseEntries);
@@ -4437,13 +4652,10 @@ export const getTransactions = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const [transactions, total] = await Promise.all([
       AccountingTransaction.find(filter)
-        .populate("type", "name")
-        .populate("head", "name")
-        .populate("paymentMethod", "name type")
-        .populate("createdBy", "name email")
         .sort({ createdAt: -1, paymentDate: -1 })
         .skip(skip)
-        .limit(parseInt(limit)),
+        .limit(parseInt(limit))
+        .lean(),
       AccountingTransaction.countDocuments(filter),
     ]);
 
@@ -4468,10 +4680,7 @@ export const getTransactions = async (req, res) => {
 export const getTransactionById = async (req, res) => {
   try {
     const txn = await AccountingTransaction.findById(req.params.id)
-      .populate("type", "name")
-      .populate("head", "name")
-      .populate("paymentMethod", "name type currentBalance")
-      .populate("createdBy", "name email");
+      .lean();
 
     if (!txn)
       return res
@@ -4591,6 +4800,14 @@ export const updateTransaction = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Transaction not found" });
 
+    const previousTransactionState = {
+      billReference: String(txn.billReference || "").trim(),
+      paymentMethod: String(txn.paymentMethod || "").trim(),
+      paymentDate: txn.paymentDate ? new Date(txn.paymentDate) : null,
+      amount: Number(txn.amount || 0),
+      head: String(txn.head || "").trim(),
+    };
+
     // Reverse old balance effect
     const oldType = await AccountingType.findById(txn.type);
     const oldDirection = oldType?.name === "Income" ? 1 : -1;
@@ -4639,20 +4856,114 @@ export const updateTransaction = async (req, res) => {
 
     await txn.save();
 
+    const linkedFeePayment = await FeePayment.findOne({
+      status: "Completed",
+      $or: [
+        previousTransactionState.billReference
+          ? { receiptNo: previousTransactionState.billReference }
+          : null,
+        previousTransactionState.billReference
+          ? { voucherNo: previousTransactionState.billReference }
+          : null,
+        String(txn.billReference || "").trim()
+          ? { receiptNo: String(txn.billReference || "").trim() }
+          : null,
+        String(txn.billReference || "").trim()
+          ? { voucherNo: String(txn.billReference || "").trim() }
+          : null,
+      ].filter(Boolean),
+    }).sort({ paymentDate: -1, createdAt: -1 });
+
+    if (linkedFeePayment) {
+      const nextBillReference = String(txn.billReference || "").trim();
+      const previousBillReference = previousTransactionState.billReference;
+
+      if (paymentMethod && resolvedMethod) {
+        linkedFeePayment.accountingPaymentMethodId = String(resolvedMethod._id);
+        linkedFeePayment.paymentMethod = resolvedMethod.name || linkedFeePayment.paymentMethod;
+      }
+
+      if (paymentDate) {
+        linkedFeePayment.paymentDate = new Date(paymentDate);
+      }
+
+      if (amount !== undefined) {
+        linkedFeePayment.amount = Number(amount);
+      }
+
+      if (billReference !== undefined && nextBillReference) {
+        if (String(linkedFeePayment.receiptNo || "").trim() === previousBillReference) {
+          linkedFeePayment.receiptNo = nextBillReference;
+        }
+        if (String(linkedFeePayment.voucherNo || "").trim() === previousBillReference) {
+          linkedFeePayment.voucherNo = nextBillReference;
+        }
+      }
+
+      await linkedFeePayment.save();
+
+      if (linkedFeePayment.feeStructure) {
+        const feeStructure = await FeeStructure.findById(linkedFeePayment.feeStructure);
+        if (feeStructure) {
+          const amountDelta =
+            Number(linkedFeePayment.amount || 0) - previousTransactionState.amount;
+
+          feeStructure.paidAmount = Math.max(
+            0,
+            Number(feeStructure.paidAmount || 0) + amountDelta,
+          );
+
+          if (
+            linkedFeePayment.installmentNumber &&
+            Array.isArray(feeStructure.installments)
+          ) {
+            const targetInstallment = feeStructure.installments.find(
+              (item) =>
+                Number(item?.installmentNumber) ===
+                Number(linkedFeePayment.installmentNumber),
+            );
+
+            if (targetInstallment) {
+              targetInstallment.paidAmount = Math.max(
+                0,
+                Number(targetInstallment.paidAmount || 0) + amountDelta,
+              );
+              if (paymentDate) {
+                targetInstallment.paidDate = new Date(paymentDate);
+              }
+
+              if (billReference !== undefined && nextBillReference) {
+                targetInstallment.receiptNumber = nextBillReference;
+                targetInstallment.voucherNo = nextBillReference;
+              }
+
+              const installmentTotal = Number(targetInstallment.amount || 0);
+              if (targetInstallment.paidAmount <= 0) {
+                targetInstallment.status = "Pending";
+              } else if (targetInstallment.paidAmount >= installmentTotal) {
+                targetInstallment.status = "Paid";
+              } else {
+                targetInstallment.status = "Partial";
+              }
+            }
+          }
+
+          syncFeeStructurePaymentStatus(feeStructure);
+          await feeStructure.save();
+        }
+      }
+    }
+
     // Apply new balance effect
     const newType = await AccountingType.findById(txn.type);
     const newDirection = newType?.name === "Income" ? 1 : -1;
     await adjustBalance(txn.paymentMethod, txn.amount, newDirection);
 
-    await txn.populate([
-      "type",
-      "head",
-      { path: "paymentMethod", select: "name type" },
-    ]);
+    const freshTxn = await AccountingTransaction.findById(txn._id).lean();
 
     res.status(200).json({
       success: true,
-      data: await serializeTransactionRecord(txn),
+      data: await serializeTransactionRecord(freshTxn),
       message: "Transaction updated successfully",
     });
   } catch (error) {
