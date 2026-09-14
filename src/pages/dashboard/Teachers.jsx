@@ -16,6 +16,7 @@ import {
   Spin,
   InputNumber,
   DatePicker,
+  Select,
 } from "antd";
 import LoaderSpnar from "../../components/loader/loaderSpnar";
 import React, { useState, useEffect } from "react";
@@ -50,6 +51,7 @@ import {
   getTeacherCompensationDetails,
   updateTeacherStudentCompensation,
   updateTeacherMonthlySalaryConfig,
+  transferTeacherStudent,
 } from "../../services/feeService";
 import dayjs from "dayjs";
 import * as XLSX from "xlsx";
@@ -106,6 +108,10 @@ const Teachers = () => {
   const [selectedStudentCompensation, setSelectedStudentCompensation] = useState(null);
   const [savingStudentCompensation, setSavingStudentCompensation] = useState(false);
   const [studentCompensationForm] = Form.useForm();
+  const [studentTransferModalOpen, setStudentTransferModalOpen] = useState(false);
+  const [selectedStudentTransfer, setSelectedStudentTransfer] = useState(null);
+  const [savingStudentTransfer, setSavingStudentTransfer] = useState(false);
+  const [studentTransferForm] = Form.useForm();
 
   // Fetch teachers and courses on mount
   useEffect(() => {
@@ -128,6 +134,12 @@ const Teachers = () => {
       bonusNote: "",
     });
     fetchTeacherCompensation(selectedTeacher._id, selectedCompensationMonth);
+
+    const refreshCompensationOnFocus = () => {
+      fetchTeacherCompensation(selectedTeacher._id, selectedCompensationMonth);
+    };
+    window.addEventListener("focus", refreshCompensationOnFocus);
+    return () => window.removeEventListener("focus", refreshCompensationOnFocus);
   }, [showIdCard, selectedTeacher?._id, selectedCompensationMonth]);
 
   const fetchTeachers = async () => {
@@ -276,6 +288,87 @@ const Teachers = () => {
     setStudentCompensationModalOpen(false);
     setSelectedStudentCompensation(null);
     studentCompensationForm.resetFields();
+  };
+
+  const getTeacherCourseOptions = (teacherId) => {
+    const teacher = teachers.find((item) => String(item._id) === String(teacherId));
+    return (teacher?.courseId || [])
+      .map((course) => ({
+        label: `${course?.courseName || "Course"}${course?.courseId ? ` (${course.courseId})` : ""}`,
+        value: course?._id,
+      }))
+      .filter((course) => course.value);
+  };
+
+  const getStudentTransferSourceOptions = (studentId) => {
+    if (!isCompensationResponseShape(teacherCompensation)) return [];
+
+    return (teacherCompensation.courses || []).flatMap((course) =>
+      (course.activeStudents || [])
+        .filter((student) => String(student.studentId) === String(studentId))
+        .map((student) => ({
+          label: `${course.courseName} (${course.courseId}) - ${student.batchName} (${student.batchCode})`,
+          value: student.enrollmentId,
+          student,
+          course,
+        })),
+    );
+  };
+
+  const openStudentTransferModal = (student) => {
+    const sourceOptions = getStudentTransferSourceOptions(student.studentId);
+    setSelectedStudentTransfer(student);
+    studentTransferForm.setFieldsValue({
+      sourceEnrollmentId: sourceOptions.length === 1 ? sourceOptions[0].value : undefined,
+      targetTeacherId: undefined,
+      targetCourseId: undefined,
+      transferDate: dayjs(),
+      reason: "",
+    });
+    setStudentTransferModalOpen(true);
+  };
+
+  const closeStudentTransferModal = () => {
+    setStudentTransferModalOpen(false);
+    setSelectedStudentTransfer(null);
+    studentTransferForm.resetFields();
+  };
+
+  const handleTransferStudent = async () => {
+    if (!selectedTeacher?._id || !selectedStudentTransfer || !selectedCompensationMonth) {
+      return;
+    }
+
+    setSavingStudentTransfer(true);
+    try {
+      const values = await studentTransferForm.validateFields();
+      const selectedMonth = dayjs(`${selectedCompensationMonth}-01`);
+      const response = await transferTeacherStudent(selectedTeacher._id, {
+        enrollmentId: values.sourceEnrollmentId,
+        studentId: selectedStudentTransfer.studentId,
+        targetTeacherId: values.targetTeacherId,
+        targetCourseId: values.targetCourseId,
+        transferDate: values.transferDate.format("YYYY-MM-DD"),
+        reason: values.reason,
+        year: selectedMonth.year(),
+        month: selectedMonth.month() + 1,
+      });
+
+      if (response.success) {
+        if (isCompensationResponseShape(response.data)) {
+          setTeacherCompensation(response.data);
+        } else {
+          await fetchTeacherCompensation(selectedTeacher._id, selectedCompensationMonth);
+        }
+        await fetchTeachers();
+        message.success(response.message || "Student moved successfully");
+        closeStudentTransferModal();
+      }
+    } catch (error) {
+      message.error(error.message || "Failed to move student");
+    } finally {
+      setSavingStudentTransfer(false);
+    }
   };
 
   const didStudentCompensationUpdatePersist = (compensationData, studentId, expectedAmount) => {
@@ -962,10 +1055,94 @@ const Teachers = () => {
       0,
       displayedProjectedMonthlySalary - payrollDeductionAmount,
     ) + payrollBonusAmount;
+    const regularSalaryStudents = studentsForSalary.filter(
+      (student) => student.isMovedStudent !== true,
+    );
+    const movedSalaryStudents = studentsForSalary.filter(
+      (student) => student.isMovedStudent === true,
+    );
+    const renderSalaryStudentRow = (student) => (
+      <div
+        key={student.studentId}
+        className={`rounded-xl border p-3 ${
+          student.isMovedStudent
+            ? "border-blue-200 bg-blue-50"
+            : "border-slate-200 bg-slate-50"
+        }`}
+      >
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-semibold text-[#01134C]">
+                {student.studentName}
+              </span>
+              {student.isMovedStudent ? <Tag color="blue">Moved Student</Tag> : null}
+            </div>
+            <div className="text-xs text-slate-500">
+              Reg #: {student.registrationNo} | Working Days:{" "}
+              {student.totalWorkingDays}
+            </div>
+            {student.isMovedStudent && student.transferReason ? (
+              <div className="mt-1 text-xs text-blue-700">
+                Reason: {student.transferReason}
+              </div>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-2">
+            <Tag
+              color={
+                student.isSalaryEligible
+                  ? "green"
+                  : "red"
+              }
+            >
+              {student.monthlyAttendancePercentage}%
+            </Tag>
+            <Tag
+              color={
+                student.isSalaryEligible
+                  ? "blue"
+                  : "default"
+              }
+            >
+              {Number(student.calculatedSalaryAmount || 0) > 0
+                ? formatCurrency(student.calculatedSalaryAmount)
+                : "Not counted"}
+            </Tag>
+            {student.hasManualAdjustment ? (
+              <Tag color="purple">Manual</Tag>
+            ) : null}
+            <Button
+              size="small"
+              icon={<FaEdit />}
+              onClick={() => openStudentCompensationModal(student)}
+              disabled={!permissions.update}
+            >
+              Edit
+            </Button>
+            <Button
+              size="small"
+              disabled={!permissions.update}
+              onClick={() => openStudentTransferModal(student)}
+            >
+              Move
+            </Button>
+          </div>
+        </div>
+        {student.hasManualAdjustment ? (
+          <div className="mt-2 text-xs text-slate-500">
+            Manual override active
+            {student.manualAdjustmentNote
+              ? ` - ${student.manualAdjustmentNote}`
+              : ""}
+          </div>
+        ) : null}
+      </div>
+    );
 
     return (
       <div className="space-y-4">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-5">
           <Card size="small">
             <div className="text-xs text-slate-500">Assigned Courses</div>
             <div className="mt-1 text-xl font-bold text-[#01134C]">
@@ -973,9 +1150,15 @@ const Teachers = () => {
             </div>
           </Card>
           <Card size="small">
-            <div className="text-xs text-slate-500">Active Students</div>
+            <div className="text-xs text-slate-500">All Students</div>
             <div className="mt-1 text-xl font-bold text-[#01134C]">
               {summary.totalActiveStudents}
+            </div>
+          </Card>
+          <Card size="small">
+            <div className="text-xs text-slate-500">Moved Students</div>
+            <div className="mt-1 text-xl font-bold text-blue-700">
+              {summary.movedStudents || 0}
             </div>
           </Card>
           <Card size="small">
@@ -1223,65 +1406,23 @@ const Teachers = () => {
             <Empty description="No active students linked to this teacher" />
           ) : (
             <div className="space-y-3">
-              {studentsForSalary.map((student) => (
-                <div
-                  key={student.studentId}
-                  className="rounded-xl border border-slate-200 bg-slate-50 p-3"
-                >
-                  <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <div className="text-sm font-semibold text-[#01134C]">
-                        {student.studentName}
-                      </div>
-                      <div className="text-xs text-slate-500">
-                        Reg #: {student.registrationNo} | Working Days:{" "}
-                        {student.totalWorkingDays}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Tag
-                        color={
-                          student.isSalaryEligible
-                            ? "green"
-                            : "red"
-                        }
-                      >
-                        {student.monthlyAttendancePercentage}%
-                      </Tag>
-                      <Tag
-                        color={
-                          student.isSalaryEligible
-                            ? "blue"
-                            : "default"
-                        }
-                      >
-                        {Number(student.calculatedSalaryAmount || 0) > 0
-                          ? formatCurrency(student.calculatedSalaryAmount)
-                          : "Not counted"}
-                      </Tag>
-                      {student.hasManualAdjustment ? (
-                        <Tag color="purple">Manual</Tag>
-                      ) : null}
-                      <Button
-                        size="small"
-                        icon={<FaEdit />}
-                        onClick={() => openStudentCompensationModal(student)}
-                        disabled={!permissions.update}
-                      >
-                        Edit
-                      </Button>
-                    </div>
+              <div className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                Active Students ({regularSalaryStudents.length})
+              </div>
+              {regularSalaryStudents.length ? (
+                regularSalaryStudents.map(renderSalaryStudentRow)
+              ) : (
+                <Empty description="No regular active students linked to this teacher" />
+              )}
+
+              {movedSalaryStudents.length ? (
+                <>
+                  <div className="pt-3 text-xs font-semibold uppercase tracking-[0.08em] text-blue-700">
+                    Moved Students ({movedSalaryStudents.length})
                   </div>
-                  {student.hasManualAdjustment ? (
-                    <div className="mt-2 text-xs text-slate-500">
-                      Manual override active
-                      {student.manualAdjustmentNote
-                        ? ` - ${student.manualAdjustmentNote}`
-                        : ""}
-                    </div>
-                  ) : null}
-                </div>
-              ))}
+                  {movedSalaryStudents.map(renderSalaryStudentRow)}
+                </>
+              ) : null}
             </div>
           )}
         </Card>
@@ -1499,6 +1640,105 @@ const Teachers = () => {
             <Input.TextArea
               rows={3}
               placeholder="Optional note for this student's salary adjustment"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="Move Student To Another Teacher"
+        open={studentTransferModalOpen}
+        onCancel={closeStudentTransferModal}
+        width={620}
+        footer={[
+          <Button key="cancel" onClick={closeStudentTransferModal}>
+            Cancel
+          </Button>,
+          <Button
+            key="move"
+            type="primary"
+            loading={savingStudentTransfer}
+            onClick={handleTransferStudent}
+            style={{ background: "#01134C", borderColor: "#01134C" }}
+          >
+            Move Student
+          </Button>,
+        ]}
+      >
+        <Form form={studentTransferForm} layout="vertical">
+          <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+            <div className="font-semibold text-[#01134C]">
+              {selectedStudentTransfer?.studentName || "Selected student"}
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              Reg #: {selectedStudentTransfer?.registrationNo || "N/A"} | Choose the current course/batch below, then select the new teacher.
+            </div>
+          </div>
+
+          <Form.Item
+            label="Current Course / Batch"
+            name="sourceEnrollmentId"
+            rules={[{ required: true, message: "Please select the current course and batch" }]}
+          >
+            <Select
+              placeholder="Select course and batch to move"
+              options={getStudentTransferSourceOptions(selectedStudentTransfer?.studentId)}
+            />
+          </Form.Item>
+
+          <Form.Item
+            label="Move To Teacher"
+            name="targetTeacherId"
+            rules={[{ required: true, message: "Please select target teacher" }]}
+          >
+            <Select
+              showSearch
+              placeholder="Select teacher"
+              options={teachers
+                .filter((teacher) => String(teacher._id) !== String(selectedTeacher?._id))
+                .map((teacher) => ({
+                  label: `${teacher.fullName} (${teacher.teacherId || "No ID"})`,
+                  value: teacher._id,
+                }))}
+              filterOption={(input, option) =>
+                String(option?.label || "").toLowerCase().includes(input.toLowerCase())
+              }
+              onChange={() => studentTransferForm.setFieldValue("targetCourseId", undefined)}
+            />
+          </Form.Item>
+
+          <Form.Item shouldUpdate={(prev, next) => prev.targetTeacherId !== next.targetTeacherId}>
+            {({ getFieldValue }) => (
+              <Form.Item
+                label="Teacher Course"
+                name="targetCourseId"
+                rules={[{ required: true, message: "Please select teacher course" }]}
+              >
+                <Select
+                  placeholder="Select target teacher first"
+                  disabled={!getFieldValue("targetTeacherId")}
+                  options={getTeacherCourseOptions(getFieldValue("targetTeacherId"))}
+                />
+              </Form.Item>
+            )}
+          </Form.Item>
+
+          <Form.Item
+            label="Transfer Date"
+            name="transferDate"
+            rules={[{ required: true, message: "Please select transfer date" }]}
+          >
+            <DatePicker className="w-full" format="DD MMM YYYY" />
+          </Form.Item>
+
+          <Form.Item
+            label="Reason"
+            name="reason"
+            rules={[{ required: true, message: "Please enter transfer reason" }]}
+          >
+            <Input.TextArea
+              rows={3}
+              placeholder="Why is this student being moved to another teacher?"
             />
           </Form.Item>
         </Form>

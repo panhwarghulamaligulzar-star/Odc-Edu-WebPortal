@@ -6,6 +6,7 @@ import createTeacher, {
   getTeacherCompensationDetails,
   updateTeacherStudentCompensation,
   updateTeacherMonthlySalaryConfig,
+  transferTeacherStudent,
   updateTeacher,
   deleteTeacher,
   bulkImportTeachers,
@@ -51,6 +52,13 @@ teacherRouter.put(
   authMiddleware,
   authorize("employees", "update"),
   updateTeacherMonthlySalaryConfig,
+);
+
+teacherRouter.put(
+  "/:id/transfer-student",
+  authMiddleware,
+  authorize("employees", "update"),
+  transferTeacherStudent,
 );
 
 // Get teacher by ID

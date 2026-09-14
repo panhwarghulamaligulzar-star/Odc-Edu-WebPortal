@@ -7,6 +7,7 @@ import BatchSchema from "../modules/batchModule.js";
 import HolidaySchema from "../modules/holidayModule.js";
 import * as XLSX from "xlsx";
 import TeacherPayroll from "../modules/teacherPayrollModule.js";
+import StudentTeacherAssignment from "../modules/studentTeacherAssignmentModule.js";
 
 const getRowValue = (row, keys = []) => {
   for (const key of keys) {
@@ -473,6 +474,24 @@ export const calculateTeacherCompensationData = async (
   const assignedCourseIds = (teacher.courseId || [])
     .map((course) => (course?._id ? course._id : course))
     .filter(Boolean);
+  const teacherId = String(teacher._id);
+  const teacherCourseMap = new Map(
+    (teacher.courseId || [])
+      .filter((course) => course?._id)
+      .map((course) => [String(course._id), course]),
+  );
+  const activeAssignments = await StudentTeacherAssignment.find({ isActive: true })
+    .populate("student", "studentName registrationNo mobileNumber isActive")
+    .populate("enrollment")
+    .populate("batch", "batchName batchCode days")
+    .populate("assignedCourse", "courseName courseId")
+    .lean();
+  const assignmentByEnrollment = new Map(
+    activeAssignments.map((assignment) => [
+      String(assignment.enrollment?._id || assignment.enrollment),
+      assignment,
+    ]),
+  );
 
   const enrollments = await EnrollmentSchema.find({
     course: { $in: assignedCourseIds },
@@ -482,9 +501,31 @@ export const calculateTeacherCompensationData = async (
     .populate("batch", "batchName batchCode days")
     .lean();
 
-  const activeEnrollments = enrollments.filter(
-    (enrollment) => enrollment.student && enrollment.student.isActive !== false,
-  );
+  const defaultActiveEnrollments = enrollments
+    .filter((enrollment) => enrollment.student && enrollment.student.isActive !== false)
+    .filter((enrollment) => {
+      const assignment = assignmentByEnrollment.get(String(enrollment._id));
+      return !assignment || String(assignment.teacher?._id || assignment.teacher) === teacherId;
+    });
+  const transferredEnrollments = activeAssignments
+    .filter((assignment) => String(assignment.teacher?._id || assignment.teacher) === teacherId)
+    .filter((assignment) => assignment.student && assignment.student.isActive !== false)
+    .map((assignment) => ({
+      ...(assignment.enrollment || {}),
+      _id: assignment.enrollment?._id || assignment.enrollment,
+      student: assignment.student,
+      course: assignment.assignedCourse?._id || assignment.assignedCourse,
+      batch: assignment.batch || assignment.enrollment?.batch,
+      teacherAssignment: assignment,
+    }))
+    .filter((enrollment) => enrollment._id && enrollment.student && enrollment.course);
+
+  const activeEnrollmentMap = new Map();
+  [...defaultActiveEnrollments, ...transferredEnrollments].forEach((enrollment) => {
+    const key = String(enrollment._id);
+    if (key) activeEnrollmentMap.set(key, enrollment);
+  });
+  const activeEnrollments = Array.from(activeEnrollmentMap.values());
 
   const uniqueStudentIds = [
     ...new Set(activeEnrollments.map((enrollment) => String(enrollment.student._id))),
@@ -532,8 +573,12 @@ export const calculateTeacherCompensationData = async (
 
   activeEnrollments.forEach((enrollment) => {
     const courseId = String(enrollment.course);
+    const assignment = enrollment.teacherAssignment || null;
+    const assignedCourse = assignment?.assignedCourse || null;
     const courseMeta =
-      (teacher.courseId || []).find((course) => String(course?._id) === courseId) || null;
+      assignedCourse?._id || assignedCourse?.courseName
+        ? assignedCourse
+        : teacherCourseMap.get(courseId) || null;
 
     if (!courseSummariesMap.has(courseId)) {
       courseSummariesMap.set(courseId, {
@@ -576,8 +621,9 @@ export const calculateTeacherCompensationData = async (
     const attendancePercentage =
       totalWorkingDays > 0 ? round2((attendedUnits / totalWorkingDays) * 100) : 0;
 
-    const studentMonthEntry = {
+      const studentMonthEntry = {
       enrollmentId: String(enrollment._id),
+      assignmentId: assignment?._id || null,
       studentId,
       studentName: enrollment.student.studentName,
       registrationNo: enrollment.student.registrationNo || "N/A",
@@ -585,6 +631,9 @@ export const calculateTeacherCompensationData = async (
       batchId,
       batchName: enrollment.batch?.batchName || "Batch not linked",
       batchCode: enrollment.batch?.batchCode || "N/A",
+      assignedTeacherId: teacherId,
+      transferDate: assignment?.transferDate || null,
+      transferReason: assignment?.reason || "",
       totalWorkingDays,
       presentDays,
       halfDays,
@@ -601,6 +650,9 @@ export const calculateTeacherCompensationData = async (
         studentId,
         studentName: enrollment.student.studentName,
         registrationNo: enrollment.student.registrationNo || "N/A",
+        isMovedStudent: false,
+        transferDate: null,
+        transferReason: "",
         totalWorkingDays: 0,
         attendedUnits: 0,
         presentDays: 0,
@@ -612,6 +664,11 @@ export const calculateTeacherCompensationData = async (
     }
 
     const aggregated = studentMonthMap.get(studentId);
+    if (assignment) {
+      aggregated.isMovedStudent = true;
+      aggregated.transferDate = assignment.transferDate || aggregated.transferDate;
+      aggregated.transferReason = assignment.reason || aggregated.transferReason;
+    }
     aggregated.totalWorkingDays += totalWorkingDays;
     aggregated.attendedUnits += attendedUnits;
     aggregated.presentDays += presentDays;
@@ -676,6 +733,9 @@ export const calculateTeacherCompensationData = async (
       studentId: student.studentId,
       studentName: student.studentName,
       registrationNo: student.registrationNo,
+      isMovedStudent: student.isMovedStudent === true,
+      transferDate: student.transferDate || null,
+      transferReason: student.transferReason || "",
       totalWorkingDays: student.totalWorkingDays,
       attendedUnits: round2(student.attendedUnits),
       presentDays: student.presentDays,
@@ -696,6 +756,9 @@ export const calculateTeacherCompensationData = async (
   });
 
   const eligibleStudents = uniqueStudentSummaries.filter((student) => student.isSalaryEligible);
+  const movedStudents = uniqueStudentSummaries.filter(
+    (student) => student.isMovedStudent === true,
+  );
   const calculatedMonthlySalary =
     salaryType === "per_student"
       ? round2(
@@ -738,6 +801,7 @@ export const calculateTeacherCompensationData = async (
     summary: {
       totalAssignedCourses: assignedCourseIds.length,
       totalActiveStudents: uniqueStudentSummaries.length,
+      movedStudents: movedStudents.length,
       eligibleStudents: eligibleStudents.length,
       calculatedMonthlySalary,
       finalMonthlySalary,
@@ -1096,6 +1160,92 @@ export const updateTeacherMonthlySalaryConfig = async (req, res) => {
       success: false,
       message: error.message || "Internal server error",
     });
+  }
+};
+
+export const transferTeacherStudent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      enrollmentId,
+      studentId,
+      targetTeacherId,
+      targetCourseId,
+      transferDate,
+      reason,
+      year,
+      month,
+    } = req.body || {};
+
+    if (!enrollmentId || !studentId || !targetTeacherId || !targetCourseId || !transferDate || !String(reason || "").trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Student, target teacher, target course, transfer date, and reason are required",
+      });
+    }
+
+    if (String(id) === String(targetTeacherId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Please choose a different teacher for the transfer",
+      });
+    }
+
+    const [sourceTeacher, targetTeacher, enrollment] = await Promise.all([
+      TeacherSchema.findById(id).lean(),
+      TeacherSchema.findById(targetTeacherId).lean(),
+      EnrollmentSchema.findById(enrollmentId).lean(),
+    ]);
+
+    if (!sourceTeacher) {
+      return res.status(404).json({ success: false, message: "Current teacher not found" });
+    }
+    if (!targetTeacher) {
+      return res.status(404).json({ success: false, message: "Target teacher not found" });
+    }
+    if (!enrollment || String(enrollment.student) !== String(studentId)) {
+      return res.status(404).json({ success: false, message: "Student enrollment not found" });
+    }
+
+    const targetTeacherCourseIds = (targetTeacher.courseId || []).map((course) => String(course));
+    if (!targetTeacherCourseIds.includes(String(targetCourseId))) {
+      return res.status(400).json({
+        success: false,
+        message: "Selected course is not assigned to the target teacher",
+      });
+    }
+
+    await StudentTeacherAssignment.updateMany(
+      { enrollment: enrollmentId, isActive: true },
+      { $set: { isActive: false } },
+    );
+
+    await StudentTeacherAssignment.create({
+      student: studentId,
+      enrollment: enrollmentId,
+      sourceCourse: enrollment.course,
+      assignedCourse: targetCourseId,
+      batch: enrollment.batch || null,
+      fromTeacher: id,
+      teacher: targetTeacherId,
+      transferDate: new Date(transferDate),
+      reason: String(reason || "").trim(),
+      createdBy: req.user?._id || null,
+    });
+
+    const selectedYear = Number(year) || new Date().getFullYear();
+    const selectedMonth = Number(month) || new Date().getMonth() + 1;
+    const refreshedTeacher = await TeacherSchema.findById(id).populate("courseId", "courseName courseId");
+    const data = await calculateTeacherCompensationData(refreshedTeacher, selectedYear, selectedMonth);
+
+    return res.status(200).json({
+      success: true,
+      message: "Student moved to the selected teacher successfully",
+      data,
+    });
+  } catch (error) {
+    console.error("Transfer teacher student error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
