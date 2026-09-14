@@ -392,6 +392,7 @@ export default function Receipt() {
 
     const exportRows = response?.data || [];
     const exportSummary = response?.summary || {};
+    const monthlySummary = response?.monthlySummary || [];
 
     const workbook = XLSX.utils.book_new();
 
@@ -427,6 +428,7 @@ export default function Receipt() {
         const status = row.dueStatus || "";
         const isPendingInstallment =
           status === "Pending" || Number(row.paidAmount || 0) <= 0;
+        const dueDate = row.dueDate ? dayjs(row.dueDate) : null;
 
         return {
           "Sr. No": index + 1,
@@ -436,7 +438,9 @@ export default function Receipt() {
           Course: row.course?.courseName || "",
           "Course ID": row.course?.courseId || "",
           Description: row.description || "",
-          "Due Date": row.dueDate ? dayjs(row.dueDate).format("DD MMM YYYY") : "",
+          "Due Month": dueDate ? dueDate.format("MMMM YYYY") : "",
+          "Due Day": dueDate ? dueDate.format("DD") : "",
+          "Due Date": dueDate ? dueDate.format("DD MMM YYYY") : "",
           "Installment No": row.installmentNumber || "",
           Amount: Number(row.amount || 0),
           Paid: Number(row.paidAmount || 0),
@@ -447,8 +451,19 @@ export default function Receipt() {
         };
       }),
     );
+    const monthlySheet = XLSX.utils.json_to_sheet(
+      monthlySummary.map((row) => ({
+        Month: row.monthName || "",
+        "Due Days": row.days || "",
+        "No. of Installments": Number(row.installmentCount || 0),
+        "Total Amount": Number(row.totalAmount || 0),
+        "Paid Amount": Number(row.paidAmount || 0),
+        "Pending Amount": Number(row.remainingAmount || 0),
+      })),
+    );
 
     XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+    XLSX.utils.book_append_sheet(workbook, monthlySheet, "Month Summary");
     XLSX.utils.book_append_sheet(workbook, detailsSheet, "Receipt Dues");
 
     XLSX.writeFile(

@@ -2043,6 +2043,40 @@ const buildDueEntries = (feeStructure) => {
   ];
 };
 
+const buildInstallmentMonthSummary = (rows = []) => {
+  const monthMap = new Map();
+
+  rows.forEach((row) => {
+    const dueDate = row?.dueDate ? new Date(row.dueDate) : null;
+    if (!dueDate || Number.isNaN(dueDate.getTime())) return;
+
+    const monthKey = `${dueDate.getFullYear()}-${String(dueDate.getMonth() + 1).padStart(2, "0")}`;
+    const existing = monthMap.get(monthKey) || {
+      monthKey,
+      monthName: dueDate.toLocaleString("en-US", { month: "long", year: "numeric" }),
+      installmentCount: 0,
+      totalAmount: 0,
+      paidAmount: 0,
+      remainingAmount: 0,
+      days: new Set(),
+    };
+
+    existing.installmentCount += 1;
+    existing.totalAmount += Number(row?.amount || 0);
+    existing.paidAmount += Number(row?.paidAmount || 0);
+    existing.remainingAmount += Number(row?.remainingAmount || 0);
+    existing.days.add(String(dueDate.getDate()).padStart(2, "0"));
+    monthMap.set(monthKey, existing);
+  });
+
+  return Array.from(monthMap.values())
+    .sort((a, b) => a.monthKey.localeCompare(b.monthKey))
+    .map((item) => ({
+      ...item,
+      days: Array.from(item.days).sort((a, b) => Number(a) - Number(b)).join(", "),
+    }));
+};
+
 // ============================================================
 // EXPENSE HEAD ENTRIES
 // ============================================================
@@ -3017,6 +3051,7 @@ export const getReceiptDuesOverview = async (req, res) => {
           bankCollected: 0,
           unassignedCollected: 0,
         },
+        monthlySummary: [],
         pagination: {
           total: 0,
           page: Number(page),
@@ -3106,6 +3141,7 @@ export const getReceiptDuesOverview = async (req, res) => {
         pendingCount: 0,
       },
     );
+    const monthlySummary = buildInstallmentMonthSummary(filteredRows);
 
     const parsedPage = Math.max(1, Number(page) || 1);
     const parsedLimit = Math.max(1, Number(limit) || 50);
@@ -3116,6 +3152,7 @@ export const getReceiptDuesOverview = async (req, res) => {
       success: true,
       data: paginatedRows,
       summary,
+      monthlySummary,
       pagination: {
         total: filteredRows.length,
         page: parsedPage,
@@ -3501,24 +3538,39 @@ export const exportReceiptDues = async (req, res) => {
       resolveAssetPath("public/assets/LOGO-gGjlK6W5.png");
 
     if (normalizedFormat === "excel" || normalizedFormat === "xlsx") {
-      const exportRows = filteredRows.map((row, index) => ({
-        "Sr. No": index + 1,
-        "Registration No": row.student?.registrationNo || "",
-        "Student Name": row.student?.studentName || "",
-        "Mobile Number": row.student?.mobileNumber || "",
-        Course: row.course?.courseName || "",
-        "Course ID": row.course?.courseId || "",
-        Description: row.description || "",
-        "Installment No": row.installmentNumber || "",
-        "Due Date": row.dueDate ? new Date(row.dueDate) : "",
-        Amount: Number(row.amount || 0),
-        Paid: Number(row.paidAmount || 0),
-        Remaining: Number(row.remainingAmount || 0),
-        Status: row.dueStatus || "",
-        "Receipt No": row.receiptNo || row.latestPayment?.receiptNo || "",
-        "Voucher No": row.voucherNo || row.latestPayment?.voucherNo || "",
-        "Payment Count": Number(row.paymentCount || 0),
-      }));
+      const exportRows = filteredRows.map((row, index) => {
+        const dueDate = row.dueDate ? new Date(row.dueDate) : null;
+        const hasDueDate = dueDate && !Number.isNaN(dueDate.getTime());
+        const isPendingInstallment =
+          row.dueStatus === "Pending" || Number(row.paidAmount || 0) <= 0;
+
+        return {
+          "Sr. No": index + 1,
+          "Registration No": row.student?.registrationNo || "",
+          "Student Name": row.student?.studentName || "",
+          "Mobile Number": row.student?.mobileNumber || "",
+          Course: row.course?.courseName || "",
+          "Course ID": row.course?.courseId || "",
+          Description: row.description || "",
+          "Due Month": hasDueDate
+            ? dueDate.toLocaleString("en-US", { month: "long", year: "numeric" })
+            : "",
+          "Due Day": hasDueDate ? String(dueDate.getDate()).padStart(2, "0") : "",
+          "Installment No": row.installmentNumber || "",
+          "Due Date": hasDueDate ? dueDate : "",
+          Amount: Number(row.amount || 0),
+          Paid: Number(row.paidAmount || 0),
+          Remaining: Number(row.remainingAmount || 0),
+          Status: row.dueStatus || "",
+          "Receipt No": isPendingInstallment
+            ? ""
+            : row.receiptNo || row.latestPayment?.receiptNo || "",
+          "Voucher No": isPendingInstallment
+            ? ""
+            : row.voucherNo || row.latestPayment?.voucherNo || "",
+          "Payment Count": Number(row.paymentCount || 0),
+        };
+      });
 
       const summaryRows = [
         { Metric: "Export Type", Value: exportType },
@@ -3545,9 +3597,20 @@ export const exportReceiptDues = async (req, res) => {
 
       const workbook = XLSX.utils.book_new();
       const summarySheet = XLSX.utils.json_to_sheet(summaryRows);
+      const monthlySheet = XLSX.utils.json_to_sheet(
+        monthlySummary.map((row) => ({
+          Month: row.monthName || "",
+          "Due Days": row.days || "",
+          "No. of Installments": Number(row.installmentCount || 0),
+          "Total Amount": Number(row.totalAmount || 0),
+          "Paid Amount": Number(row.paidAmount || 0),
+          "Pending Amount": Number(row.remainingAmount || 0),
+        })),
+      );
       const detailsSheet = XLSX.utils.json_to_sheet(exportRows);
 
       XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
+      XLSX.utils.book_append_sheet(workbook, monthlySheet, "Month Summary");
       XLSX.utils.book_append_sheet(workbook, detailsSheet, "Receipt Dues");
 
       const workbookBuffer = XLSX.write(workbook, {
@@ -3681,7 +3744,8 @@ export const exportReceiptDues = async (req, res) => {
       doc.restore();
     };
 
-    let contentTop = drawHeader();
+    let pageNum = 1;
+    let contentTop = drawHeader(pageNum);
 
     // Summary Box
     const boxTop = contentTop + 10;
@@ -3751,6 +3815,81 @@ export const exportReceiptDues = async (req, res) => {
 
     contentTop = boxTop + 112;
 
+    if (monthlySummary.length) {
+      const monthlyTop = contentTop;
+      const monthlyHeaderHeight = 24;
+      const monthlyRowHeight = 18;
+      const monthlyHeight = monthlyHeaderHeight + monthlySummary.length * monthlyRowHeight + 12;
+
+      if (monthlyTop + monthlyHeight > doc.page.height - 60) {
+        doc.addPage();
+        contentTop = drawHeader(++pageNum);
+      }
+
+      doc.fillColor(primaryColor)
+        .font("Helvetica-Bold")
+        .fontSize(11)
+        .text("Month Wise Installment Summary", 40, contentTop);
+
+      const monthColumns = [
+        { label: "Month", width: 110 },
+        { label: "Due Days", width: 85 },
+        { label: "Inst.", width: 45, align: "right" },
+        { label: "Amount", width: 80, align: "right" },
+        { label: "Paid", width: 75, align: "right" },
+        { label: "Pending", width: 80, align: "right" },
+      ];
+      let monthY = contentTop + 18;
+      let monthX = 40;
+
+      doc.roundedRect(40, monthY, doc.page.width - 80, 22, 4).fill(primaryColor);
+      doc.fillColor("#ffffff").fontSize(8).font("Helvetica-Bold");
+      monthColumns.forEach((column) => {
+        doc.text(column.label, monthX + 6, monthY + 7, {
+          width: column.width - 10,
+          align: column.align || "left",
+          lineBreak: false,
+        });
+        monthX += column.width;
+      });
+
+      monthY += 22;
+      monthlySummary.forEach((row, index) => {
+        if (index % 2 === 0) {
+          doc.rect(40, monthY, doc.page.width - 80, monthlyRowHeight).fill("#f8fafc");
+        }
+        doc.strokeColor(borderColor)
+          .lineWidth(0.4)
+          .moveTo(40, monthY + monthlyRowHeight)
+          .lineTo(doc.page.width - 40, monthY + monthlyRowHeight)
+          .stroke();
+
+        const rowValues = [
+          sanitizePdfText(row.monthName, "-"),
+          sanitizePdfText(row.days, "-"),
+          String(row.installmentCount || 0),
+          safeCurrency(row.totalAmount || 0),
+          safeCurrency(row.paidAmount || 0),
+          safeCurrency(row.remainingAmount || 0),
+        ];
+
+        monthX = 40;
+        doc.fillColor(darkGray).font(fontFamily).fontSize(8);
+        monthColumns.forEach((column, columnIndex) => {
+          doc.text(rowValues[columnIndex], monthX + 6, monthY + 5, {
+            width: column.width - 10,
+            align: column.align || "left",
+            lineBreak: false,
+          });
+          monthX += column.width;
+        });
+
+        monthY += monthlyRowHeight;
+      });
+
+      contentTop = monthY + 18;
+    }
+
     // Table
     const tableHeaders = [
       { label: "Sr.", width: 30 },
@@ -3769,8 +3908,6 @@ export const exportReceiptDues = async (req, res) => {
     let rowY = contentTop + 28;
     const rowHeight = 19;
     const pageHeight = doc.page.height - 40;
-    let pageNum = 1;
-
     const skippedRows = [];
 
     filteredRows.forEach((row, index) => {
