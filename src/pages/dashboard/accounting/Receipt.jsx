@@ -423,23 +423,29 @@ export default function Receipt() {
     ]);
 
     const detailsSheet = XLSX.utils.json_to_sheet(
-      exportRows.map((row, index) => ({
-        "Sr. No": index + 1,
-        "Student Name": row.student?.studentName || "",
-        "Registration No": row.student?.registrationNo || "",
-        "Mobile Number": row.student?.mobileNumber || "",
-        Course: row.course?.courseName || "",
-        "Course ID": row.course?.courseId || "",
-        Description: row.description || "",
-        "Due Date": row.dueDate ? dayjs(row.dueDate).format("DD MMM YYYY") : "",
-        "Installment No": row.installmentNumber || "",
-        Amount: Number(row.amount || 0),
-        Paid: Number(row.paidAmount || 0),
-        Remaining: Number(row.remainingAmount || 0),
-        Status: row.dueStatus || "",
-        "Receipt No": row.receiptNo || row.latestPayment?.receiptNo || "",
-        "Voucher No": row.voucherNo || row.latestPayment?.voucherNo || "",
-      })),
+      exportRows.map((row, index) => {
+        const status = row.dueStatus || "";
+        const isPendingInstallment =
+          status === "Pending" || Number(row.paidAmount || 0) <= 0;
+
+        return {
+          "Sr. No": index + 1,
+          "Student Name": row.student?.studentName || "",
+          "Registration No": row.student?.registrationNo || "",
+          "Mobile Number": row.student?.mobileNumber || "",
+          Course: row.course?.courseName || "",
+          "Course ID": row.course?.courseId || "",
+          Description: row.description || "",
+          "Due Date": row.dueDate ? dayjs(row.dueDate).format("DD MMM YYYY") : "",
+          "Installment No": row.installmentNumber || "",
+          Amount: Number(row.amount || 0),
+          Paid: Number(row.paidAmount || 0),
+          Remaining: Number(row.remainingAmount || 0),
+          Status: status,
+          "Receipt No": isPendingInstallment ? "" : row.receiptNo || row.latestPayment?.receiptNo || "",
+          "Voucher No": isPendingInstallment ? "" : row.voucherNo || row.latestPayment?.voucherNo || "",
+        };
+      }),
     );
 
     XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary");
