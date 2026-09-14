@@ -2,8 +2,12 @@ import api from "../api/axiosInstance";
 
 // Mark attendance for multiple persons in a batch on a date
 // records: [{ personId, personType: 'student'|'teacher', status, notes }]
-export const bulkMarkAttendance = async (batchId, date, records) => {
-  const response = await api.post("/attendance/bulk", { batchId, date, records });
+export const bulkMarkAttendance = async (batchIdOrPayload, date, records) => {
+  const payload =
+    typeof batchIdOrPayload === "object" && batchIdOrPayload !== null
+      ? batchIdOrPayload
+      : { batchId: batchIdOrPayload, date, records };
+  const response = await api.post("/attendance/bulk", payload);
   return response.data;
 };
 

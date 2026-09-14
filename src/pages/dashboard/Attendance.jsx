@@ -125,6 +125,7 @@ const STATUS_CONFIG = {
   Holiday:   { color: "bg-orange-100 border-orange-400 text-orange-700", activeColor: "bg-orange-500 text-white border-orange-600", icon: <MdBeachAccess size={16} />,  tag: "warning",    dot: "🟠" },
 };
 const STATUSES = ["Present", "Absent", "Half Day", "Leave"];
+const ALL_BATCHES_VALUE = "__all_batches__";
 
 const DOW_MAP = {
   "Monday to Saturday": [1, 2, 3, 4, 5, 6],
@@ -195,6 +196,12 @@ const StatusPicker = ({ value, onChange, disabled = false }) => (
 
 const isStudentAttendanceEligible = (student) =>
   student?.attendanceEligible !== false;
+
+const getBatchOptionLabel = (batch) =>
+  `${batch?.batchName || "Batch"}${batch?.batchCode ? ` (${batch.batchCode})` : ""}`;
+
+const getAttendanceRowKey = (record, fallbackBatchId = "") =>
+  `${record?.attendanceBatchId || record?.batchId || fallbackBatchId}:${record?._id}`;
 
 // ─── Legend ───────────────────────────────────────────────────────────────────
 const Legend = () => (
@@ -267,9 +274,12 @@ function MarkAttendancePanel({ batches }) {
   const [selectedPersonId, setSelectedPersonId] = useState(null);
   const [personCalendarData, setPersonCalendarData] = useState({}); // "YYYY-MM-DD" → status string
   const selectedBatchDetails = useMemo(
-    () => batches.find((batch) => batch._id === selectedBatch) || null,
+    () => selectedBatch === ALL_BATCHES_VALUE
+      ? null
+      : batches.find((batch) => batch._id === selectedBatch) || null,
     [batches, selectedBatch],
   );
+  const isAllBatchesSelected = selectedBatch === ALL_BATCHES_VALUE;
   const [attendanceMode, setAttendanceMode] = useState("manual");
   const [qrScannerOpen, setQrScannerOpen] = useState(false);
   const [qrSupported, setQrSupported] = useState(false);
@@ -303,11 +313,72 @@ function MarkAttendancePanel({ batches }) {
   useEffect(() => {
     if (!selectedBatch) return;
     setLoading(true);
+    if (selectedBatch === ALL_BATCHES_VALUE) {
+      Promise.all(
+        batches.map((batch) =>
+          getBatchMembers(batch._id)
+            .then((res) => ({ batch, data: res.data || { students: [], teachers: [], batch: null } }))
+            .catch(() => ({ batch, data: { students: [], teachers: [], batch: null } })),
+        ),
+      )
+        .then((responses) => {
+          const students = responses.flatMap(({ batch, data }) => {
+            const batchDetails = data.batch || batch;
+            const batchLabel = getBatchOptionLabel(batchDetails);
+
+            return (data.students || []).map((student) => ({
+              ...student,
+              attendanceBatchId: batchDetails?._id || batch._id,
+              attendanceBatchName: batchDetails?.batchName || batch.batchName,
+              attendanceBatchLabel: batchLabel,
+              attendanceBatchCode: batchDetails?.batchCode || batch.batchCode,
+              attendanceBatchDays: batchDetails?.days || batch.days,
+              attendanceBatchShift: batchDetails?.shift || batch.shift,
+              attendanceBatchHoursPerDay: batchDetails?.hoursPerDay || batch.hoursPerDay,
+              attendanceBatchStartDate: batchDetails?.startDate || batch.startDate,
+              attendanceBatchEndDate: batchDetails?.endDate || batch.endDate,
+              attendanceKey: `${batchDetails?._id || batch._id}:${student._id}`,
+            }));
+          });
+
+          setMembers({ students, teachers: [], batch: null });
+          setActiveTab("student");
+          setPersonTypeFilter("student");
+        })
+        .catch(() => message.error("Failed to load batch members"))
+        .finally(() => setLoading(false));
+      return;
+    }
+
     getBatchMembers(selectedBatch)
-      .then((res) => setMembers(res.data || { students: [], teachers: [], batch: null }))
+      .then((res) => {
+        const data = res.data || { students: [], teachers: [], batch: null };
+        const batchId = data.batch?._id || selectedBatch;
+        setMembers({
+          ...data,
+          students: (data.students || []).map((student) => ({
+            ...student,
+            attendanceBatchId: batchId,
+            attendanceBatchName: data.batch?.batchName,
+            attendanceBatchLabel: getBatchOptionLabel(data.batch),
+            attendanceBatchCode: data.batch?.batchCode,
+            attendanceBatchDays: data.batch?.days,
+            attendanceBatchShift: data.batch?.shift,
+            attendanceBatchHoursPerDay: data.batch?.hoursPerDay,
+            attendanceBatchStartDate: data.batch?.startDate,
+            attendanceBatchEndDate: data.batch?.endDate,
+            attendanceKey: `${batchId}:${student._id}`,
+          })),
+          teachers: (data.teachers || []).map((teacher) => ({
+            ...teacher,
+            attendanceBatchId: batchId,
+            attendanceKey: `${batchId}:${teacher._id}`,
+          })),
+        });
+      })
       .catch(() => message.error("Failed to load batch members"))
       .finally(() => setLoading(false));
-  }, [selectedBatch]);
+  }, [batches, selectedBatch]);
 
   useEffect(() => {
     if (!selectedBatchDetails) return;
@@ -692,7 +763,7 @@ function MarkAttendancePanel({ batches }) {
 
   // Reload calendar when batch changes (clear old data first)
   useEffect(() => {
-    if (!selectedBatch) return;
+    if (!selectedBatch || selectedBatch === ALL_BATCHES_VALUE) return;
     setCalendarData({});
     setPersonCalendarData({});
     setSelectedPersonId(null);
@@ -718,10 +789,20 @@ function MarkAttendancePanel({ batches }) {
 
   // Person dropdown options based on type filter
   const personDropdownOptions = useMemo(() => {
-    if (personTypeFilter === "student") return members.students;
+    if (personTypeFilter === "student") {
+      const studentMap = new Map();
+      members.students.forEach((student) => {
+        if (!studentMap.has(student._id)) studentMap.set(student._id, student);
+      });
+      return Array.from(studentMap.values());
+    }
     if (personTypeFilter === "teacher") return members.teachers;
+    const studentMap = new Map();
+    members.students.forEach((student) => {
+      if (!studentMap.has(student._id)) studentMap.set(student._id, student);
+    });
     return [
-      ...members.students.map((s) => ({ ...s, _group: "Students" })),
+      ...Array.from(studentMap.values()).map((s) => ({ ...s, _group: "Students" })),
       ...members.teachers.map((t) => ({ ...t, _group: "Teachers" })),
     ];
   }, [members, personTypeFilter]);
@@ -746,22 +827,35 @@ function MarkAttendancePanel({ batches }) {
     if (!selectedBatch || !selectedDate) return;
     setLoading(true);
     try {
-      const res = await getAttendanceByBatchAndDate(selectedBatch, selectedDate.format("YYYY-MM-DD"));
+      const targetBatches =
+        selectedBatch === ALL_BATCHES_VALUE
+          ? batches
+          : batches.filter((batch) => batch._id === selectedBatch);
+      const responses = await Promise.all(
+        targetBatches.map((batch) =>
+          getAttendanceByBatchAndDate(batch._id, selectedDate.format("YYYY-MM-DD"))
+            .then((res) => ({ batchId: batch._id, records: res.data || [] }))
+            .catch(() => ({ batchId: batch._id, records: [] })),
+        ),
+      );
       const map = {};
       const tmap = {};
-      (res.data || []).forEach((r) => {
-        const pid = r.person?._id || r.person;
-        map[pid] = r.status;
-        if (r.updatedAt) {
-          tmap[pid] = dayjs(r.updatedAt).format("HH:mm, DD MMM");
-        }
+      responses.forEach(({ batchId, records }) => {
+        records.forEach((r) => {
+          const pid = r.person?._id || r.person;
+          const key = `${batchId}:${pid}`;
+          map[key] = r.status;
+          if (r.updatedAt) {
+            tmap[key] = dayjs(r.updatedAt).format("HH:mm, DD MMM");
+          }
+        });
       });
       setAttendanceMap(map);
       setTimeMap(tmap);
       setDirty(false);
     } catch { message.error("Failed to load attendance"); }
     finally { setLoading(false); }
-  }, [selectedBatch, selectedDate]);
+  }, [batches, selectedBatch, selectedDate]);
 
   useEffect(() => { loadAttendance(); }, [loadAttendance]);
 
@@ -888,18 +982,41 @@ function MarkAttendancePanel({ batches }) {
     setSaving(true);
     try {
       const list = activeTab === "student" ? members.students : members.teachers;
-      const records = list
+      const recordsByBatch = list
         .filter((p) => p.personType !== "student" || isStudentAttendanceEligible(p))
-        .map((p) => ({
-        personId: p._id, personType: p.personType,
-        status: attendanceMap[p._id] || "Absent", notes: "",
-      }));
-      await bulkMarkAttendance(selectedBatch, selectedDate.format("YYYY-MM-DD"), records);
+        .filter(isAttendanceOpenForRow)
+        .reduce((acc, p) => {
+          const batchId = p.attendanceBatchId || selectedBatch;
+          if (!batchId || batchId === ALL_BATCHES_VALUE) return acc;
+          const key = p.attendanceKey || getAttendanceRowKey(p, batchId);
+          if (!acc[batchId]) acc[batchId] = [];
+          acc[batchId].push({
+            personId: p._id,
+            personType: p.personType,
+            status: attendanceMap[key] || "Absent",
+            notes: "",
+          });
+          return acc;
+        }, {});
+
+      const batchEntries = Object.entries(recordsByBatch).filter(([, records]) => records.length);
+      if (!batchEntries.length) {
+        message.warning("No attendance records available to save");
+        return;
+      }
+
+      await Promise.all(
+        batchEntries.map(([batchId, records]) =>
+          bulkMarkAttendance(batchId, selectedDate.format("YYYY-MM-DD"), records),
+        ),
+      );
       message.success("Attendance saved successfully!");
       setDirty(false);
       // Refresh time stamps + calendar
       await loadAttendance();
-      await loadCalendar(selectedBatch, selectedDate);
+      if (selectedBatch !== ALL_BATCHES_VALUE) {
+        await loadCalendar(selectedBatch, selectedDate);
+      }
     } catch (err) {
       message.error(err?.response?.data?.message || "Failed to save attendance");
     } finally { setSaving(false); }
@@ -1031,30 +1148,50 @@ function MarkAttendancePanel({ batches }) {
   // If a person is selected, filter the table to show only that person
   const filteredStudents = useMemo(() => {
     if (!selectedPersonId) return members.students;
-    const found = members.students.find((s) => s._id === selectedPersonId);
-    return found ? [found] : members.students;
+    const found = members.students.filter((s) => s._id === selectedPersonId);
+    return found.length ? found : members.students;
   }, [members.students, selectedPersonId]);
 
   const filteredTeachers = useMemo(() => {
     if (!selectedPersonId) return members.teachers;
-    const found = members.teachers.find((t) => t._id === selectedPersonId);
-    return found ? [found] : members.teachers;
+    const found = members.teachers.filter((t) => t._id === selectedPersonId);
+    return found.length ? found : members.teachers;
   }, [members.teachers, selectedPersonId]);
 
+  const isAttendanceOpenForRow = (record) => {
+    if (!isAllBatchesSelected || !selectedDate) return true;
+
+    if (record.attendanceBatchStartDate) {
+      const start = dayjs(record.attendanceBatchStartDate).startOf("day");
+      if (selectedDate.isBefore(start, "day")) return false;
+    }
+
+    if (record.attendanceBatchEndDate) {
+      const end = dayjs(record.attendanceBatchEndDate).endOf("day");
+      if (selectedDate.isAfter(end, "day")) return false;
+    }
+
+    const allowedDays = DOW_MAP[record.attendanceBatchDays] || [];
+    return allowedDays.includes(selectedDate.day());
+  };
+
   const areAllVisibleStudentsPresent = useMemo(() => {
-    const eligibleStudents = filteredStudents.filter(isStudentAttendanceEligible);
+    const eligibleStudents = filteredStudents
+      .filter(isStudentAttendanceEligible)
+      .filter(isAttendanceOpenForRow);
     if (eligibleStudents.length === 0) return false;
     return eligibleStudents.every(
-      (student) => (attendanceMap[student._id] || "Absent") === "Present",
+      (student) => (attendanceMap[student.attendanceKey] || "Absent") === "Present",
     );
-  }, [attendanceMap, filteredStudents]);
+  }, [attendanceMap, filteredStudents, selectedDate, isAllBatchesSelected]);
 
   const areAllVisibleTeachersPresent = useMemo(() => {
-    if (filteredTeachers.length === 0) return false;
-    return filteredTeachers.every(
-      (teacher) => (attendanceMap[teacher._id] || "Absent") === "Present",
+    const eligibleTeachers = filteredTeachers.filter(isAttendanceOpenForRow);
+    if (eligibleTeachers.length === 0) return false;
+    return eligibleTeachers.every(
+      (teacher) => (attendanceMap[teacher.attendanceKey] || "Absent") === "Present",
     );
-  }, [attendanceMap, filteredTeachers]);
+  }, [attendanceMap, filteredTeachers, selectedDate, isAllBatchesSelected]);
 
   const handleMarkAllVisibleStudentsPresent = (event) => {
     const shouldMarkPresent = Boolean(event?.target?.checked);
@@ -1063,8 +1200,9 @@ function MarkAttendancePanel({ batches }) {
       const next = { ...prev };
       filteredStudents
         .filter(isStudentAttendanceEligible)
+        .filter(isAttendanceOpenForRow)
         .forEach((student) => {
-        next[student._id] = shouldMarkPresent ? "Present" : "Absent";
+        next[student.attendanceKey] = shouldMarkPresent ? "Present" : "Absent";
         });
       return next;
     });
@@ -1076,9 +1214,11 @@ function MarkAttendancePanel({ batches }) {
 
     setAttendanceMap((prev) => {
       const next = { ...prev };
-      filteredTeachers.forEach((teacher) => {
-        next[teacher._id] = shouldMarkPresent ? "Present" : "Absent";
-      });
+      filteredTeachers
+        .filter(isAttendanceOpenForRow)
+        .forEach((teacher) => {
+          next[teacher.attendanceKey] = shouldMarkPresent ? "Present" : "Absent";
+        });
       return next;
     });
     setDirty(true);
@@ -1090,7 +1230,7 @@ function MarkAttendancePanel({ batches }) {
     return activeTab === "student" ? filteredStudents : filteredTeachers;
   }, [activeTab, personTypeFilter, filteredStudents, filteredTeachers]);
   const unmarkedCount = useMemo(
-    () => currentList.filter((p) => !attendanceMap[p._id]).length,
+    () => currentList.filter((p) => !attendanceMap[p.attendanceKey]).length,
     [attendanceMap, currentList],
   );
   const hasSavedRecordsForSelection = useMemo(
@@ -1098,7 +1238,7 @@ function MarkAttendancePanel({ batches }) {
     [attendanceMap],
   );
   const counts = [...STATUSES, "Holiday"].reduce((acc, s) => {
-    acc[s] = currentList.filter((p) => attendanceMap[p._id] === s).length;
+    acc[s] = currentList.filter((p) => attendanceMap[p.attendanceKey] === s).length;
     return acc;
   }, {});
 
@@ -1106,6 +1246,19 @@ function MarkAttendancePanel({ batches }) {
     { title: "#", width: 50, render: (_, __, i) => i + 1 },
     { title: "Name", dataIndex: "name", render: (v) => <span className="font-medium">{v}</span> },
     { title: "Reg. No", dataIndex: "registrationNo" },
+    ...(isAllBatchesSelected ? [{
+      title: "Batch",
+      dataIndex: "attendanceBatchLabel",
+      render: (label, record) => (
+        <div className="flex flex-col gap-1">
+          <Tag color="processing">{label || record.attendanceBatchName || "Batch"}</Tag>
+          <span className="text-[11px] text-slate-400">{record.attendanceBatchDays || ""}</span>
+          {!isAttendanceOpenForRow(record) && (
+            <Tag color="default" className="w-fit">Not scheduled today</Tag>
+          )}
+        </div>
+      ),
+    }] : []),
     { title: "Gender", dataIndex: "gender", render: (g) => <Tag color={g === "Male" ? "blue" : "pink"}>{g}</Tag> },
     {
       title: "Enrollment",
@@ -1132,9 +1285,9 @@ function MarkAttendancePanel({ batches }) {
       title: "Mark Attendance",
       render: (_, r) => (
         <StatusPicker
-          disabled={isAcademyHoliday || !isStudentAttendanceEligible(r)}
-          value={attendanceMap[r._id]}
-          onChange={(s) => handleStatusChange(r._id, s)}
+          disabled={isAcademyHoliday || !isStudentAttendanceEligible(r) || !isAttendanceOpenForRow(r)}
+          value={attendanceMap[r.attendanceKey]}
+          onChange={(s) => handleStatusChange(r.attendanceKey, s)}
         />
       ),
     },
@@ -1154,9 +1307,9 @@ function MarkAttendancePanel({ batches }) {
       title: "Status", width: 130,
       render: (_, r) => (
         <div className="flex flex-col gap-1">
-          <StatusTag status={attendanceMap[r._id]} />
-          {timeMap[r._id] && (
-            <span className="text-[10px] text-gray-400">🕐 {timeMap[r._id]}</span>
+          <StatusTag status={attendanceMap[r.attendanceKey]} />
+          {timeMap[r.attendanceKey] && (
+            <span className="text-[10px] text-gray-400">🕐 {timeMap[r.attendanceKey]}</span>
           )}
         </div>
       ),
@@ -1169,14 +1322,14 @@ function MarkAttendancePanel({ batches }) {
     { title: "ID", dataIndex: "teacherId" },
     { title: "Designation", dataIndex: "designation", render: (d) => d || "—" },
     { title: "Gender", dataIndex: "gender", render: (g) => <Tag color={g === "Male" ? "blue" : "pink"}>{g}</Tag> },
-    { title: "Mark Attendance", render: (_, r) => <StatusPicker disabled={isAcademyHoliday} value={attendanceMap[r._id]} onChange={(s) => handleStatusChange(r._id, s)} /> },
+    { title: "Mark Attendance", render: (_, r) => <StatusPicker disabled={isAcademyHoliday} value={attendanceMap[r.attendanceKey]} onChange={(s) => handleStatusChange(r.attendanceKey, s)} /> },
     {
       title: "Status", width: 130,
       render: (_, r) => (
         <div className="flex flex-col gap-1">
-          <StatusTag status={attendanceMap[r._id]} />
-          {timeMap[r._id] && (
-            <span className="text-[10px] text-gray-400">🕐 {timeMap[r._id]}</span>
+          <StatusTag status={attendanceMap[r.attendanceKey]} />
+          {timeMap[r.attendanceKey] && (
+            <span className="text-[10px] text-gray-400">🕐 {timeMap[r.attendanceKey]}</span>
           )}
         </div>
       ),
@@ -1227,17 +1380,25 @@ function MarkAttendancePanel({ batches }) {
           <label className="text-xs font-semibold text-gray-600">Select Batch</label>
           <Select placeholder="Choose a batch" value={selectedBatch}
             onChange={(v) => {
-              const nextBatch = batches.find((batch) => batch._id === v) || null;
+              const nextBatch = v === ALL_BATCHES_VALUE
+                ? null
+                : batches.find((batch) => batch._id === v) || null;
               setSelectedBatch(v);
-              setSelectedDate((current) => clampDateToBatchRange(current, nextBatch));
+              if (nextBatch) {
+                setSelectedDate((current) => clampDateToBatchRange(current, nextBatch));
+              }
               setAttendanceMap({});
               setTimeMap({});
               setCalendarData({});
+              setHolidayMap(new Map());
               setDirty(false);
             }}
             disabled={isQrMode}
             showSearch filterOption={(input, o) => o?.label?.toLowerCase().includes(input.toLowerCase())}
-            options={batches.map((b) => ({ value: b._id, label: `${b.batchName} (${b.batchCode})` }))}
+            options={[
+              { value: ALL_BATCHES_VALUE, label: "All batches" },
+              ...batches.map((b) => ({ value: b._id, label: getBatchOptionLabel(b) })),
+            ]}
             className="w-full" />
         </div>
         <div className="flex flex-col gap-1">
@@ -1528,7 +1689,7 @@ function MarkAttendancePanel({ batches }) {
                         If you change any student to absent, half day, or leave, this will turn off automatically.
                       </span>
                     </div>
-                    <Table dataSource={filteredStudents} columns={studentCols} rowKey="_id"
+                    <Table dataSource={filteredStudents} columns={studentCols} rowKey="attendanceKey"
                       pagination={false} size="middle" locale={{ emptyText: "No students enrolled in this batch" }} />
                   </Spin>
                 ),
@@ -1550,7 +1711,7 @@ function MarkAttendancePanel({ batches }) {
                         If you change any teacher to absent, half day, or leave, this will turn off automatically.
                       </span>
                     </div>
-                    <Table dataSource={filteredTeachers} columns={teacherCols} rowKey="_id"
+                    <Table dataSource={filteredTeachers} columns={teacherCols} rowKey="attendanceKey"
                       pagination={false} size="middle" locale={{ emptyText: "No teachers assigned to this batch's course" }} />
                   </Spin>
                 ),
