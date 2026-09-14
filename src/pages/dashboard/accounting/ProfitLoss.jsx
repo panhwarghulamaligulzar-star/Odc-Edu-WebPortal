@@ -29,6 +29,8 @@ import { getHeadsOfAccount, getProfitLoss } from "../../../services/accountingSe
 import { getCourses } from "../../../services/feeService";
 
 const { Option } = Select;
+const currentReportYear = dayjs().year();
+const currentReportMonth = dayjs().month() + 1;
 
 const formatCurrency = (value) =>
   Number(value || 0).toLocaleString("en-PK", {
@@ -57,8 +59,8 @@ const ProfitLoss = () => {
   const [data, setData] = useState(null);
   const [courses, setCourses] = useState([]);
   const [heads, setHeads] = useState([]);
-  const [selectedYear, setSelectedYear] = useState("all");
-  const [selectedMonth, setSelectedMonth] = useState("all");
+  const [selectedYear, setSelectedYear] = useState(currentReportYear);
+  const [selectedMonth, setSelectedMonth] = useState(currentReportMonth);
   const [selectedCourse, setSelectedCourse] = useState("all");
   const [selectedIncomeHeadKey, setSelectedIncomeHeadKey] = useState(null);
   const [selectedExpenseHeadKey, setSelectedExpenseHeadKey] = useState(null);
@@ -524,8 +526,8 @@ const ProfitLoss = () => {
           <Button
             className="!h-10 !rounded-xl !border-slate-200 !px-4"
             onClick={() => {
-              setSelectedYear("all");
-              setSelectedMonth("all");
+              setSelectedYear(currentReportYear);
+              setSelectedMonth(currentReportMonth);
               setSelectedCourse("all");
             }}
           >
