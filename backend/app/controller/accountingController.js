@@ -2558,10 +2558,10 @@ const buildRawRefFilter = async (fieldName, values = []) => {
   return { [fieldName]: { $in: variants } };
 };
 
-const getReceiptOverviewBaseData = async () => {
+const getReceiptOverviewBaseData = async ({ enrollmentStatus = "Active" } = {}) => {
   const mongoose = (await import("mongoose")).default;
   const db = mongoose.connection.db;
-  const enrollmentFilter = { status: "Active" };
+  const enrollmentFilter = { status: enrollmentStatus };
 
   const activeEnrollments = await Enrollment.find(enrollmentFilter)
     .sort({ enrollmentDate: -1, createdAt: -1 })
@@ -3197,6 +3197,252 @@ export const getReceiptDuesOverview = async (req, res) => {
 };
 
 // GET /accounting/receipts/dues/export — Export receipt dues to PDF
+const filterDuesRows = ({
+  rows = [],
+  status,
+  courseId,
+  batchId,
+  search = "",
+  dueDateFrom,
+  dueDateTo,
+}) => {
+  const searchValue = String(search || "").trim().toLowerCase();
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+
+  return rows.filter((row) => {
+    const rowStatus = String(row.dueStatus || "").trim().toLowerCase();
+
+    if (normalizedStatus) {
+      if (normalizedStatus === "unpaid" && row.remainingAmount <= 0) {
+        return false;
+      }
+      if (
+        normalizedStatus !== "unpaid" &&
+        normalizedStatus !== "all" &&
+        rowStatus !== normalizedStatus
+      ) {
+        return false;
+      }
+    }
+
+    if (courseId && String(row.course?._id || "") !== String(courseId)) {
+      return false;
+    }
+
+    if (
+      batchId &&
+      String(row.enrollment?.batch?._id || row.enrollment?.batch || "") !==
+        String(batchId)
+    ) {
+      return false;
+    }
+
+    const rowDueDate = row.dueDate ? new Date(row.dueDate) : null;
+    if (dueDateFrom && rowDueDate && rowDueDate < new Date(dueDateFrom)) {
+      return false;
+    }
+    if (dueDateFrom && !rowDueDate) return false;
+    if (dueDateTo && rowDueDate) {
+      const endDate = new Date(dueDateTo);
+      endDate.setHours(23, 59, 59, 999);
+      if (rowDueDate > endDate) return false;
+    }
+    if (dueDateTo && !rowDueDate) return false;
+
+    if (!searchValue) return true;
+
+    return [
+      row.student?.studentName,
+      row.student?._id,
+      row.student?.registrationNo,
+      row.student?.mobileNumber,
+      row.enrollment?._id,
+      row.enrollment?.batch?.batchName,
+      row.enrollment?.batch?.batchCode,
+      row.course?.courseName,
+      row.course?.courseId,
+      row.description,
+      row.receiptNo,
+      row.voucherNo,
+      row.latestPayment?.receiptNo,
+      row.latestPayment?.voucherNo,
+    ]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(searchValue));
+  });
+};
+
+const buildDuesRowsSummary = (rows = []) =>
+  rows.reduce(
+    (acc, row) => {
+      acc.totalDues += Number(row.amount || 0);
+      acc.collected += Number(row.paidAmount || 0);
+      acc.remaining += Number(row.remainingAmount || 0);
+      acc.installmentCount += 1;
+      if (row.dueStatus === "Paid") acc.paidCount += 1;
+      if (row.dueStatus === "Partial") acc.partialCount += 1;
+      if (row.dueStatus === "Pending") acc.pendingCount += 1;
+      return acc;
+    },
+    {
+      totalDues: 0,
+      collected: 0,
+      remaining: 0,
+      installmentCount: 0,
+      paidCount: 0,
+      partialCount: 0,
+      pendingCount: 0,
+    },
+  );
+
+const groupDropoutRowsByStudent = (rows = []) => {
+  const grouped = new Map();
+
+  rows.forEach((row) => {
+    const studentId = String(row.student?._id || row.student || "");
+    if (!studentId) return;
+
+    const existing = grouped.get(studentId) || {
+      _id: studentId,
+      student: row.student,
+      courses: new Map(),
+      batches: new Map(),
+      enrollments: new Map(),
+      rows: [],
+      totalDues: 0,
+      collected: 0,
+      remaining: 0,
+      installmentCount: 0,
+      paidCount: 0,
+      partialCount: 0,
+      pendingCount: 0,
+      latestDropoutDate: null,
+      nextDueDate: null,
+    };
+
+    const courseId = String(row.course?._id || row.course || "");
+    if (courseId) existing.courses.set(courseId, row.course);
+
+    const batchId = String(row.enrollment?.batch?._id || row.enrollment?.batch || "");
+    if (batchId) existing.batches.set(batchId, row.enrollment?.batch);
+
+    const enrollmentId = String(row.enrollment?._id || row.enrollment || "");
+    if (enrollmentId) {
+      existing.enrollments.set(enrollmentId, row.enrollment);
+      const dropoutDate =
+        row.enrollment?.completionDate ||
+        row.enrollment?.updatedAt ||
+        row.enrollment?.createdAt ||
+        null;
+      if (
+        dropoutDate &&
+        (!existing.latestDropoutDate ||
+          new Date(dropoutDate) > new Date(existing.latestDropoutDate))
+      ) {
+        existing.latestDropoutDate = dropoutDate;
+      }
+    }
+
+    if (
+      row.dueDate &&
+      Number(row.remainingAmount || 0) > 0 &&
+      (!existing.nextDueDate || new Date(row.dueDate) < new Date(existing.nextDueDate))
+    ) {
+      existing.nextDueDate = row.dueDate;
+    }
+
+    existing.rows.push(row);
+    existing.totalDues += Number(row.amount || 0);
+    existing.collected += Number(row.paidAmount || 0);
+    existing.remaining += Number(row.remainingAmount || 0);
+    existing.installmentCount += 1;
+    if (row.dueStatus === "Paid") existing.paidCount += 1;
+    if (row.dueStatus === "Partial") existing.partialCount += 1;
+    if (row.dueStatus === "Pending") existing.pendingCount += 1;
+
+    grouped.set(studentId, existing);
+  });
+
+  return Array.from(grouped.values()).map((student) => ({
+    ...student,
+    courses: Array.from(student.courses.values()).filter(Boolean),
+    batches: Array.from(student.batches.values()).filter(Boolean),
+    enrollments: Array.from(student.enrollments.values()).filter(Boolean),
+  }));
+};
+
+// GET /accounting/receipts/dropout-dues
+export const getDropoutStudentDuesOverview = async (req, res) => {
+  try {
+    const {
+      status,
+      courseId,
+      batchId,
+      search = "",
+      dueDateFrom,
+      dueDateTo,
+      sortOrder = "desc",
+      page = 1,
+      limit = 20,
+    } = req.query;
+
+    const { rows: allRows } = await getReceiptOverviewBaseData({
+      enrollmentStatus: "Dropped",
+    });
+
+    const filteredRows = filterDuesRows({
+      rows: allRows,
+      status,
+      courseId,
+      batchId,
+      search,
+      dueDateFrom,
+      dueDateTo,
+    });
+
+    const studentRows = groupDropoutRowsByStudent(filteredRows).sort((a, b) => {
+      const aDate = a.latestDropoutDate
+        ? new Date(a.latestDropoutDate).getTime()
+        : 0;
+      const bDate = b.latestDropoutDate
+        ? new Date(b.latestDropoutDate).getTime()
+        : 0;
+      return String(sortOrder).toLowerCase() === "asc" ? aDate - bDate : bDate - aDate;
+    });
+
+    const summary = {
+      ...buildDuesRowsSummary(filteredRows),
+      dropoutStudentCount: studentRows.length,
+      droppedEnrollmentCount: new Set(
+        filteredRows
+          .map((row) => String(row.enrollment?._id || row.enrollment || ""))
+          .filter(Boolean),
+      ).size,
+    };
+
+    const parsedPage = Math.max(1, Number(page) || 1);
+    const parsedLimit = Math.max(1, Number(limit) || 20);
+    const startIndex = (parsedPage - 1) * parsedLimit;
+
+    res.status(200).json({
+      success: true,
+      data: studentRows.slice(startIndex, startIndex + parsedLimit),
+      summary,
+      monthlySummary: buildInstallmentMonthSummary(filteredRows),
+      pagination: {
+        total: studentRows.length,
+        page: parsedPage,
+        limit: parsedLimit,
+        pages: Math.ceil(studentRows.length / parsedLimit),
+      },
+      message: "Dropout student dues retrieved successfully",
+    });
+  } catch (error) {
+    console.error("Error fetching dropout student dues:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
 export const exportReceiptDues = async (req, res) => {
   try {
     const {

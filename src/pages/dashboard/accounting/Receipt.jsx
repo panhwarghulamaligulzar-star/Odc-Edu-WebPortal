@@ -29,6 +29,7 @@ import {
   DollarCircleOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
+  UserDeleteOutlined,
   FilterOutlined,
   BarChartOutlined,
 } from "@ant-design/icons";
@@ -36,7 +37,11 @@ import dayjs from "dayjs";
 import * as XLSX from "xlsx";
 import { MdReceiptLong } from "react-icons/md";
 import { useNavigate } from "react-router-dom";
-import { getReceiptDuesOverview, exportReceiptDues } from "../../../services/accountingService";
+import {
+  getDropoutStudentDuesOverview,
+  getReceiptDuesOverview,
+  exportReceiptDues,
+} from "../../../services/accountingService";
 import academyConfig from "../../../config/academyConfig";
 import { getAllBatches } from "../../../services/batchService";
 import {
@@ -275,6 +280,7 @@ export default function Receipt({ variant = "receipts" }) {
   const [courses, setCourses] = useState([]);
   const [batches, setBatches] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [dropoutLoading, setDropoutLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [receiptLoading, setReceiptLoading] = useState(false);
   const [exportLoadingFormat, setExportLoadingFormat] = useState(null);
@@ -289,6 +295,15 @@ export default function Receipt({ variant = "receipts" }) {
     cashCollected: 0,
     bankCollected: 0,
     unassignedCollected: 0,
+  });
+  const [dropoutSummary, setDropoutSummary] = useState({
+    dropoutStudentCount: 0,
+    droppedEnrollmentCount: 0,
+    installmentCount: 0,
+    pendingCount: 0,
+    partialCount: 0,
+    paidCount: 0,
+    remaining: 0,
   });
   const [filters, setFilters] = useState({
     search: "",
@@ -327,6 +342,9 @@ export default function Receipt({ variant = "receipts" }) {
   useEffect(() => {
     fetchCourses();
     fetchBatches();
+    if (!isStudentDuesPage) {
+      fetchDropoutSummary();
+    }
   }, []);
 
   useEffect(() => {
@@ -535,6 +553,23 @@ export default function Receipt({ variant = "receipts" }) {
       dueDateFrom: dates?.[0] ? dates[0].startOf("month").toISOString() : undefined,
       dueDateTo: dates?.[1] ? dates[1].endOf("month").toISOString() : undefined,
     }));
+  };
+
+  const fetchDropoutSummary = async () => {
+    setDropoutLoading(true);
+    try {
+      const response = await getDropoutStudentDuesOverview({
+        page: 1,
+        limit: 1,
+      });
+      if (response?.success) {
+        setDropoutSummary(response.summary || {});
+      }
+    } catch (error) {
+      console.error("Failed to load dropout dues summary:", error);
+    } finally {
+      setDropoutLoading(false);
+    }
   };
 
   const handleQuickRangeChange = (value) => {
@@ -1005,7 +1040,12 @@ export default function Receipt({ variant = "receipts" }) {
           <Space size="middle" wrap>
             <Button
               icon={<ReloadOutlined />}
-              onClick={fetchReceiptOverview}
+              onClick={() => {
+                fetchReceiptOverview();
+                if (!isStudentDuesPage) {
+                  fetchDropoutSummary();
+                }
+              }}
               className="!h-11 !rounded-xl !border-slate-200 !bg-white !px-5 !font-medium"
             >
               Refresh
@@ -1200,7 +1240,7 @@ export default function Receipt({ variant = "receipts" }) {
 
       <Row gutter={[18, 18]} className="mb-5">
         {entryCards.map((card) => (
-          <Col xs={24} md={8} key={card.key}>
+          <Col xs={24} md={isStudentDuesPage ? 8 : 12} xl={isStudentDuesPage ? 8 : 6} key={card.key}>
             <Card
               bordered={false}
               style={{
@@ -1236,6 +1276,49 @@ export default function Receipt({ variant = "receipts" }) {
             </Card>
           </Col>
         ))}
+        {!isStudentDuesPage ? (
+          <Col xs={24} md={12} xl={6}>
+            <Card
+              bordered={false}
+              hoverable
+              loading={dropoutLoading}
+              onClick={() => navigate("/dashboard/accounting/receipt/dropout-students")}
+              style={{
+                background: "linear-gradient(135deg, #ffffff 0%, #fff1f2 100%)",
+                borderRadius: 22,
+                border: "1px solid #fecdd3",
+                boxShadow: "0 18px 40px rgba(15, 23, 42, 0.06)",
+                cursor: "pointer",
+              }}
+              bodyStyle={{ padding: 24 }}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="text-sm font-medium text-slate-500">
+                    Dropout Students
+                  </div>
+                  <div className="mt-3 text-[34px] font-semibold leading-none text-rose-700">
+                    {dropoutSummary.dropoutStudentCount || 0}
+                  </div>
+                  <div className="mt-3 text-xs text-slate-500">
+                    {dropoutSummary.pendingCount || 0} pending installments |{" "}
+                    {formatCurrency(dropoutSummary.remaining || 0)} remaining
+                  </div>
+                </div>
+                <div
+                  className="flex h-12 w-12 items-center justify-center rounded-2xl text-xl"
+                  style={{
+                    background: "#ffffff",
+                    color: "#be123c",
+                    boxShadow: "0 10px 24px rgba(15, 23, 42, 0.08)",
+                  }}
+                >
+                  <UserDeleteOutlined />
+                </div>
+              </div>
+            </Card>
+          </Col>
+        ) : null}
       </Row>
 
       <Card

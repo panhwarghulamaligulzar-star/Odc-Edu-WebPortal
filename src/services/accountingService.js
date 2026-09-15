@@ -348,6 +348,18 @@ export const getReceiptDuesOverview = async (filters = {}) => {
   }
 };
 
+export const getDropoutStudentDuesOverview = async (filters = {}) => {
+  try {
+    const response = await api.get("/accounting/receipts/dropout-dues", {
+      params: filters,
+    });
+    return response.data;
+  } catch (error) {
+    console.error("Get Dropout Student Dues Overview Error:", error.response?.data);
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
 export const exportReceiptDues = async (filters = {}) => {
   try {
     const response = await api.get("/accounting/receipts/dues/export", {

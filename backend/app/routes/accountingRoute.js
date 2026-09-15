@@ -28,6 +28,7 @@ import {
   getProfitLoss,
   getMonthlySummary,
   getReceiptDuesOverview,
+  getDropoutStudentDuesOverview,
   exportReceiptDues,
   getSuperAdminFinanceMonitor,
   getTeacherPayrollSummary,
@@ -101,6 +102,7 @@ accountingRoute.get(
 
 // Receipt / Dues Tracking
 accountingRoute.get("/receipts/dues", authMiddleware, authorize("accounting", "view"), getReceiptDuesOverview);
+accountingRoute.get("/receipts/dropout-dues", authMiddleware, authorize("accounting", "view"), getDropoutStudentDuesOverview);
 accountingRoute.get("/receipts/dues/export", authMiddleware, authorize("accounting", "export"), exportReceiptDues);
 
 export default accountingRoute;

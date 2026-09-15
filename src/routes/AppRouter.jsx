@@ -41,6 +41,7 @@ import ProfitLoss from "../pages/dashboard/accounting/ProfitLoss";
 import Receipt from "../pages/dashboard/accounting/Receipt";
 import ReceiptStudentHistory from "../pages/dashboard/accounting/ReceiptStudentHistory";
 import StudentDues from "../pages/dashboard/accounting/StudentDues";
+import DropoutStudentsDues from "../pages/dashboard/accounting/DropoutStudentsDues";
 import Payroll from "../pages/dashboard/accounting/Payroll";
 import Attendance from "../pages/dashboard/Attendance";
 import HolidayManagement from "../pages/dashboard/HolidayManagement";
@@ -118,6 +119,7 @@ function AppRouter() {
           <Route path="accounting/banks" element={<ProtectedRoute moduleKey="accounting"><Banks /></ProtectedRoute>} />
           <Route path="accounting/transactions" element={<ProtectedRoute moduleKey="accounting"><Transactions /></ProtectedRoute>} />
           <Route path="accounting/receipt" element={<ProtectedRoute moduleKey="accounting"><Receipt /></ProtectedRoute>} />
+          <Route path="accounting/receipt/dropout-students" element={<ProtectedRoute moduleKey="accounting"><DropoutStudentsDues /></ProtectedRoute>} />
           <Route path="accounting/student-dues" element={<ProtectedRoute moduleKey="accounting"><StudentDues /></ProtectedRoute>} />
           <Route path="accounting/receipt/history/:studentId" element={<ProtectedRoute moduleKey="accounting"><ReceiptStudentHistory /></ProtectedRoute>} />
           <Route path="accounting/payroll" element={<ProtectedRoute moduleKey="accounting"><Payroll /></ProtectedRoute>} />
