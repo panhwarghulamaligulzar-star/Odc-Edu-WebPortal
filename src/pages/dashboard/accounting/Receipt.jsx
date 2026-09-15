@@ -38,6 +38,7 @@ import { MdReceiptLong } from "react-icons/md";
 import { useNavigate } from "react-router-dom";
 import { getReceiptDuesOverview, exportReceiptDues } from "../../../services/accountingService";
 import academyConfig from "../../../config/academyConfig";
+import { getAllBatches } from "../../../services/batchService";
 import {
   getCourses,
   getPaymentReceipt,
@@ -249,8 +250,9 @@ const entryCards = [
   },
 ];
 
-export default function Receipt() {
+export default function Receipt({ variant = "receipts" }) {
   const navigate = useNavigate();
+  const isStudentDuesPage = variant === "student-dues";
   const dueDatePresets = {
     this_month: [dayjs().startOf("month"), dayjs().endOf("month")],
     last_month: [
@@ -271,6 +273,7 @@ export default function Receipt() {
 
   const [rows, setRows] = useState([]);
   const [courses, setCourses] = useState([]);
+  const [batches, setBatches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [receiptLoading, setReceiptLoading] = useState(false);
@@ -291,6 +294,7 @@ export default function Receipt() {
     search: "",
     status: "all",
     courseId: undefined,
+    batchId: undefined,
     dueDateFrom: undefined,
     dueDateTo: undefined,
     sortOrder: "asc",
@@ -322,6 +326,7 @@ export default function Receipt() {
 
   useEffect(() => {
     fetchCourses();
+    fetchBatches();
   }, []);
 
   useEffect(() => {
@@ -336,6 +341,17 @@ export default function Receipt() {
       }
     } catch (error) {
       console.error("Failed to load courses:", error);
+    }
+  };
+
+  const fetchBatches = async () => {
+    try {
+      const response = await getAllBatches();
+      if (response?.success) {
+        setBatches(response.data || []);
+      }
+    } catch (error) {
+      console.error("Failed to load batches:", error);
     }
   };
 
@@ -400,6 +416,7 @@ export default function Receipt() {
       { Metric: "Export Type", Value: exportType },
       { Metric: "Search", Value: filters.search || "-" },
       { Metric: "Course", Value: filters.courseId || "All" },
+      { Metric: "Batch", Value: filters.batchId || "All" },
       { Metric: "Status", Value: effectiveStatus || "all" },
       {
         Metric: "Due Date From",
@@ -437,6 +454,10 @@ export default function Receipt() {
           "Mobile Number": row.student?.mobileNumber || "",
           Course: row.course?.courseName || "",
           "Course ID": row.course?.courseId || "",
+          Batch:
+            row.enrollment?.batch?.batchName ||
+            row.enrollment?.batch?.batchCode ||
+            "",
           Description: row.description || "",
           "Due Month": dueDate ? dueDate.format("MMMM YYYY") : "",
           "Due Day": dueDate ? dueDate.format("DD") : "",
@@ -511,8 +532,8 @@ export default function Receipt() {
     setPagination((prev) => ({ ...prev, current: 1 }));
     setFilters((prev) => ({
       ...prev,
-      dueDateFrom: dates?.[0] ? dates[0].startOf("day").toISOString() : undefined,
-      dueDateTo: dates?.[1] ? dates[1].endOf("day").toISOString() : undefined,
+      dueDateFrom: dates?.[0] ? dates[0].startOf("month").toISOString() : undefined,
+      dueDateTo: dates?.[1] ? dates[1].endOf("month").toISOString() : undefined,
     }));
   };
 
@@ -730,6 +751,11 @@ export default function Receipt() {
             {record.student?.studentName || "N/A"} |{" "}
             {record.student?.registrationNo || "No reg no"} |{" "}
             {record.course?.courseName || "No course"}
+          </div>
+          <div className="text-xs text-gray-400">
+            {record.enrollment?.batch?.batchName ||
+              record.enrollment?.batch?.batchCode ||
+              "No batch"}
           </div>
         </div>
       ),
@@ -966,9 +992,13 @@ export default function Receipt() {
               <MdReceiptLong size={28} color="#ffffff" />
             </div>
             <div>
-              <h2 className="module-title !mb-1">Receipts</h2>
+              <h2 className="module-title !mb-1">
+                {isStudentDuesPage ? "Student Dues" : "Receipts"}
+              </h2>
               <p className="module-subtitle !mb-0 max-w-[640px]">
-                Track student dues, collections, and remaining balances with a clearer financial snapshot.
+                {isStudentDuesPage
+                  ? "Track active student installments, paid amounts, partial dues, pending balances, and export reports."
+                  : "Track student dues, collections, and remaining balances with a clearer financial snapshot."}
               </p>
             </div>
           </div>
@@ -1125,12 +1155,12 @@ export default function Receipt() {
         open={exportModalOpen}
         onCancel={() => setExportModalOpen(false)}
         footer={null}
-        title="Download Receipt Report"
+        title={isStudentDuesPage ? "Download Student Dues Report" : "Download Receipt Report"}
         destroyOnClose
       >
         <div className="space-y-4 pt-2">
           <div className="text-sm text-slate-600">
-            Choose how you want to download the selected receipt report.
+            Choose how you want to download the selected dues report.
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
             Export type:{" "}
@@ -1223,10 +1253,10 @@ export default function Receipt() {
           <div>
             <div className="flex items-center gap-2 text-slate-800 font-semibold">
               <FilterOutlined style={{ color: "#142d78" }} />
-              Filter Receipts
+              {isStudentDuesPage ? "Filter Student Dues" : "Filter Receipts"}
             </div>
             <div className="mt-1 text-sm text-slate-500">
-              Narrow the dues list by student, course, status, or due-date range.
+              Narrow the dues list by student, course, batch, status, or month range.
             </div>
           </div>
           <Button
@@ -1237,6 +1267,7 @@ export default function Receipt() {
                 search: "",
                 status: "all",
                 courseId: undefined,
+                batchId: undefined,
                 dueDateFrom: undefined,
                 dueDateTo: undefined,
                 sortOrder: "asc",
@@ -1248,7 +1279,7 @@ export default function Receipt() {
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-7">
           <Input
             allowClear
             placeholder="Search student name, student ID, reg no, enrollment ID, course or receipt"
@@ -1262,11 +1293,34 @@ export default function Receipt() {
             placeholder="All courses"
             className="!h-11"
             value={filters.courseId}
-            onChange={(value) => handleFilterChange("courseId", value)}
+            onChange={(value) => {
+              handleFilterChange("courseId", value);
+              handleFilterChange("batchId", undefined);
+            }}
             options={courses.map((course) => ({
               label: course.courseName,
               value: course._id,
             }))}
+          />
+          <Select
+            allowClear
+            showSearch
+            placeholder="All batches"
+            className="!h-11"
+            value={filters.batchId}
+            onChange={(value) => handleFilterChange("batchId", value)}
+            options={batches
+              .filter(
+                (batch) =>
+                  !filters.courseId ||
+                  String(batch.course?._id || batch.course || "") === String(filters.courseId),
+              )
+              .map((batch) => ({
+                label: `${batch.batchName || batch.batchCode || "Batch"}${
+                  batch.batchCode ? ` (${batch.batchCode})` : ""
+                }`,
+                value: batch._id,
+              }))}
           />
           <Select
             placeholder="All statuses"
@@ -1283,7 +1337,9 @@ export default function Receipt() {
           />
           <RangePicker
             className="!h-11 !rounded-xl"
-            format="DD-MM-YYYY"
+            picker="month"
+            format="MMM YYYY"
+            placeholder={["Starting month", "Ending month"]}
             onChange={handleDueDateChange}
             value={[
               filters.dueDateFrom ? dayjs(filters.dueDateFrom) : null,

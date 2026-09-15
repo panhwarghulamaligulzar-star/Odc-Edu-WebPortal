@@ -2575,13 +2575,17 @@ const getReceiptOverviewBaseData = async () => {
     "_id",
     activeEnrollments.map((item) => item?.course),
   );
+  const batchFilter = await buildRawRefFilter(
+    "_id",
+    activeEnrollments.map((item) => item?.batch),
+  );
 
-  const [students, courses] = await Promise.all([
+  const [students, courses, batches] = await Promise.all([
     studentFilter
       ? db
           .collection("admissions")
           .find(studentFilter, {
-            projection: { registrationNo: 1, studentName: 1, mobileNumber: 1 },
+            projection: { registrationNo: 1, studentName: 1, mobileNumber: 1, isActive: 1 },
           })
           .toArray()
       : [],
@@ -2593,10 +2597,19 @@ const getReceiptOverviewBaseData = async () => {
           })
           .toArray()
       : [],
+    batchFilter
+      ? db
+          .collection("batches")
+          .find(batchFilter, {
+            projection: { batchName: 1, batchCode: 1, shift: 1 },
+          })
+          .toArray()
+      : [],
   ]);
 
   const studentsById = buildEntityMapById(students);
   const coursesById = buildEntityMapById(courses);
+  const batchesById = buildEntityMapById(batches);
   const latestEnrollmentByStudentCourse = new Map();
   const enrollmentsById = new Map();
 
@@ -2614,6 +2627,7 @@ const getReceiptOverviewBaseData = async () => {
       ...enrollment,
       student: studentsById.get(studentId) || null,
       course: coursesById.get(courseIdValue) || null,
+      batch: batchesById.get(String(enrollment?.batch || "")) || null,
     });
 
     const key = `${studentId}:${courseIdValue}`;
@@ -2766,7 +2780,13 @@ const getReceiptOverviewBaseData = async () => {
         };
       });
     })
-    .filter((row) => row.student?._id && row.course?._id && row.enrollment?._id);
+    .filter(
+      (row) =>
+        row.student?._id &&
+        row.student?.isActive !== false &&
+        row.course?._id &&
+        row.enrollment?._id,
+    );
 
   const paymentMethods = await PaymentMethod.find(
     { isActive: true },
@@ -3025,6 +3045,7 @@ export const getReceiptDuesOverview = async (req, res) => {
     const {
       status,
       courseId,
+      batchId,
       search = "",
       dueDateFrom,
       dueDateTo,
@@ -3079,6 +3100,14 @@ export const getReceiptDuesOverview = async (req, res) => {
       }
 
       if (courseId && String(row.course?._id || "") !== String(courseId)) {
+        return false;
+      }
+
+      if (
+        batchId &&
+        String(row.enrollment?.batch?._id || row.enrollment?.batch || "") !==
+          String(batchId)
+      ) {
         return false;
       }
 
@@ -3173,6 +3202,7 @@ export const exportReceiptDues = async (req, res) => {
     const {
       status,
       courseId,
+      batchId,
       search = "",
       dueDateFrom,
       dueDateTo,
@@ -3183,14 +3213,19 @@ export const exportReceiptDues = async (req, res) => {
 
     const enrollmentFilter = { status: "Active" };
     if (courseId) enrollmentFilter.course = courseId;
+    if (batchId) enrollmentFilter.batch = batchId;
 
     const activeEnrollments = await Enrollment.find(enrollmentFilter)
-      .populate("student", "registrationNo studentName mobileNumber")
+      .populate("student", "registrationNo studentName mobileNumber isActive")
       .populate("course", "courseName courseId")
+      .populate("batch", "batchName batchCode")
       .sort({ enrollmentDate: -1, createdAt: -1 })
       .lean();
 
     const latestEnrollmentByStudentCourse = new Map();
+    const activeEnrollmentById = new Map(
+      activeEnrollments.map((item) => [String(item?._id || ""), item]),
+    );
     for (const enrollment of activeEnrollments) {
       const studentId = String(enrollment.student?._id || enrollment.student || "");
       const courseIdValue = String(
@@ -3323,7 +3358,9 @@ export const exportReceiptDues = async (req, res) => {
           feeStructureId: item._id,
           student: item.student,
           course: item.course,
-          enrollment: item.enrollment,
+          enrollment:
+            activeEnrollmentById.get(String(item.enrollment?._id || item.enrollment || "")) ||
+            item.enrollment,
           totalFee: item.totalFee || 0,
           amount: entry.amount,
           paidAmount: entry.paidAmount,
@@ -3353,6 +3390,7 @@ export const exportReceiptDues = async (req, res) => {
     }).filter(
       (row) =>
         row.student?._id &&
+        row.student?.isActive !== false &&
         row.course?._id &&
         row.enrollment,
     );
@@ -3551,6 +3589,10 @@ export const exportReceiptDues = async (req, res) => {
           "Mobile Number": row.student?.mobileNumber || "",
           Course: row.course?.courseName || "",
           "Course ID": row.course?.courseId || "",
+          Batch:
+            row.enrollment?.batch?.batchName ||
+            row.enrollment?.batch?.batchCode ||
+            "",
           Description: row.description || "",
           "Due Month": hasDueDate
             ? dueDate.toLocaleString("en-US", { month: "long", year: "numeric" })
@@ -3577,6 +3619,7 @@ export const exportReceiptDues = async (req, res) => {
         { Metric: "Format", Value: "Excel" },
         { Metric: "Status Filter", Value: status || "All" },
         { Metric: "Course Filter", Value: courseId || "All" },
+        { Metric: "Batch Filter", Value: batchId || "All" },
         { Metric: "Search", Value: search || "-" },
         {
           Metric: "Due Date Range",
@@ -3796,7 +3839,7 @@ export const exportReceiptDues = async (req, res) => {
     let filterY = boxTop + 70;
     doc.text(
       sanitizePdfText(
-        `Filter: ${status || "All Status"} | Course: ${courseId || "All"} | Export: ${exportType}`,
+        `Filter: ${status || "All Status"} | Course: ${courseId || "All"} | Batch: ${batchId || "All"} | Export: ${exportType}`,
         "Filter: All",
       ),
       50,
@@ -3892,14 +3935,15 @@ export const exportReceiptDues = async (req, res) => {
 
     // Table
     const tableHeaders = [
-      { label: "Sr.", width: 30 },
-      { label: "Reg. No", width: 55 },
-      { label: "Student Name", width: 90 },
-      { label: "Course", width: 75 },
-      { label: "Amount", width: 60, align: "right" },
-      { label: "Paid", width: 60, align: "right" },
-      { label: "Remaining", width: 65, align: "right" },
-      { label: "Status", width: 50 },
+      { label: "Sr.", width: 25 },
+      { label: "Reg. No", width: 45 },
+      { label: "Student Name", width: 80 },
+      { label: "Course", width: 65 },
+      { label: "Batch", width: 45 },
+      { label: "Amount", width: 55, align: "right" },
+      { label: "Paid", width: 55, align: "right" },
+      { label: "Remaining", width: 60, align: "right" },
+      { label: "Status", width: 40 },
     ];
 
     drawTableHeader(contentTop);
@@ -3940,6 +3984,10 @@ export const exportReceiptDues = async (req, res) => {
           sanitizePdfText(row.student?.registrationNo, "-"),
           sanitizePdfText(row.student?.studentName, "-").substring(0, 18),
           sanitizePdfText(row.course?.courseName, "-").substring(0, 14),
+          sanitizePdfText(
+            row.enrollment?.batch?.batchName || row.enrollment?.batch?.batchCode,
+            "-",
+          ).substring(0, 10),
           safeCurrency(row.amount || 0),
           safeCurrency(row.paidAmount || 0),
           safeCurrency(row.remainingAmount || 0),
@@ -3997,17 +4045,17 @@ export const exportReceiptDues = async (req, res) => {
     doc.roundedRect(40, rowY, doc.page.width - 80, 22, 4).fill(primaryColor);
     doc.fillColor("#ffffff").fontSize(9).font("Helvetica-Bold");
     doc.text("TOTAL", 47, rowY + 6, { width: 170, lineBreak: false });
-    doc.text(safeCurrency(summary.totalDues), 269, rowY + 6, {
+    doc.text(safeCurrency(summary.totalDues), 307, rowY + 6, {
       width: 55,
       align: "right",
       lineBreak: false,
     });
-    doc.text(safeCurrency(summary.collected), 329, rowY + 6, {
+    doc.text(safeCurrency(summary.collected), 362, rowY + 6, {
       width: 55,
       align: "right",
       lineBreak: false,
     });
-    doc.text(safeCurrency(summary.remaining), 394, rowY + 6, {
+    doc.text(safeCurrency(summary.remaining), 417, rowY + 6, {
       width: 60,
       align: "right",
       lineBreak: false,

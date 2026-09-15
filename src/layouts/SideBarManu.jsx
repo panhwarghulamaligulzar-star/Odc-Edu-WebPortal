@@ -9,6 +9,7 @@ import {
   MdOutlineCategory,
   MdOutlineSecurity,
   MdOutlineTune,
+  MdPayments,
   MdReceipt,
   MdSettings,
   MdSwapHoriz,
@@ -96,6 +97,11 @@ const SideBarManu = () => {
       icon: MdReceipt,
       title: "Receipt",
       path: "/dashboard/accounting/receipt",
+    },
+    {
+      icon: MdPayments,
+      title: "Student Dues",
+      path: "/dashboard/accounting/student-dues",
     },
     {
       icon: MdAccountBalance,
