@@ -4,6 +4,7 @@ import {
   Avatar,
   Button,
   Card,
+  DatePicker,
   Input,
   Modal,
   Select,
@@ -54,6 +55,7 @@ const EnrollmentManagement = () => {
   const [statusSubmitting, setStatusSubmitting] = useState(false);
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [selectedStatus, setSelectedStatus] = useState("Dropped");
+  const [selectedStatusDate, setSelectedStatusDate] = useState(dayjs());
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
@@ -156,6 +158,7 @@ const EnrollmentManagement = () => {
   const openStatusModal = (record) => {
     setSelectedRecord(record);
     setSelectedStatus("Dropped");
+    setSelectedStatusDate(dayjs());
     setStatusModalOpen(true);
   };
 
@@ -164,10 +167,19 @@ const EnrollmentManagement = () => {
     setStatusModalOpen(false);
     setSelectedRecord(null);
     setSelectedStatus("Dropped");
+    setSelectedStatusDate(dayjs());
   };
 
   const handleStatusChange = async () => {
     if (!selectedRecord || !selectedStatus) return;
+
+    if (
+      (selectedStatus === "Dropped" || selectedStatus === "Completed") &&
+      !selectedStatusDate
+    ) {
+      message.warning("Please select the status change date.");
+      return;
+    }
 
     setStatusSubmitting(true);
     try {
@@ -176,7 +188,9 @@ const EnrollmentManagement = () => {
           updateEnrollmentStatus(enrollment._id, {
             status: selectedStatus,
             completionDate:
-              selectedStatus === "Completed" ? dayjs().format("YYYY-MM-DD") : null,
+              selectedStatus === "Dropped" || selectedStatus === "Completed"
+                ? selectedStatusDate.format("YYYY-MM-DD")
+                : null,
           }),
         ),
       );
@@ -575,6 +589,41 @@ const EnrollmentManagement = () => {
             >
               {STATUS_OPTIONS.find((option) => option.value === selectedStatus)?.helper}
             </div>
+            {(selectedStatus === "Dropped" || selectedStatus === "Completed") && (
+              <>
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "#0F172A",
+                    marginTop: 16,
+                    marginBottom: 8,
+                  }}
+                >
+                  {selectedStatus === "Dropped" ? "Dropout date" : "Passout date"}
+                </div>
+                <DatePicker
+                  value={selectedStatusDate}
+                  onChange={(value) => setSelectedStatusDate(value)}
+                  format="DD MMM YYYY"
+                  size="large"
+                  style={{ width: "100%" }}
+                  disabledDate={(current) =>
+                    current && current > dayjs().endOf("day")
+                  }
+                />
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 12,
+                    color: "#64748B",
+                    fontWeight: 500,
+                  }}
+                >
+                  Dropout dues report will show only installments due on or before this date.
+                </div>
+              </>
+            )}
           </div>
         </div>
       </Modal>

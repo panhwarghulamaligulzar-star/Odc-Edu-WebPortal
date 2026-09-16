@@ -596,6 +596,7 @@ const Students = () => {
     [],
   );
   const [statusChangeNote, setStatusChangeNote] = useState("");
+  const [statusChangeDate, setStatusChangeDate] = useState(dayjs());
   const fileInputRef = useRef(null);
   const profileUploadInputRef = useRef(null);
   const profileCameraInputRef = useRef(null);
@@ -1116,6 +1117,7 @@ const Students = () => {
         .filter(Boolean),
     );
     setStatusChangeNote("");
+    setStatusChangeDate(dayjs());
     setStatusModalVisible(true);
   };
 
@@ -1126,6 +1128,7 @@ const Students = () => {
     setSelectedStudentStatus("Dropped");
     setSelectedStatusEnrollmentIds([]);
     setStatusChangeNote("");
+    setStatusChangeDate(dayjs());
   };
 
   const handleStudentStatusUpdate = async () => {
@@ -1159,6 +1162,14 @@ const Students = () => {
       return;
     }
 
+    if (
+      (selectedStudentStatus === "Dropped" || selectedStudentStatus === "Completed") &&
+      !statusChangeDate
+    ) {
+      message.warning("Please select the status change date.");
+      return;
+    }
+
     setStatusLoading(true);
     try {
       await Promise.all(
@@ -1166,8 +1177,8 @@ const Students = () => {
           updateEnrollmentStatus(enrollment._id, {
             status: selectedStudentStatus,
             completionDate:
-              selectedStudentStatus === "Completed"
-                ? dayjs().format("YYYY-MM-DD")
+              selectedStudentStatus === "Dropped" || selectedStudentStatus === "Completed"
+                ? statusChangeDate.format("YYYY-MM-DD")
                 : null,
             notes:
               selectedStudentStatus === "Active"
@@ -4481,6 +4492,45 @@ const Students = () => {
                 )?.helper
               }
             </div>
+
+            {(selectedStudentStatus === "Dropped" ||
+              selectedStudentStatus === "Completed") && (
+              <>
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: "#0F172A",
+                    marginTop: 16,
+                    marginBottom: 8,
+                  }}
+                >
+                  {selectedStudentStatus === "Dropped"
+                    ? "Dropout date"
+                    : "Passout date"}
+                </div>
+                <DatePicker
+                  value={statusChangeDate}
+                  onChange={(value) => setStatusChangeDate(value)}
+                  format="DD MMM YYYY"
+                  size="large"
+                  style={{ width: "100%" }}
+                  disabledDate={(current) =>
+                    current && current > dayjs().endOf("day")
+                  }
+                />
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 12,
+                    color: "#64748B",
+                    fontWeight: 500,
+                  }}
+                >
+                  Dropout dues report will show only installments due on or before this date.
+                </div>
+              </>
+            )}
 
             <div
               style={{

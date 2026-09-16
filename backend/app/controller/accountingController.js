@@ -3371,6 +3371,27 @@ const groupDropoutRowsByStudent = (rows = []) => {
   }));
 };
 
+const getDropoutDateForDueRow = (row) =>
+  row?.enrollment?.completionDate ||
+  row?.enrollment?.updatedAt ||
+  row?.enrollment?.createdAt ||
+  null;
+
+const filterRowsDueBeforeDropout = (rows = []) =>
+  rows.filter((row) => {
+    const dropoutDate = getDropoutDateForDueRow(row);
+    if (!dropoutDate) return true;
+
+    const dueDate = row?.dueDate ? new Date(row.dueDate) : null;
+    if (!dueDate || Number.isNaN(dueDate.getTime())) return false;
+
+    const dropoutEndDate = new Date(dropoutDate);
+    if (Number.isNaN(dropoutEndDate.getTime())) return true;
+    dropoutEndDate.setHours(23, 59, 59, 999);
+
+    return dueDate <= dropoutEndDate;
+  });
+
 // GET /accounting/receipts/dropout-dues
 export const getDropoutStudentDuesOverview = async (req, res) => {
   try {
@@ -3390,8 +3411,10 @@ export const getDropoutStudentDuesOverview = async (req, res) => {
       enrollmentStatus: "Dropped",
     });
 
+    const dueBeforeDropoutRows = filterRowsDueBeforeDropout(allRows);
+
     const filteredRows = filterDuesRows({
-      rows: allRows,
+      rows: dueBeforeDropoutRows,
       status,
       courseId,
       batchId,
