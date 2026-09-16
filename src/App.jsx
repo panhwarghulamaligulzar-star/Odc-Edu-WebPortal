@@ -33,7 +33,7 @@ const App = () => {
       .catch(() => {});
   }, [setAppSettings]);
 
-  useEffect(() => {
+  useEffect(() =>    {
     if (!token) return;
 
     getMyPermissions()
