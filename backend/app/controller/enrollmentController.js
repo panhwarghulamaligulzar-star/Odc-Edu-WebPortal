@@ -249,6 +249,42 @@ const normalizeInstallments = ({
   return rebalanceInstallmentsToTarget(normalized, targetTotal);
 };
 
+const mergeInstallmentsPreservingPaid = (existingInstallments = [], updatedInstallments = []) => {
+  const paidInstallments = (Array.isArray(existingInstallments) ? existingInstallments : [])
+    .filter(
+      (installment) =>
+        Number(installment?.paidAmount || 0) > 0 ||
+        ["Paid", "Partial"].includes(installment?.status),
+    )
+    .map((installment) => ({
+      ...installment,
+      installmentNumber: Number(installment.installmentNumber),
+    }));
+
+  const paidByNumber = new Map(
+    paidInstallments.map((installment) => [installment.installmentNumber, installment]),
+  );
+  const merged = (Array.isArray(updatedInstallments) ? updatedInstallments : []).map(
+    (installment) =>
+      paidByNumber.get(Number(installment.installmentNumber)) || installment,
+  );
+
+  for (const paidInstallment of paidInstallments) {
+    if (
+      !merged.some(
+        (installment) =>
+          Number(installment.installmentNumber) === paidInstallment.installmentNumber,
+      )
+    ) {
+      merged.push(paidInstallment);
+    }
+  }
+
+  return merged.sort(
+    (left, right) => Number(left.installmentNumber) - Number(right.installmentNumber),
+  );
+};
+
 // Create enrollment for a student
 export const createEnrollment = async (req, res) => {
   try {
@@ -767,8 +803,15 @@ export const updateEnrollmentStatus = async (req, res) => {
           preserveExactAmounts: true,
         })
       : [];
-    const resolvedTotal = normalizedInstallments.length
-      ? getInstallmentsTotal(normalizedInstallments)
+    const existingFeeStructure = await FeeStructureSchema.findOne({ enrollment: enrollmentId }).lean();
+    const mergedInstallments = normalizedInstallments.length
+      ? mergeInstallmentsPreservingPaid(
+          existingFeeStructure?.installments,
+          normalizedInstallments,
+        )
+      : [];
+    const resolvedTotal = mergedInstallments.length
+      ? getInstallmentsTotal(mergedInstallments)
       : round2(finalFee ?? totalFee ?? 0);
     if (finalFee !== undefined || totalFee !== undefined) {
       feeStructureUpdate.totalFee = resolvedTotal;
@@ -778,10 +821,10 @@ export const updateEnrollmentStatus = async (req, res) => {
       feeStructureUpdate.numberOfInstallments = numberOfInstallments;
       feeStructureUpdate.installmentEnabled = numberOfInstallments > 1;
     }
-    if (normalizedInstallments.length > 0) {
-      feeStructureUpdate.installments = normalizedInstallments;
-      feeStructureUpdate.numberOfInstallments = normalizedInstallments.length;
-      feeStructureUpdate.installmentEnabled = normalizedInstallments.length > 1;
+    if (mergedInstallments.length > 0) {
+      feeStructureUpdate.installments = mergedInstallments;
+      feeStructureUpdate.numberOfInstallments = mergedInstallments.length;
+      feeStructureUpdate.installmentEnabled = mergedInstallments.length > 1;
       feeStructureUpdate.totalFee = resolvedTotal;
     }
 
@@ -789,8 +832,7 @@ export const updateEnrollmentStatus = async (req, res) => {
       feeStructureUpdate.systemGrantedNumber = syncedRegistrationNo;
       // Recalculate remainingAmount = totalFee - paidAmount
       if (feeStructureUpdate.totalFee !== undefined) {
-        const existingFs = await FeeStructureSchema.findOne({ enrollment: enrollmentId }).lean();
-        const paidAmount = round2(existingFs?.paidAmount || 0);
+        const paidAmount = round2(existingFeeStructure?.paidAmount || 0);
         feeStructureUpdate.remainingAmount = round2(feeStructureUpdate.totalFee - paidAmount);
       }
       await FeeStructureSchema.findOneAndUpdate(
