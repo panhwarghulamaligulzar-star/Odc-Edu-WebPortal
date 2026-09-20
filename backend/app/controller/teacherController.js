@@ -1,10 +1,12 @@
 import courseModule from "../modules/courseModule.js";
-import "../modules/AdmissionModule.js";
+import AdmissionSchema from "../modules/AdmissionModule.js";
 import TeacherSchema from "../modules/teacherModule.js";
 import EnrollmentSchema from "../modules/enrollmentModule.js";
 import AttendanceSchema from "../modules/attendanceModule.js";
 import BatchSchema from "../modules/batchModule.js";
 import HolidaySchema from "../modules/holidayModule.js";
+import FeeStructureSchema from "../modules/feeStructureModule.js";
+import FeePaymentSchema from "../modules/feePaymentModule.js";
 import * as XLSX from "xlsx";
 import TeacherPayroll from "../modules/teacherPayrollModule.js";
 import StudentTeacherAssignment from "../modules/studentTeacherAssignmentModule.js";
@@ -1171,6 +1173,7 @@ export const transferTeacherStudent = async (req, res) => {
       studentId,
       targetTeacherId,
       targetCourseId,
+      targetBatchId,
       transferDate,
       reason,
       year,
@@ -1215,17 +1218,129 @@ export const transferTeacherStudent = async (req, res) => {
       });
     }
 
+    const duplicateEnrollment = await EnrollmentSchema.findOne({
+      student: studentId,
+      course: targetCourseId,
+      _id: { $ne: enrollmentId },
+    }).lean();
+
+    if (duplicateEnrollment) {
+      return res.status(400).json({
+        success: false,
+        message: "This student is already assigned to the selected target course",
+      });
+    }
+
+    let targetBatch = null;
+    if (targetBatchId) {
+      targetBatch = await BatchSchema.findById(targetBatchId).lean();
+      if (!targetBatch) {
+        return res.status(404).json({ success: false, message: "Target batch not found" });
+      }
+      if (String(targetBatch.course) !== String(targetCourseId)) {
+        return res.status(400).json({
+          success: false,
+          message: "Selected batch does not belong to the selected target course",
+        });
+      }
+    } else {
+      targetBatch = await BatchSchema.findOne({
+        course: targetCourseId,
+        isActive: true,
+        status: { $in: ["Active", "Upcoming"] },
+      })
+        .sort({ status: 1, startDate: -1, createdAt: -1 })
+        .lean();
+    }
+
+    if (!targetBatch) {
+      return res.status(400).json({
+        success: false,
+        message: "Please create or select a batch for the target course before moving this student",
+      });
+    }
+
+    const sourceCourseId = enrollment.course;
+    const sourceBatchId = enrollment.batch || null;
+    const resolvedTargetBatchId = targetBatch._id;
+    const isChangingBatch = String(sourceBatchId || "") !== String(resolvedTargetBatchId);
+
+    if (
+      isChangingBatch &&
+      Number(targetBatch.maxStudents || 0) > 0 &&
+      Number(targetBatch.currentStudents || 0) >= Number(targetBatch.maxStudents || 0)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Selected target batch is full. Please choose another batch.",
+      });
+    }
+
     await StudentTeacherAssignment.updateMany(
       { enrollment: enrollmentId, isActive: true },
       { $set: { isActive: false } },
     );
 
+    await EnrollmentSchema.findByIdAndUpdate(enrollmentId, {
+      $set: {
+        course: targetCourseId,
+        batch: resolvedTargetBatchId,
+        status: "Active",
+        notes: [
+          enrollment.notes,
+          `Moved to selected teacher/course on ${transferDate}: ${String(reason || "").trim()}`,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      },
+    });
+
+    if (isChangingBatch) {
+      if (sourceBatchId) {
+        await BatchSchema.findByIdAndUpdate(sourceBatchId, {
+          $inc: { currentStudents: -1 },
+        });
+        await BatchSchema.findByIdAndUpdate(sourceBatchId, {
+          $max: { currentStudents: 0 },
+        });
+      }
+      await BatchSchema.findByIdAndUpdate(resolvedTargetBatchId, {
+        $inc: { currentStudents: 1 },
+      });
+    }
+
+    const enrolledCourseIds = await EnrollmentSchema.distinct("course", {
+      student: studentId,
+    });
+
+    await AdmissionSchema.findByIdAndUpdate(studentId, {
+      $set: {
+        enrolledCourses: enrolledCourseIds,
+        course: targetCourseId,
+      },
+    });
+
+    await FeeStructureSchema.findOneAndUpdate(
+      { enrollment: enrollmentId },
+      { $set: { course: targetCourseId } },
+    );
+
+    const feeStructure = await FeeStructureSchema.findOne({ enrollment: enrollmentId })
+      .select("_id")
+      .lean();
+    if (feeStructure?._id) {
+      await FeePaymentSchema.updateMany(
+        { feeStructure: feeStructure._id },
+        { $set: { course: targetCourseId } },
+      );
+    }
+
     await StudentTeacherAssignment.create({
       student: studentId,
       enrollment: enrollmentId,
-      sourceCourse: enrollment.course,
+      sourceCourse: sourceCourseId,
       assignedCourse: targetCourseId,
-      batch: enrollment.batch || null,
+      batch: resolvedTargetBatchId,
       fromTeacher: id,
       teacher: targetTeacherId,
       transferDate: new Date(transferDate),

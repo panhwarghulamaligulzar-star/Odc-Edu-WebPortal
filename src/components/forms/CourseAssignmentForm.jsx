@@ -89,6 +89,43 @@ const sanitizeAdditionalFees = (rows = []) =>
     }))
     .filter((row) => row.amount > 0);
 
+const buildAdditionalFeesFromFeeStructure = (feeStructure = {}) => {
+  const rows = Array.isArray(feeStructure?.additionalFees)
+    ? feeStructure.additionalFees.map((fee, idx) => ({
+        id: `${Date.now()}-${idx}`,
+        feeType: fee.feeType || "exam",
+        title: fee.title || getFeeTypeLabel(fee.feeType || "exam"),
+        amount: fee.amount,
+        paymentMode: fee.paymentMode || "one_time",
+      }))
+    : [];
+
+  const existingTypes = new Set(
+    rows.map((row) => String(row.feeType || "").toLowerCase()),
+  );
+  const legacyFeeRows = [
+    { key: "examFee", feeType: "exam", title: "Exam Fee" },
+    { key: "registrationFee", feeType: "registration", title: "Registration Fee" },
+    { key: "practicalFee", feeType: "practical", title: "Practical Fee" },
+    { key: "otherFee", feeType: "other", title: "Other Fee" },
+  ];
+
+  legacyFeeRows.forEach((fee) => {
+    const amount = round2(feeStructure?.[fee.key] || 0);
+    if (amount <= 0 || existingTypes.has(fee.feeType)) return;
+
+    rows.push({
+      id: `${Date.now()}-${fee.key}`,
+      feeType: fee.feeType,
+      title: fee.title,
+      amount,
+      paymentMode: "one_time",
+    });
+  });
+
+  return rows;
+};
+
 const buildDistributedValues = (amount, count) => {
   const safeAmount = round2(amount);
   const safeCount = Math.max(1, Math.min(24, Number(count) || 1));
@@ -320,6 +357,7 @@ const CourseAssignmentForm = ({
   const isInitPaymentPlanRef = useRef(false);
   // Ref to avoid automatic installment rebuilds after initial edit restore
   const userChangedInstallmentInputsRef = useRef(false);
+  const userChangedAdditionalFeesRef = useRef(false);
   // Ref to track previous enrollment date for installment date recalculation
   const prevEnrollmentDateRef = useRef(null);
 
@@ -448,6 +486,7 @@ const CourseAssignmentForm = ({
       isInitializingEditRef.current = false;
       isInitPaymentPlanRef.current = false;
       skipInstallmentInitRef.current = false;
+      userChangedAdditionalFeesRef.current = false;
       prevEnrollmentDateRef.current = null;
       return;
     }
@@ -489,20 +528,13 @@ const CourseAssignmentForm = ({
         certificateFee: fs?.certificateFee ?? null,
       });
 
-      // Set additional fees from feeStructure
-      if (fs?.additionalFees?.length > 0) {
-        setAdditionalFees(
-          fs.additionalFees.map((fee, idx) => ({
-            id: `${Date.now()}-${idx}`,
-            feeType: fee.feeType || "exam",
-            title: fee.title,
-            amount: fee.amount,
-            paymentMode: fee.paymentMode || "one_time",
-          })),
-        );
-      } else {
-        setAdditionalFees([createAdditionalFeeRow()]);
-      }
+      const restoredAdditionalFees = buildAdditionalFeesFromFeeStructure(fs);
+      setAdditionalFees(
+        restoredAdditionalFees.length
+          ? restoredAdditionalFees
+          : [createAdditionalFeeRow()],
+      );
+      userChangedAdditionalFeesRef.current = false;
 
       // Set installments from feeStructure
       if (fs?.installments?.length > 0) {
@@ -543,6 +575,7 @@ const CourseAssignmentForm = ({
       isInitializingEditRef.current = false;
       isInitPaymentPlanRef.current = false;
       setAdditionalFees([createAdditionalFeeRow()]);
+      userChangedAdditionalFeesRef.current = false;
       setOverriddenFees({
         admissionFee: null,
         courseFee: null,
@@ -674,16 +707,19 @@ const CourseAssignmentForm = ({
 
   const addAdditionalFee = () => {
     userChangedInstallmentInputsRef.current = true;
+    userChangedAdditionalFeesRef.current = true;
     setAdditionalFees((prev) => [...prev, createAdditionalFeeRow()]);
   };
 
   const removeAdditionalFee = (id) => {
     userChangedInstallmentInputsRef.current = true;
+    userChangedAdditionalFeesRef.current = true;
     setAdditionalFees((prev) => prev.filter((item) => item.id !== id));
   };
 
   const updateAdditionalFee = (id, updates) => {
     userChangedInstallmentInputsRef.current = true;
+    userChangedAdditionalFeesRef.current = true;
     setAdditionalFees((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
@@ -901,6 +937,9 @@ const CourseAssignmentForm = ({
       },
     }));
 
+    const shouldUpdateAdditionalFees =
+      !isEditMode || userChangedAdditionalFeesRef.current;
+
     const payload = {
       ...values,
       status: values.status || "Active",
@@ -913,11 +952,6 @@ const CourseAssignmentForm = ({
       admissionFee: baseFee.admissionFee,
       courseFee: baseFee.courseFee,
       certificateFee: baseFee.certificateFee,
-      examFee: 0,
-      registrationFee: 0,
-      practicalFee: 0,
-      otherFee: 0,
-      additionalFees: cleanedAdditionalFees,
       totalFee: baseFee.finalFee,
       discount: baseFee.discountAmount,
       totalDiscount: baseFee.discountAmount,
@@ -930,6 +964,14 @@ const CourseAssignmentForm = ({
       // Properly formatted installments with custom fees included
       installments: formattedInstallments,
     };
+
+    if (shouldUpdateAdditionalFees) {
+      payload.examFee = 0;
+      payload.registrationFee = 0;
+      payload.practicalFee = 0;
+      payload.otherFee = 0;
+      payload.additionalFees = cleanedAdditionalFees;
+    }
 
     console.log("📤 CourseAssignmentForm sending payload:", {
       customFees: {
