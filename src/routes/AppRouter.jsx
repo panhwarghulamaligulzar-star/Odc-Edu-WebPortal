@@ -56,7 +56,7 @@ function AppRouter() {
         {/* PUBLIC ROUTE */}
 
         {/* Wrap all routes with Layout */}
-        <Route element={<Layout />}>
+        <Route element= {<Layout />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/about-us" element={<AboutUs />} />
           <Route path="/services" element={<ServicesSection />} />
