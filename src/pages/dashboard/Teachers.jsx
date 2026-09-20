@@ -58,6 +58,7 @@ import * as XLSX from "xlsx";
 import odcLogo from "../../assets/images/logos/new logo.png";
 import { MdPeopleAlt } from "react-icons/md";
 import { useModulePermissions } from "../../hooks/usePermissions";
+import { getBatchesByCourse } from "../../services/batchService";
 
 const TEACHERS_PER_PAGE = 10;
 
@@ -111,6 +112,8 @@ const Teachers = () => {
   const [studentTransferModalOpen, setStudentTransferModalOpen] = useState(false);
   const [selectedStudentTransfer, setSelectedStudentTransfer] = useState(null);
   const [savingStudentTransfer, setSavingStudentTransfer] = useState(false);
+  const [transferTargetBatches, setTransferTargetBatches] = useState([]);
+  const [loadingTransferTargetBatches, setLoadingTransferTargetBatches] = useState(false);
   const [studentTransferForm] = Form.useForm();
 
   // Fetch teachers and courses on mount
@@ -322,6 +325,7 @@ const Teachers = () => {
       sourceEnrollmentId: sourceOptions.length === 1 ? sourceOptions[0].value : undefined,
       targetTeacherId: undefined,
       targetCourseId: undefined,
+      targetBatchId: undefined,
       transferDate: dayjs(),
       reason: "",
     });
@@ -331,7 +335,32 @@ const Teachers = () => {
   const closeStudentTransferModal = () => {
     setStudentTransferModalOpen(false);
     setSelectedStudentTransfer(null);
+    setTransferTargetBatches([]);
     studentTransferForm.resetFields();
+  };
+
+  const fetchTransferTargetBatches = async (courseId) => {
+    if (!courseId) {
+      setTransferTargetBatches([]);
+      return;
+    }
+
+    setLoadingTransferTargetBatches(true);
+    try {
+      const response = await getBatchesByCourse(courseId);
+      const batches = (response.data || []).filter(
+        (batch) => batch.isActive !== false && ["Active", "Upcoming"].includes(batch.status),
+      );
+      setTransferTargetBatches(batches);
+      if (batches.length === 1) {
+        studentTransferForm.setFieldValue("targetBatchId", batches[0]._id);
+      }
+    } catch (error) {
+      setTransferTargetBatches([]);
+      message.error(error.response?.data?.message || "Failed to load course batches");
+    } finally {
+      setLoadingTransferTargetBatches(false);
+    }
   };
 
   const handleTransferStudent = async () => {
@@ -348,6 +377,7 @@ const Teachers = () => {
         studentId: selectedStudentTransfer.studentId,
         targetTeacherId: values.targetTeacherId,
         targetCourseId: values.targetCourseId,
+        targetBatchId: values.targetBatchId,
         transferDate: values.transferDate.format("YYYY-MM-DD"),
         reason: values.reason,
         year: selectedMonth.year(),
@@ -1703,7 +1733,13 @@ const Teachers = () => {
               filterOption={(input, option) =>
                 String(option?.label || "").toLowerCase().includes(input.toLowerCase())
               }
-              onChange={() => studentTransferForm.setFieldValue("targetCourseId", undefined)}
+              onChange={() => {
+                studentTransferForm.setFieldsValue({
+                  targetCourseId: undefined,
+                  targetBatchId: undefined,
+                });
+                setTransferTargetBatches([]);
+              }}
             />
           </Form.Item>
 
@@ -1718,9 +1754,42 @@ const Teachers = () => {
                   placeholder="Select target teacher first"
                   disabled={!getFieldValue("targetTeacherId")}
                   options={getTeacherCourseOptions(getFieldValue("targetTeacherId"))}
+                  onChange={(courseId) => {
+                    studentTransferForm.setFieldValue("targetBatchId", undefined);
+                    fetchTransferTargetBatches(courseId);
+                  }}
                 />
               </Form.Item>
             )}
+          </Form.Item>
+
+          <Form.Item
+            label="Teacher Course Batch"
+            name="targetBatchId"
+            rules={[{ required: true, message: "Please select target batch" }]}
+          >
+            <Select
+              showSearch
+              loading={loadingTransferTargetBatches}
+              disabled={!studentTransferForm.getFieldValue("targetCourseId")}
+              placeholder={
+                studentTransferForm.getFieldValue("targetCourseId")
+                  ? "Select batch for attendance"
+                  : "Select teacher course first"
+              }
+              options={transferTargetBatches.map((batch) => ({
+                label: `${batch.batchName || "Batch"}${batch.batchCode ? ` (${batch.batchCode})` : ""} - ${batch.status || "Active"}`,
+                value: batch._id,
+              }))}
+              filterOption={(input, option) =>
+                String(option?.label || "").toLowerCase().includes(input.toLowerCase())
+              }
+              notFoundContent={
+                loadingTransferTargetBatches
+                  ? "Loading batches..."
+                  : "No active batch found for this course"
+              }
+            />
           </Form.Item>
 
           <Form.Item
