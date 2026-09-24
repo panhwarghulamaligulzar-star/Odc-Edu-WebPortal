@@ -51,6 +51,12 @@ const AttendanceSchema = new mongoose.Schema(
       default: "",
     },
 
+    method: {
+      type: String,
+      enum: ["manual", "qr", "face", "holiday", "excel"],
+      default: "manual",
+    },
+
     markedBy: {
       type: String,
       ref: "User",

@@ -16,6 +16,21 @@ export const markQrAttendance = async ({ date, studentId, studentCode }) => {
   return response.data;
 };
 
+export const enrollFaceAttendance = async ({ studentId, faceHash, imageData, samplesCount }) => {
+  const response = await api.post("/attendance/face/enroll", {
+    studentId,
+    faceHash,
+    imageData,
+    samplesCount,
+  });
+  return response.data;
+};
+
+export const markFaceAttendance = async ({ batchId, date, faceHash }) => {
+  const response = await api.post("/attendance/face/mark", { batchId, date, faceHash });
+  return response.data;
+};
+
 // Get attendance records for a batch on a specific date
 export const getAttendanceByBatchAndDate = async (batchId, date) => {
   const response = await api.get(`/attendance/batch/${batchId}`, {

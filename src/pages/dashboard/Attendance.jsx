@@ -6,6 +6,7 @@ import {
 import {
   MdCheckCircle, MdCancel, MdAccessTime, MdBeachAccess,
   MdSave, MdHistory, MdFactCheck, MdDownload, MdUpload, MdQrCodeScanner,
+  MdFace, MdCameraAlt,
 } from "react-icons/md";
 import { FaFileExcel, FaFilePdf } from "react-icons/fa";
 import dayjs from "dayjs";
@@ -20,6 +21,8 @@ import {
   getAttendanceByBatchAndDate,
   bulkMarkAttendance,
   markQrAttendance,
+  enrollFaceAttendance,
+  markFaceAttendance,
   getAttendanceHistory,
   getMonthCalendar,
   getPersonAttendance,
@@ -177,6 +180,64 @@ const parseAttendanceQrPayload = (rawValue) => {
 const INVALID_QR_MESSAGE =
   "QR code detected, but it is not a valid student attendance ID card QR code.";
 
+const FACE_HASH_SIZE = 16;
+const FACE_CAPTURE_WIDTH = 320;
+
+const createFaceHashFromCanvas = (canvas) => {
+  const workingCanvas = document.createElement("canvas");
+  workingCanvas.width = FACE_HASH_SIZE;
+  workingCanvas.height = FACE_HASH_SIZE;
+  const context = workingCanvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return "";
+
+  context.drawImage(canvas, 0, 0, FACE_HASH_SIZE, FACE_HASH_SIZE);
+  const { data } = context.getImageData(0, 0, FACE_HASH_SIZE, FACE_HASH_SIZE);
+  const grayValues = [];
+
+  for (let index = 0; index < data.length; index += 4) {
+    grayValues.push(Math.round((data[index] + data[index + 1] + data[index + 2]) / 3));
+  }
+
+  const average = grayValues.reduce((sum, value) => sum + value, 0) / grayValues.length;
+  return grayValues.map((value) => (value >= average ? "1" : "0")).join("");
+};
+
+const captureFaceFrame = async ({ video, canvas, detector, requireSingleFace = false }) => {
+  if (!video || video.readyState < 2 || !canvas) {
+    throw new Error("Camera is not ready yet. Please wait a moment and try again.");
+  }
+
+  const width = video.videoWidth || 640;
+  const height = video.videoHeight || 480;
+  canvas.width = width;
+  canvas.height = height;
+
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("Unable to read camera frame.");
+  context.drawImage(video, 0, 0, width, height);
+
+  if (detector) {
+    const faces = await detector.detect(canvas);
+    if (requireSingleFace && faces.length !== 1) {
+      throw new Error(faces.length > 1 ? "Multiple faces detected. Keep only one student in frame." : "No face detected. Center the student's face and try again.");
+    }
+  }
+
+  return {
+    imageData: (() => {
+      const previewCanvas = document.createElement("canvas");
+      const ratio = width > 0 ? height / width : 0.75;
+      previewCanvas.width = FACE_CAPTURE_WIDTH;
+      previewCanvas.height = Math.round(FACE_CAPTURE_WIDTH * ratio);
+      const previewContext = previewCanvas.getContext("2d");
+      if (!previewContext) return canvas.toDataURL("image/jpeg", 0.72);
+      previewContext.drawImage(canvas, 0, 0, previewCanvas.width, previewCanvas.height);
+      return previewCanvas.toDataURL("image/jpeg", 0.72);
+    })(),
+    faceHash: createFaceHashFromCanvas(canvas),
+  };
+};
+
 // ─── StatusPicker ─────────────────────────────────────────────────────────────
 const StatusPicker = ({ value, onChange, disabled = false }) => (
   <div className="flex gap-1 flex-wrap">
@@ -297,8 +358,35 @@ function MarkAttendancePanel({ batches }) {
   const qrLastScanRef = useRef({ key: "", at: 0 });
   const qrLastErrorRef = useRef({ key: "", at: 0 });
   const qrSuccessTimerRef = useRef(null);
+  const [faceSupported, setFaceSupported] = useState(false);
+  const [faceSetupOpen, setFaceSetupOpen] = useState(false);
+  const [faceScannerOpen, setFaceScannerOpen] = useState(false);
+  const [faceInitializing, setFaceInitializing] = useState(false);
+  const [faceCameraActive, setFaceCameraActive] = useState(false);
+  const [faceBusy, setFaceBusy] = useState(false);
+  const [faceScanError, setFaceScanError] = useState("");
+  const [faceScanStatus, setFaceScanStatus] = useState("idle");
+  const [faceSearch, setFaceSearch] = useState("");
+  const [faceSuccessOpen, setFaceSuccessOpen] = useState(false);
+  const [faceSuccessData, setFaceSuccessData] = useState(null);
+  const [faceNoMatchOpen, setFaceNoMatchOpen] = useState(false);
+  const [faceNoMatchData, setFaceNoMatchData] = useState(null);
+  const [faceSetupSuccessOpen, setFaceSetupSuccessOpen] = useState(false);
+  const [faceSetupSuccessData, setFaceSetupSuccessData] = useState(null);
+  const [faceEnrollmentStudent, setFaceEnrollmentStudent] = useState(null);
+  const faceVideoRef = useRef(null);
+  const faceCanvasRef = useRef(null);
+  const faceStreamRef = useRef(null);
+  const faceDetectorRef = useRef(null);
+  const faceScanTimerRef = useRef(null);
+  const faceBusyRef = useRef(false);
+  const faceScanHandlerRef = useRef(null);
+  const faceLastMatchRef = useRef({ key: "", at: 0 });
+  const faceSuccessTimerRef = useRef(null);
+  const faceNoMatchTimerRef = useRef(null);
   const loadCalendarRef = useRef(async () => {});
   const isQrMode = attendanceMode === "qr";
+  const isFaceMode = attendanceMode === "face";
 
   useEffect(() => {
     if (!isQrMode) return;
@@ -454,6 +542,11 @@ function MarkAttendancePanel({ batches }) {
 
   useEffect(() => {
     setQrSupported(
+      typeof window !== "undefined" &&
+      typeof navigator !== "undefined" &&
+      typeof navigator.mediaDevices?.getUserMedia === "function",
+    );
+    setFaceSupported(
       typeof window !== "undefined" &&
       typeof navigator !== "undefined" &&
       typeof navigator.mediaDevices?.getUserMedia === "function",
@@ -692,6 +785,93 @@ function MarkAttendancePanel({ batches }) {
     stopQrScanner();
   }, [stopQrScanner]);
 
+  const stopFaceCamera = useCallback(() => {
+    if (faceScanTimerRef.current) {
+      clearTimeout(faceScanTimerRef.current);
+      faceScanTimerRef.current = null;
+    }
+
+    if (faceStreamRef.current) {
+      faceStreamRef.current.getTracks().forEach((track) => track.stop());
+      faceStreamRef.current = null;
+    }
+
+    if (faceVideoRef.current) {
+      faceVideoRef.current.srcObject = null;
+    }
+
+    faceBusyRef.current = false;
+    setFaceBusy(false);
+    setFaceInitializing(false);
+    setFaceCameraActive(false);
+    setFaceScanStatus("idle");
+  }, []);
+
+  const startFaceCamera = useCallback(async () => {
+    if (!faceSupported) {
+      setFaceScanError("Camera access is not available in this browser. Use Chrome/Edge on HTTPS or localhost.");
+      return;
+    }
+
+    setFaceScanError("");
+    setFaceScanStatus("starting");
+    setFaceInitializing(true);
+
+    try {
+      stopFaceCamera();
+
+      if (
+        typeof window !== "undefined" &&
+        typeof window.FaceDetector !== "undefined" &&
+        !faceDetectorRef.current
+      ) {
+        try {
+          faceDetectorRef.current = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 2 });
+        } catch {
+          faceDetectorRef.current = null;
+        }
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "user",
+          width: { ideal: 960 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+
+      faceStreamRef.current = stream;
+
+      if (faceVideoRef.current) {
+        faceVideoRef.current.srcObject = stream;
+        await faceVideoRef.current.play();
+      }
+      setFaceCameraActive(true);
+      setFaceScanStatus("scanning");
+    } catch (error) {
+      const permissionMessage =
+        error?.name === "NotAllowedError" || error?.message === "Permission denied"
+          ? "Camera permission was denied. Click the camera/lock icon near the address bar, allow Camera for this site, then press Start Camera again. Camera also requires HTTPS or localhost."
+          : error?.name === "NotFoundError"
+            ? "No camera was found on this device. Please connect or enable a camera and try again."
+            : error?.message || "Camera access failed. Please allow camera permission and try again.";
+      setFaceScanError(
+        permissionMessage,
+      );
+      setFaceCameraActive(false);
+      setFaceScanStatus("error");
+    } finally {
+      setFaceInitializing(false);
+    }
+  }, [faceSupported, stopFaceCamera]);
+
+  const closeFaceCameraModal = useCallback(() => {
+    setFaceSetupOpen(false);
+    setFaceScannerOpen(false);
+    stopFaceCamera();
+  }, [stopFaceCamera]);
+
   useEffect(() => {
     if (attendanceMode !== "qr") {
       closeQrScanner();
@@ -702,10 +882,45 @@ function MarkAttendancePanel({ batches }) {
   }, [attendanceMode, closeQrScanner]);
 
   useEffect(() => {
+    if (attendanceMode !== "face") {
+      closeFaceCameraModal();
+      return;
+    }
+
+    if (!selectedBatch) {
+      setSelectedBatch(ALL_BATCHES_VALUE);
+      setFaceScanError("");
+      setFaceCameraActive(false);
+      setFaceScannerOpen(true);
+      return;
+    }
+
+    setFaceScanError("");
+    setFaceCameraActive(false);
+    setFaceScannerOpen(true);
+  }, [attendanceMode, selectedBatch, closeFaceCameraModal]);
+
+  useEffect(() => {
     if (!qrScannerOpen) return;
     startQrScanner();
     return () => stopQrScanner();
   }, [qrScannerOpen, startQrScanner, stopQrScanner]);
+
+  useEffect(() => {
+    if (!faceSetupOpen && !faceScannerOpen) return;
+    startFaceCamera();
+    return () => stopFaceCamera();
+  }, [faceSetupOpen, faceScannerOpen, startFaceCamera, stopFaceCamera]);
+
+  useEffect(() => () => {
+    stopFaceCamera();
+    if (faceSuccessTimerRef.current) {
+      clearTimeout(faceSuccessTimerRef.current);
+    }
+    if (faceNoMatchTimerRef.current) {
+      clearTimeout(faceNoMatchTimerRef.current);
+    }
+  }, [stopFaceCamera]);
 
   // ── Load calendar data for a given month ───────────────────────────────────
   // MERGE into existing map so navigating months keeps previous months' dots
@@ -1022,7 +1237,283 @@ function MarkAttendancePanel({ batches }) {
     } finally { setSaving(false); }
   };
 
+  const refreshFaceStudentInState = (studentId, faceAttendance) => {
+    setMembers((prev) => ({
+      ...prev,
+      students: (prev.students || []).map((student) =>
+        student._id === studentId
+          ? { ...student, faceAttendance: { ...(student.faceAttendance || {}), ...faceAttendance, enabled: true } }
+          : student,
+      ),
+    }));
+  };
+
+  const openFaceSetup = (student) => {
+    setFaceEnrollmentStudent(student);
+    setFaceScanError("");
+    setFaceCameraActive(false);
+    setFaceSetupOpen(true);
+  };
+
+  const handleFaceEnrollmentCapture = async () => {
+    if (!faceEnrollmentStudent?._id) {
+      message.warning("Select a student first");
+      return;
+    }
+    if (!faceCameraActive) {
+      message.warning("Start the camera first, then capture the face.");
+      return;
+    }
+
+    setFaceBusy(true);
+    faceBusyRef.current = true;
+    setFaceScanStatus("scanning");
+
+    try {
+      const capture = await captureFaceFrame({
+        video: faceVideoRef.current,
+        canvas: faceCanvasRef.current,
+        detector: faceDetectorRef.current,
+        requireSingleFace: true,
+      });
+
+      const response = await enrollFaceAttendance({
+        studentId: faceEnrollmentStudent._id,
+        faceHash: capture.faceHash,
+        imageData: capture.imageData,
+        samplesCount: 1,
+      });
+
+      refreshFaceStudentInState(faceEnrollmentStudent._id, response?.data?.student?.faceAttendance || {
+        imageData: capture.imageData,
+        samplesCount: 1,
+        updatedAt: new Date().toISOString(),
+      });
+      setFaceSetupSuccessData({
+        ...(response?.data?.student || faceEnrollmentStudent),
+        name: response?.data?.student?.name || faceEnrollmentStudent.name,
+        registrationNo: response?.data?.student?.registrationNo || faceEnrollmentStudent.registrationNo,
+        capturedFaceImage: capture.imageData,
+        batchName: faceEnrollmentStudent.attendanceBatchLabel || faceEnrollmentStudent.attendanceBatchName || "Face attendance roster",
+      });
+      setFaceSetupSuccessOpen(true);
+      message.success(response?.message || "Face setup saved successfully");
+      closeFaceCameraModal();
+    } catch (error) {
+      const errorMessage = error?.response?.data?.message || error?.message || "Failed to save face setup";
+      setFaceScanError(errorMessage);
+      Modal.error({
+        title: error?.response?.data?.code === "FACE_ALREADY_ENROLLED"
+          ? "Face Already Setup"
+          : "Face Setup Failed",
+        content: errorMessage,
+      });
+    } finally {
+      faceBusyRef.current = false;
+      setFaceBusy(false);
+      if (faceCameraActive) {
+        setFaceScanStatus("scanning");
+      }
+    }
+  };
+
+  const handleFaceAttendanceMarked = (studentRecord, confidence, batchesMarked = [], options = {}) => {
+    const timestamp = dayjs().format("HH:mm, DD MMM");
+    const targetBatchIds = batchesMarked.length
+      ? batchesMarked.map((batch) => batch._id)
+      : [selectedBatch];
+
+    setAttendanceMap((prev) => ({
+      ...prev,
+      ...targetBatchIds.reduce((acc, batchId) => {
+        acc[`${batchId}:${studentRecord._id}`] = "Present";
+        return acc;
+      }, {}),
+    }));
+    setTimeMap((prev) => ({
+      ...prev,
+      ...targetBatchIds.reduce((acc, batchId) => {
+        acc[`${batchId}:${studentRecord._id}`] = timestamp;
+        return acc;
+      }, {}),
+    }));
+    setDirty(false);
+    setFaceSuccessData({
+      ...studentRecord,
+      confidence,
+      capturedFaceImage: options.capturedFaceImage || "",
+      alreadyMarked: !!options.alreadyMarked,
+      markedAt: timestamp,
+      attendanceDate: selectedDate.format("DD MMM YYYY"),
+      batchName: batchesMarked.length > 1
+        ? `${batchesMarked.length} batches marked`
+        : batchesMarked[0]?.batchName || members.batch?.batchName || selectedBatchDetails?.batchName || "",
+    });
+    setFaceSuccessOpen(true);
+
+    if (faceSuccessTimerRef.current) {
+      clearTimeout(faceSuccessTimerRef.current);
+    }
+
+    faceSuccessTimerRef.current = setTimeout(() => {
+      setFaceSuccessOpen(false);
+      setFaceScanStatus("scanning");
+    }, 5000);
+  };
+
+  const showFaceNoMatchPopup = ({ message: popupMessage, capturedFaceImage, title }) => {
+    setFaceNoMatchData({
+      title: title || "Face Not Matched",
+      message: popupMessage,
+      capturedFaceImage,
+      attendanceDate: selectedDate.format("DD MMM YYYY"),
+    });
+    setFaceNoMatchOpen(true);
+
+    if (faceNoMatchTimerRef.current) {
+      clearTimeout(faceNoMatchTimerRef.current);
+    }
+
+    faceNoMatchTimerRef.current = setTimeout(() => {
+      setFaceNoMatchOpen(false);
+      setFaceScanStatus("scanning");
+    }, 4500);
+  };
+
+  const handleFaceScanAndMark = async ({ showToast = true } = {}) => {
+    if (!selectedBatch) {
+      if (showToast) message.warning("Select a batch before using face attendance");
+      return;
+    }
+    if (!faceCameraActive) {
+      if (showToast) message.warning("Start the camera first, then scan the face.");
+      return;
+    }
+
+    setFaceBusy(true);
+    faceBusyRef.current = true;
+    setFaceScanStatus("matching");
+    let capture = null;
+
+    try {
+      capture = await captureFaceFrame({
+        video: faceVideoRef.current,
+        canvas: faceCanvasRef.current,
+        detector: faceDetectorRef.current,
+        requireSingleFace: true,
+      });
+
+      const response = await markFaceAttendance({
+        batchId: selectedBatch,
+        date: selectedDate.format("YYYY-MM-DD"),
+        faceHash: capture.faceHash,
+      });
+
+      const matchedStudent = response?.data?.student;
+      const matchKey = String(matchedStudent?._id || "");
+      const now = Date.now();
+
+      if (
+        faceLastMatchRef.current.key === matchKey &&
+        now - faceLastMatchRef.current.at < 4000
+      ) {
+        return;
+      }
+
+      faceLastMatchRef.current = { key: matchKey, at: now };
+      handleFaceAttendanceMarked(
+        matchedStudent,
+        response?.data?.confidence,
+        response?.data?.batchesMarked || [],
+        { capturedFaceImage: capture.imageData },
+      );
+      setFaceScanError("");
+      setFaceScanStatus("success");
+      if (showToast) {
+        message.success(response?.message || "Face attendance marked successfully.");
+      }
+      await loadAttendance();
+    } catch (error) {
+      if (error?.response?.data?.code === "ATTENDANCE_ALREADY_MARKED") {
+        const data = error.response.data.data || {};
+        const matchedStudent = data.student;
+        if (matchedStudent?._id) {
+          const matchKey = String(matchedStudent._id);
+          const now = Date.now();
+          if (
+            faceLastMatchRef.current.key !== matchKey ||
+            now - faceLastMatchRef.current.at >= 4000
+          ) {
+            faceLastMatchRef.current = { key: matchKey, at: now };
+            handleFaceAttendanceMarked(
+              matchedStudent,
+              data.confidence,
+              data.batchesMarked || [],
+              { capturedFaceImage: capture.imageData, alreadyMarked: true },
+            );
+          }
+          setFaceScanError("");
+          setFaceScanStatus("success");
+          return;
+        }
+      }
+
+      const errorMessage = error?.response?.data?.message || error?.message || "Failed to mark face attendance";
+      setFaceScanError(errorMessage);
+      setFaceScanStatus("error");
+      if (
+        ["FACE_MATCH_NOT_CONFIDENT"].includes(error?.response?.data?.code) ||
+        error?.response?.status === 404 ||
+        !error?.response
+      ) {
+        showFaceNoMatchPopup({
+          title: error?.response?.status === 404 ? "Student Face Not Setup" : "Face Not Matched",
+          message: error?.response?.status === 404
+            ? "No student face record matched this scan. Please setup this student's face first, then scan again to mark attendance."
+            : !error?.response
+              ? "The scanner could not read a valid face from the camera frame. Center the student's face in the box, or setup the student's face first if this is a new student."
+              : "We detected a face, but it did not confidently match any setup student. Please try again with better lighting or setup this student's face.",
+          capturedFaceImage: capture?.imageData,
+        });
+      }
+      if (showToast) message.error(errorMessage);
+    } finally {
+      faceBusyRef.current = false;
+      setFaceBusy(false);
+      if (!faceSuccessOpen) {
+        setFaceScanStatus("scanning");
+      }
+    }
+  };
+
   // ── DatePicker: calendar cell renderer ────────────────────────────────────
+  useEffect(() => {
+    faceScanHandlerRef.current = handleFaceScanAndMark;
+  });
+
+  useEffect(() => {
+    if (!faceScannerOpen || !faceCameraActive || faceSuccessOpen || faceNoMatchOpen) return;
+
+    faceScanHandlerRef.current?.({ showToast: false });
+
+    faceScanTimerRef.current = setInterval(() => {
+      if (!faceScannerOpen || !faceCameraActive || faceSuccessOpen || faceNoMatchOpen) {
+        return;
+      }
+      if (faceBusyRef.current) {
+        return;
+      }
+      faceScanHandlerRef.current?.({ showToast: false });
+    }, 1800);
+
+    return () => {
+      if (faceScanTimerRef.current) {
+        clearInterval(faceScanTimerRef.current);
+        faceScanTimerRef.current = null;
+      }
+    };
+  }, [faceScannerOpen, faceCameraActive, faceSuccessOpen, faceNoMatchOpen]);
+
   const cellRender = useCallback((current, info) => {
     if (info.type !== "date") return info.originNode;
     const dateStr = current.format("YYYY-MM-DD");
@@ -1366,6 +1857,111 @@ function MarkAttendancePanel({ batches }) {
     },
   ];
 
+  const faceRoster = useMemo(() => {
+    const rosterMap = new Map();
+    members.students.forEach((student) => {
+      const key = String(student._id);
+      const batchLabel = student.attendanceBatchLabel || student.attendanceBatchName;
+      const existing = rosterMap.get(key);
+
+      if (!existing) {
+        rosterMap.set(key, {
+          ...student,
+          attendanceKeys: student.attendanceKey ? [student.attendanceKey] : [],
+          batchLabels: batchLabel ? [batchLabel] : [],
+        });
+        return;
+      }
+
+      if (student.attendanceKey && !existing.attendanceKeys.includes(student.attendanceKey)) {
+        existing.attendanceKeys.push(student.attendanceKey);
+      }
+      if (batchLabel && !existing.batchLabels.includes(batchLabel)) {
+        existing.batchLabels.push(batchLabel);
+      }
+      if (!existing.faceAttendance?.enabled && student.faceAttendance?.enabled) {
+        existing.faceAttendance = student.faceAttendance;
+      }
+    });
+
+    const query = faceSearch.trim().toLowerCase();
+    return Array.from(rosterMap.values())
+      .filter((student) => {
+        if (!query) return true;
+        return [
+          student.name,
+          student.registrationNo,
+          student.gender,
+          ...(student.batchLabels || []),
+        ]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(query));
+      })
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  }, [faceSearch, members.students]);
+
+  const faceStudentCols = [
+    { title: "#", width: 50, render: (_, __, i) => i + 1 },
+    { title: "Name", dataIndex: "name", render: (v) => <span className="font-medium">{v}</span> },
+    { title: "Reg. No", dataIndex: "registrationNo" },
+    ...(isAllBatchesSelected ? [{
+      title: "Batches",
+      dataIndex: "batchLabels",
+      render: (labels = []) => (
+        <div className="flex flex-wrap gap-1">
+          {labels.map((label) => (
+            <Tag key={label} color="processing">{label}</Tag>
+          ))}
+        </div>
+      ),
+    }] : []),
+    { title: "Gender", dataIndex: "gender", render: (g) => <Tag color={g === "Male" ? "blue" : "pink"}>{g}</Tag> },
+    {
+      title: "Face Setup",
+      width: 180,
+      render: (_, r) => {
+        const enabled = !!r.faceAttendance?.enabled;
+        return (
+          <div className="flex flex-col gap-2">
+            <Tag color={enabled ? "green" : "orange"} className="w-fit">
+              {enabled ? "Ready" : "Not Setup"}
+            </Tag>
+            {r.faceAttendance?.updatedAt && (
+              <span className="text-[10px] text-slate-400">
+                Updated {dayjs(r.faceAttendance.updatedAt).format("DD MMM, HH:mm")}
+              </span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      title: "Today's Status",
+      width: 150,
+      render: (_, r) => (
+        <div className="flex flex-col gap-1">
+          <StatusTag status={attendanceMap[r.attendanceKey]} />
+          {timeMap[r.attendanceKey] && (
+            <span className="text-[10px] text-gray-400">ðŸ• {timeMap[r.attendanceKey]}</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      title: "Action",
+      width: 170,
+      render: (_, r) => (
+        <Button
+          icon={<MdCameraAlt size={16} />}
+          onClick={() => openFaceSetup(r)}
+          disabled={!isStudentAttendanceEligible(r)}
+        >
+          {r.faceAttendance?.enabled ? "Re-Setup Face" : "Setup Face"}
+        </Button>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-4">
       {/* CSS for the attendance DatePicker portal — targets .attend-cal class */}
@@ -1373,6 +1969,32 @@ function MarkAttendancePanel({ batches }) {
         .attend-cal .ant-picker-cell-inner { height: auto !important; min-height: 24px; overflow: visible !important; }
         .attend-cal td.ant-picker-cell { height: auto !important; overflow: visible !important; vertical-align: top !important; }
         .attend-cal .ant-picker-body tbody tr { height: auto !important; }
+        .face-scan-frame::before {
+          content: "";
+          position: absolute;
+          inset: 28px;
+          border: 2px solid rgba(45, 212, 191, 0.9);
+          border-radius: 28px;
+          box-shadow: 0 0 0 999px rgba(15, 23, 42, 0.18), 0 0 24px rgba(45, 212, 191, 0.35);
+          pointer-events: none;
+        }
+        .face-scan-frame::after {
+          content: "";
+          position: absolute;
+          left: 44px;
+          right: 44px;
+          top: 38px;
+          height: 3px;
+          border-radius: 999px;
+          background: linear-gradient(90deg, transparent, #67e8f9, transparent);
+          animation: faceScanSweep 1.7s ease-in-out infinite;
+          pointer-events: none;
+        }
+        @keyframes faceScanSweep {
+          0% { transform: translateY(0); opacity: 0.25; }
+          50% { transform: translateY(270px); opacity: 1; }
+          100% { transform: translateY(0); opacity: 0.25; }
+        }
       `}</style>
       {/* Controls */}
       <div className="bg-white rounded-xl shadow p-4 flex flex-wrap gap-4 items-end">
@@ -1391,6 +2013,7 @@ function MarkAttendancePanel({ batches }) {
               setTimeMap({});
               setCalendarData({});
               setHolidayMap(new Map());
+              setFaceSearch("");
               setDirty(false);
             }}
             disabled={isQrMode}
@@ -1472,6 +2095,7 @@ function MarkAttendancePanel({ batches }) {
             options={[
               { label: "Manual", value: "manual" },
               { label: "QR Scan", value: "qr" },
+              { label: "Face Scan", value: "face" },
             ]}
           />
         </div>
@@ -1496,7 +2120,7 @@ function MarkAttendancePanel({ batches }) {
         )}
 
         {/* ── Person filter: type + name dropdown ── */}
-        {selectedBatch && !isQrMode && (
+        {selectedBatch && !isQrMode && !isFaceMode && (
           <>
             <div className="flex flex-col gap-1">
               <label className="text-xs font-semibold text-gray-600">Filter by Type</label>
@@ -1550,7 +2174,7 @@ function MarkAttendancePanel({ batches }) {
 
       </div>
 
-      {!isQrMode && selectedBatch && batchInfo && (
+      {!isQrMode && !isFaceMode && selectedBatch && batchInfo && (
         <div className="bg-white rounded-xl shadow p-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -1595,7 +2219,7 @@ function MarkAttendancePanel({ batches }) {
       )}
 
       {/* Summary counts */}
-      {!isQrMode && selectedBatch && (
+      {!isQrMode && !isFaceMode && selectedBatch && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {unmarkedCount > 0 && (
             <div className="rounded-xl border px-4 py-3 flex items-center gap-3 bg-gray-50 border-gray-300 text-gray-700">
@@ -1655,7 +2279,45 @@ function MarkAttendancePanel({ batches }) {
             />
           </Spin>
         </div>
-      ) : selectedBatch ? (
+      ) : isFaceMode && selectedBatch ? (
+        <div className="bg-white rounded-xl shadow">
+          <div className="border-b border-slate-100 px-4 py-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-slate-800">Face Attendance Setup</div>
+              <div className="text-xs text-slate-500">
+                Enroll each student's face once. Selecting Face Scan opens the camera automatically for {selectedDate.format("DD MMM YYYY")}.
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs">
+              <Tag color="green">
+                {faceRoster.filter((student) => student.faceAttendance?.enabled).length} ready
+              </Tag>
+              <Tag color="orange">
+                {faceRoster.filter((student) => !student.faceAttendance?.enabled).length} pending
+              </Tag>
+            </div>
+          </div>
+          <div className="border-b border-slate-100 px-4 py-3">
+            <Input
+              allowClear
+              value={faceSearch}
+              onChange={(event) => setFaceSearch(event.target.value)}
+              placeholder="Search student by name, registration no, gender, or batch"
+              className="max-w-md"
+            />
+          </div>
+          <Spin spinning={loading}>
+            <Table
+              dataSource={faceRoster}
+              columns={faceStudentCols}
+              rowKey="_id"
+              pagination={false}
+              size="middle"
+              locale={{ emptyText: "No students enrolled in this batch" }}
+            />
+          </Spin>
+        </div>
+      ) : !isFaceMode && selectedBatch ? (
         <div className="bg-white rounded-xl shadow">
           {!isAcademyHoliday && !hasSavedRecordsForSelection && (
             <div className="mx-4 mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -1837,6 +2499,345 @@ function MarkAttendancePanel({ batches }) {
             </div>
             <div className="text-center text-xs text-slate-500">
               This popup will close automatically in 5 seconds. Camera stays ready for the next student.
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        title={faceEnrollmentStudent ? `Setup Face: ${faceEnrollmentStudent.name}` : "Setup Face Attendance"}
+        open={faceSetupOpen}
+        onCancel={closeFaceCameraModal}
+        footer={[
+          <Button key="cancel" onClick={closeFaceCameraModal}>
+            Cancel
+          </Button>,
+          <Button
+            key="start"
+            icon={<MdCameraAlt size={16} />}
+            loading={faceInitializing}
+            onClick={startFaceCamera}
+          >
+            {faceCameraActive ? "Restart Camera" : "Start Camera"}
+          </Button>,
+          <Button
+            key="capture"
+            type="primary"
+            icon={<MdCameraAlt size={16} />}
+            loading={faceBusy}
+            disabled={!faceCameraActive}
+            onClick={handleFaceEnrollmentCapture}
+          >
+            Capture & Save Face
+          </Button>,
+        ]}
+        width={720}
+        destroyOnClose
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+            Press Start Camera, then ask the student to face the camera clearly. Good light, one face in frame, and no heavy shadows will make matching better.
+          </div>
+          {!faceSupported && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              Camera access is not available in this browser or device.
+            </div>
+          )}
+          <div className="face-scan-frame relative overflow-hidden rounded-2xl border border-slate-200 bg-[#0f172a]">
+            <video
+              ref={faceVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className="h-[360px] w-full object-cover"
+            />
+            <div className="absolute bottom-4 left-4 rounded-full bg-slate-950/80 px-4 py-2 text-xs font-semibold text-cyan-100">
+              {faceBusy ? "Saving face setup..." : faceCameraActive ? "Center face inside the frame" : "Opening camera..."}
+            </div>
+            <canvas ref={faceCanvasRef} className="hidden" />
+          </div>
+          {!faceCameraActive && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              Camera is not started yet. If your browser asks for permission, choose Allow.
+            </div>
+          )}
+          {faceScanError && !faceNoMatchOpen && !faceSuccessOpen ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {faceScanError}
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+
+      <Modal
+        title="Face Setup Completed"
+        open={faceSetupSuccessOpen}
+        footer={[
+          <Button key="ok" type="primary" onClick={() => setFaceSetupSuccessOpen(false)}>
+            OK
+          </Button>,
+        ]}
+        onCancel={() => setFaceSetupSuccessOpen(false)}
+      >
+        {faceSetupSuccessData ? (
+          <div className="space-y-4 pt-2">
+            <div className="flex items-center gap-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+              {faceSetupSuccessData.capturedFaceImage ? (
+                <img
+                  src={faceSetupSuccessData.capturedFaceImage}
+                  alt={faceSetupSuccessData.name}
+                  className="h-20 w-20 rounded-2xl object-cover ring-2 ring-white"
+                />
+              ) : (
+                <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-blue-600 text-xl font-bold text-white">
+                  {String(faceSetupSuccessData.name || "S").charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div>
+                <div className="text-lg font-semibold text-slate-900">{faceSetupSuccessData.name}</div>
+                <div className="text-sm text-slate-600">Registration No: {faceSetupSuccessData.registrationNo || "N/A"}</div>
+                <div className="text-sm font-medium text-blue-700">Face attendance is ready</div>
+                <div className="text-xs text-slate-500">Captured from the camera during setup</div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Batch / Roster</div>
+              <div className="mt-1 font-medium text-slate-800">{faceSetupSuccessData.batchName}</div>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        title="Face Attendance Scanner"
+        open={faceScannerOpen}
+        onCancel={closeFaceCameraModal}
+        footer={[
+          <Button key="cancel" onClick={closeFaceCameraModal}>
+            Close
+          </Button>,
+          <Button
+            key="start"
+            icon={<MdCameraAlt size={16} />}
+            loading={faceInitializing}
+            onClick={startFaceCamera}
+          >
+            {faceCameraActive ? "Restart Camera" : "Start Camera"}
+          </Button>,
+          <Button
+            key="scan"
+            type="primary"
+            icon={<MdFace size={16} />}
+            loading={faceBusy}
+            disabled={!faceCameraActive || !selectedBatch}
+            onClick={() => handleFaceScanAndMark({ showToast: true })}
+          >
+            Retry Scan Now
+          </Button>,
+        ]}
+        width={720}
+        destroyOnClose
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+            Face scan will match against enrolled students in <span className="font-semibold">{members.batch?.batchName || "the selected batch"}</span> and mark attendance for <span className="font-semibold">{selectedDate.format("DD MMM YYYY")}</span>.
+          </div>
+          <div className="face-scan-frame relative overflow-hidden rounded-2xl border border-slate-200 bg-[#0f172a]">
+            <video
+              ref={faceVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className="h-[360px] w-full object-cover"
+            />
+            <div className="absolute bottom-4 left-4 rounded-full bg-slate-950/80 px-4 py-2 text-xs font-semibold text-cyan-100">
+              {faceScanStatus === "matching"
+                ? "Matching face..."
+                : faceScanStatus === "success"
+                  ? "Attendance marked"
+                  : faceScanStatus === "error"
+                    ? "Face not matched yet"
+                    : faceCameraActive
+                      ? "Scanning face automatically..."
+                      : "Opening camera..."}
+            </div>
+            <canvas ref={faceCanvasRef} className="hidden" />
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Mode</div>
+              <div className="mt-1 font-medium text-slate-800">Face Scan</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ready Students</div>
+              <div className="mt-1 font-medium text-slate-800">
+                {members.students.filter((student) => student.faceAttendance?.enabled).length}
+              </div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Camera</div>
+              <div className="mt-1 font-medium text-slate-800">
+                {faceInitializing
+                  ? "Opening..."
+                  : faceScanStatus === "matching"
+                    ? "Matching face..."
+                    : faceScanStatus === "error"
+                      ? "Waiting for a known face"
+                      : faceCameraActive
+                        ? "Auto scanning"
+                        : "Opening camera"}
+              </div>
+            </div>
+          </div>
+          {faceScanError ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {faceScanError}
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+
+      <Modal
+        title={faceNoMatchData?.title || "Face Not Matched"}
+        open={faceNoMatchOpen}
+        footer={[
+          <Button
+            key="setup"
+            type="primary"
+            onClick={() => {
+              if (faceNoMatchTimerRef.current) {
+                clearTimeout(faceNoMatchTimerRef.current);
+                faceNoMatchTimerRef.current = null;
+              }
+              setFaceNoMatchOpen(false);
+              closeFaceCameraModal();
+              setFaceScanStatus("idle");
+            }}
+          >
+            Close Scanner & Setup Face
+          </Button>,
+          <Button
+            key="close"
+            onClick={() => {
+              if (faceNoMatchTimerRef.current) {
+                clearTimeout(faceNoMatchTimerRef.current);
+                faceNoMatchTimerRef.current = null;
+              }
+              setFaceNoMatchOpen(false);
+              setFaceScanStatus("scanning");
+            }}
+          >
+            Continue Scanning
+          </Button>,
+        ]}
+        onCancel={() => {
+          if (faceNoMatchTimerRef.current) {
+            clearTimeout(faceNoMatchTimerRef.current);
+            faceNoMatchTimerRef.current = null;
+          }
+          setFaceNoMatchOpen(false);
+          setFaceScanStatus("scanning");
+        }}
+      >
+        {faceNoMatchData ? (
+          <div className="space-y-4 pt-2">
+            <div className="flex items-center gap-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              {faceNoMatchData.capturedFaceImage ? (
+                <img
+                  src={faceNoMatchData.capturedFaceImage}
+                  alt="Unmatched face"
+                  className="h-20 w-20 rounded-2xl object-cover ring-2 ring-white"
+                />
+              ) : (
+                <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-amber-500 text-xl font-bold text-white">
+                  ?
+                </div>
+              )}
+              <div>
+                <div className="text-lg font-semibold text-slate-900">{faceNoMatchData.title}</div>
+                <div className="text-sm text-amber-800">{faceNoMatchData.message}</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Attendance Date</div>
+                <div className="mt-1 font-medium text-slate-800">{faceNoMatchData.attendanceDate}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Next Step</div>
+                <div className="mt-1 font-medium text-slate-800">Setup student face first</div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              If this is a new student, close this message, find the student in the Face Attendance Setup list, click Setup Face, then scan again.
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        title={faceSuccessData?.alreadyMarked ? "Attendance Already Marked Today" : "Face Attendance Marked"}
+        open={faceSuccessOpen}
+        footer={null}
+        closable={false}
+        maskClosable={false}
+        onCancel={() => setFaceSuccessOpen(false)}
+      >
+        {faceSuccessData ? (
+          <div className="space-y-4 pt-2">
+            <div className="flex items-center gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+              {(faceSuccessData.capturedFaceImage || faceSuccessData.profilePicture) ? (
+                <img
+                  src={faceSuccessData.capturedFaceImage || faceSuccessData.profilePicture}
+                  alt={faceSuccessData.name}
+                  className="h-20 w-20 rounded-2xl object-cover ring-2 ring-white"
+                />
+              ) : (
+                <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-blue-600 text-xl font-bold text-white">
+                  {String(faceSuccessData.name || "S").charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div>
+                <div className="text-lg font-semibold text-slate-900">{faceSuccessData.name}</div>
+                <div className="text-sm text-slate-600">Registration No: {faceSuccessData.registrationNo || "N/A"}</div>
+                <div className="text-sm text-emerald-700 font-medium">
+                  {faceSuccessData.alreadyMarked ? "Status: Already Present" : "Status: Present"}
+                </div>
+                {faceSuccessData.capturedFaceImage && (
+                  <div className="text-xs text-slate-500">Live face captured from camera</div>
+                )}
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Batch</div>
+                <div className="mt-1 font-medium text-slate-800">{faceSuccessData.batchName || "Selected batch"}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Attendance Date</div>
+                <div className="mt-1 font-medium text-slate-800">{faceSuccessData.attendanceDate}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Confidence</div>
+                <div className="mt-1 font-medium text-slate-800">{faceSuccessData.confidence || 0}%</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Marked At</div>
+                <div className="mt-1 font-medium text-slate-800">{faceSuccessData.markedAt}</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Method</div>
+                <div className="mt-1 font-medium text-slate-800">Face Scan</div>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Result</div>
+                <div className="mt-1 font-medium text-slate-800">
+                  {faceSuccessData.alreadyMarked ? "Already marked today" : "Attendance saved"}
+                </div>
+              </div>
+            </div>
+            <div className="text-center text-xs text-slate-500">
+              This popup closes automatically in 5 seconds, then the camera continues scanning for the next student.
             </div>
           </div>
         ) : null}
