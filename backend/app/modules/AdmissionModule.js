@@ -238,6 +238,34 @@ const AdmissionSchema = new mongoose.Schema(
       default: "",
     },
 
+    faceAttendance: {
+      enabled: {
+        type: Boolean,
+        default: false,
+      },
+      imageData: {
+        type: String, // Base64 enrollment capture used for admin review
+        default: "",
+      },
+      faceHash: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      samplesCount: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+      updatedBy: {
+        type: String,
+        ref: "User",
+      },
+      updatedAt: {
+        type: Date,
+      },
+    },
+
     // Active status
     isActive: {
       type: Boolean,

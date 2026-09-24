@@ -4,6 +4,8 @@ import authorize from "../midlewear/authorize.js";
 import {
   bulkMarkAttendance,
   markQrAttendance,
+  enrollFaceAttendance,
+  markFaceAttendance,
   getAttendanceByBatchAndDate,
   getPersonAttendance,
   getBatchMembers,
@@ -21,6 +23,8 @@ router.use(authMiddleware);
 // Mark / update attendance in bulk for a batch+date
 router.post("/bulk", authorize("attendance", "create"), bulkMarkAttendance);
 router.post("/qr-mark", authorize("attendance", "create"), markQrAttendance);
+router.post("/face/enroll", authorize("attendance", "create"), enrollFaceAttendance);
+router.post("/face/mark", authorize("attendance", "create"), markFaceAttendance);
 
 // Get batch members (students + teachers)
 router.get("/batch/:batchId/members", authorize("attendance", "view"), getBatchMembers);
