@@ -363,6 +363,7 @@ function MarkAttendancePanel({ batches }) {
   const [faceScannerOpen, setFaceScannerOpen] = useState(false);
   const [faceInitializing, setFaceInitializing] = useState(false);
   const [faceCameraActive, setFaceCameraActive] = useState(false);
+  const [faceFacingMode, setFaceFacingMode] = useState("user");
   const [faceBusy, setFaceBusy] = useState(false);
   const [faceScanError, setFaceScanError] = useState("");
   const [faceScanStatus, setFaceScanStatus] = useState("idle");
@@ -834,7 +835,7 @@ function MarkAttendancePanel({ batches }) {
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: "user",
+          facingMode: { ideal: faceFacingMode },
           width: { ideal: 960 },
           height: { ideal: 720 },
         },
@@ -864,7 +865,7 @@ function MarkAttendancePanel({ batches }) {
     } finally {
       setFaceInitializing(false);
     }
-  }, [faceSupported, stopFaceCamera]);
+  }, [faceFacingMode, faceSupported, stopFaceCamera]);
 
   const closeFaceCameraModal = useCallback(() => {
     setFaceSetupOpen(false);
@@ -1381,6 +1382,7 @@ function MarkAttendancePanel({ batches }) {
   };
 
   const handleFaceScanAndMark = async ({ showToast = true } = {}) => {
+    if (faceSetupOpen) return;
     if (!selectedBatch) {
       if (showToast) message.warning("Select a batch before using face attendance");
       return;
@@ -1408,6 +1410,7 @@ function MarkAttendancePanel({ batches }) {
         date: selectedDate.format("YYYY-MM-DD"),
         faceHash: capture.faceHash,
       });
+      if (faceSetupOpen) return;
 
       const matchedStudent = response?.data?.student;
       const matchKey = String(matchedStudent?._id || "");
@@ -1434,6 +1437,7 @@ function MarkAttendancePanel({ batches }) {
       }
       await loadAttendance();
     } catch (error) {
+      if (faceSetupOpen) return;
       if (error?.response?.data?.code === "ATTENDANCE_ALREADY_MARKED") {
         const data = error.response.data.data || {};
         const matchedStudent = data.student;
@@ -1492,12 +1496,12 @@ function MarkAttendancePanel({ batches }) {
   });
 
   useEffect(() => {
-    if (!faceScannerOpen || !faceCameraActive || faceSuccessOpen || faceNoMatchOpen) return;
+    if (!faceScannerOpen || faceSetupOpen || !faceCameraActive || faceSuccessOpen || faceNoMatchOpen) return;
 
     faceScanHandlerRef.current?.({ showToast: false });
 
     faceScanTimerRef.current = setInterval(() => {
-      if (!faceScannerOpen || !faceCameraActive || faceSuccessOpen || faceNoMatchOpen) {
+      if (!faceScannerOpen || faceSetupOpen || !faceCameraActive || faceSuccessOpen || faceNoMatchOpen) {
         return;
       }
       if (faceBusyRef.current) {
@@ -1512,7 +1516,7 @@ function MarkAttendancePanel({ batches }) {
         faceScanTimerRef.current = null;
       }
     };
-  }, [faceScannerOpen, faceCameraActive, faceSuccessOpen, faceNoMatchOpen]);
+  }, [faceScannerOpen, faceSetupOpen, faceCameraActive, faceSuccessOpen, faceNoMatchOpen]);
 
   const cellRender = useCallback((current, info) => {
     if (info.type !== "date") return info.originNode;
@@ -2535,8 +2539,21 @@ function MarkAttendancePanel({ batches }) {
         destroyOnClose
       >
         <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-slate-700">Camera</span>
+            <Segmented
+              aria-label="Face setup camera"
+              value={faceFacingMode}
+              onChange={setFaceFacingMode}
+              disabled={faceInitializing}
+              options={[
+                { label: "Front camera", value: "user" },
+                { label: "Back camera", value: "environment" },
+              ]}
+            />
+          </div>
           <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
-            Press Start Camera, then ask the student to face the camera clearly. Good light, one face in frame, and no heavy shadows will make matching better.
+            Center the student's face in the frame, then select Capture &amp; Save Face. The photo is saved only when you press the capture button.
           </div>
           {!faceSupported && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
@@ -2639,6 +2656,19 @@ function MarkAttendancePanel({ batches }) {
         destroyOnClose
       >
         <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium text-slate-700">Camera</span>
+            <Segmented
+              aria-label="Face attendance camera"
+              value={faceFacingMode}
+              onChange={setFaceFacingMode}
+              disabled={faceInitializing}
+              options={[
+                { label: "Front camera", value: "user" },
+                { label: "Back camera", value: "environment" },
+              ]}
+            />
+          </div>
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
             Face scan will match against enrolled students in <span className="font-semibold">{members.batch?.batchName || "the selected batch"}</span> and mark attendance for <span className="font-semibold">{selectedDate.format("DD MMM YYYY")}</span>.
           </div>
