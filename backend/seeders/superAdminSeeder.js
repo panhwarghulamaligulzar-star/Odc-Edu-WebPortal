@@ -46,6 +46,7 @@ const createSuperAdmin = async () => {
           { module: "dashboard", actions: { view: true, create: true, update: true, delete: true, import: true, export: true, print: true, approve: true } },
           { module: "courses", actions: { view: true, create: true, update: true, delete: true, import: true, export: true, print: true, approve: true } },
           { module: "employees", actions: { view: true, create: true, update: true, delete: true, import: true, export: true, print: true, approve: true } },
+          { module: "test_studio", actions: { view: true, create: true, update: true, delete: true, import: true, export: true, print: true, approve: true } },
           { module: "students", actions: { view: true, create: true, update: true, delete: true, import: true, export: true, print: true, approve: true } },
           { module: "attendance", actions: { view: true, create: true, update: true, delete: true, import: true, export: true, print: true, approve: true } },
           { module: "accounting", actions: { view: true, create: true, update: true, delete: true, import: true, export: true, print: true, approve: true } },
@@ -59,8 +60,18 @@ const createSuperAdmin = async () => {
         permissions: [
           { module: "dashboard", actions: { view: true } },
           { module: "courses", actions: { view: true } },
+          { module: "test_studio", actions: { view: true, create: true, update: true, import: true, export: true, approve: true } },
           { module: "students", actions: { view: true } },
           { module: "attendance", actions: { view: true, create: true, update: true } },
+        ],
+      },
+      {
+        name: "Employee",
+        isSystem: true,
+        description: "Limited employee role for assigned course dashboard access.",
+        permissions: [
+          { module: "dashboard", actions: { view: true } },
+          { module: "test_studio", actions: { view: true, create: true, update: true, import: true, export: true, approve: true } },
         ],
       },
       {
@@ -90,6 +101,32 @@ const createSuperAdmin = async () => {
           ...roleData,
           permissions: normalizePermissions(roleData.permissions),
         });
+      } else if (roleData.isSystem) {
+        const existingPermissions = normalizePermissions(exists.permissions);
+        const desiredPermissions = normalizePermissions(roleData.permissions);
+        const mergedPermissions = existingPermissions.map((permission) => {
+          const desired = desiredPermissions.find(
+            (item) => item.module === permission.module,
+          );
+          if (!desired) return permission;
+
+          return {
+            module: permission.module,
+            actions: {
+              ...(permission.actions?.toObject
+                ? permission.actions.toObject()
+                : permission.actions || {}),
+              ...(desired.actions?.toObject
+                ? desired.actions.toObject()
+                : desired.actions || {}),
+            },
+          };
+        });
+
+        exists.isSystem = true;
+        exists.description = roleData.description || exists.description;
+        exists.permissions = normalizePermissions(mergedPermissions);
+        await exists.save();
       }
     }
 

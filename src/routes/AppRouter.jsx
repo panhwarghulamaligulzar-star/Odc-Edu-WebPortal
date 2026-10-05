@@ -29,6 +29,9 @@ import CoachingClasses from "../pages/website/pages/CoachingClasses";
 import CareerOpportunities from "../pages/website/pages/CareerOpportunities";
 import Courses from "../pages/dashboard/Courses";
 import Teachers from "../pages/dashboard/Teachers";
+import EmployeeManagement from "../pages/dashboard/EmployeeManagement";
+import EmployeeDashboard from "../pages/dashboard/EmployeeDashboard";
+import TestStudio from "../pages/dashboard/TestStudio";
 import Students from "../pages/dashboard/Students";
 import EnrollmentManagement from "../pages/dashboard/EnrollmentManagement";
 import StudentProfile from "../pages/dashboard/StudentProfile";
@@ -86,6 +89,9 @@ function AppRouter() {
         >
           <Route index element={<ProtectedRoute moduleKey="dashboard"><Dashboard /></ProtectedRoute>} />
           <Route path="courses" element={<ProtectedRoute moduleKey="courses"><Courses /></ProtectedRoute>} />
+          <Route path="employees" element={<ProtectedRoute moduleKey="employees"><EmployeeManagement /></ProtectedRoute>} />
+          <Route path="test-studio" element={<ProtectedRoute moduleKey="test_studio"><TestStudio /></ProtectedRoute>} />
+          <Route path="test-studio/create" element={<ProtectedRoute moduleKey="test_studio"><TestStudio setupMode /></ProtectedRoute>} />
           <Route path="teachers" element={<ProtectedRoute moduleKey="employees"><Teachers /></ProtectedRoute>} />
           <Route
             path="students"
@@ -129,6 +135,18 @@ function AppRouter() {
           {/* Attendance Module */}
           <Route path="attendance" element={<ProtectedRoute moduleKey="attendance"><Attendance /></ProtectedRoute>} />
           <Route path="attendance/holidays" element={<ProtectedRoute moduleKey="attendance"><HolidayManagement /></ProtectedRoute>} />
+        </Route>
+        <Route
+          path="/employee-dashboard"
+          element={
+            <ProtectedRoute employeeOnly>
+              <DashboardLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<EmployeeDashboard />} />
+          <Route path="test-studio" element={<TestStudio />} />
+          <Route path="test-studio/create" element={<TestStudio setupMode />} />
         </Route>
       </Routes>
     </Router>

@@ -271,5 +271,70 @@ h3 {
   ) {
     font-family: "Inter-sans", Arial, sans-serif !important;
   }
+
+  .test-studio-modal,
+  .test-studio-modal :where(
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    p,
+    span,
+    div,
+    button,
+    label,
+    input,
+    textarea,
+    th,
+    td,
+    .ant-modal-content,
+    .ant-modal-title,
+    .ant-steps,
+    .ant-steps-item,
+    .ant-form,
+    .ant-form-item-label > label,
+    .ant-input,
+    .ant-input-number,
+    .ant-input-number-input,
+    .ant-select,
+    .ant-select-selector,
+    .ant-picker,
+    .ant-btn
+  ) {
+    font-family: "Inter-sans", Arial, sans-serif !important;
+  }
+
+  .test-studio-modal .ant-btn-primary,
+  .test-studio-modal .ant-btn-primary:not(:disabled):not(.ant-btn-disabled) {
+    background: #01134c !important;
+    border-color: #01134c !important;
+    color: #ffffff !important;
+    box-shadow: none !important;
+  }
+
+  .test-studio-modal .ant-btn-primary:hover,
+  .test-studio-modal .ant-btn-primary:focus,
+  .test-studio-modal .ant-btn-primary:not(:disabled):not(.ant-btn-disabled):hover {
+    background: #0e215f !important;
+    border-color: #0e215f !important;
+    color: #ffffff !important;
+  }
+
+  .test-studio-modal .ant-steps .ant-steps-item-process .ant-steps-item-icon,
+  .test-studio-modal .ant-steps .ant-steps-item-finish .ant-steps-item-icon {
+    background-color: #01134c !important;
+    border-color: #01134c !important;
+  }
+
+  .test-studio-modal .ant-steps .ant-steps-item-process .ant-steps-icon,
+  .test-studio-modal .ant-steps .ant-steps-item-finish .ant-steps-icon {
+    color: #ffffff !important;
+  }
+
+  .test-studio-modal .ant-steps .ant-steps-item-finish .ant-steps-item-tail::after {
+    background-color: #01134c !important;
+  }
   
 }

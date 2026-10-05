@@ -7,15 +7,26 @@ export default function ProtectedRoute({
   moduleKey = null,
   action = "view",
   superAdminOnly = false,
+  employeeOnly = false,
 }) {
   const location = useLocation();
   const { token, permissions, isSuperAdmin, adminInfo } = useZustandStore();
   const localToken = localStorage.getItem("token");
   const superAdminMode =
     isSuperAdmin === true || adminInfo?.userData?.isSuperAdmin === true;
+  const roleName = adminInfo?.userData?.role || "";
+  const employeeMode = String(roleName || "").toLowerCase() === "employee";
 
   if (!token && !localToken) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (employeeOnly) {
+    return employeeMode ? children : <Navigate to="/dashboard/no-access" replace />;
+  }
+
+  if (employeeMode && !employeeOnly) {
+    return <Navigate to="/employee-dashboard" replace />;
   }
 
   if (superAdminOnly && !superAdminMode) {

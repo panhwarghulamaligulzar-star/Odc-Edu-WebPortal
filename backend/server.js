@@ -21,6 +21,9 @@ import attendanceRoute from "./app/routes/attendanceRoute.js";
 import holidayRoute from "./app/routes/holidayRoute.js";
 import roleRoutes from "./app/routes/roleRoutes.js";
 import appSettingsRoutes from "./app/routes/appSettingsRoutes.js";
+import employeeRoutes from "./app/routes/employeeRoute.js";
+import testStudioRoutes from "./app/routes/testStudioRoute.js";
+import { startTestStudioScheduler } from "./app/jobs/testStudioScheduler.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -108,6 +111,8 @@ app.use("/attendance", attendanceRoute);
 app.use("/holiday", holidayRoute);
 app.use("/roles", roleRoutes);
 app.use("/settings", appSettingsRoutes);
+app.use("/employees", employeeRoutes);
+app.use("/test-studio", testStudioRoutes);
 
 // ===== Serve Static Files (Built Frontend) AFTER API ROUTES =====
 const publicPath = path.join(__dirname, "public");
@@ -133,6 +138,8 @@ if (publicExists) {
       req.path.startsWith("/holiday") ||
       req.path.startsWith("/roles") ||
       req.path.startsWith("/settings") ||
+      req.path.startsWith("/employees") ||
+      req.path.startsWith("/test-studio") ||
       req.path.startsWith("/uploads") ||
       req.path.startsWith("/health")
     ) {
@@ -167,4 +174,5 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  startTestStudioScheduler();
 });

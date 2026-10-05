@@ -67,6 +67,7 @@ const Login = () => {
         const firstPath = getFirstAccessibleDashboardPath({
           permissions: currentPermissions,
           isSuperAdmin: currentSuperAdmin,
+          role: response?.user?.role,
         });
 
         navigate(firstPath || "/dashboard/no-access");

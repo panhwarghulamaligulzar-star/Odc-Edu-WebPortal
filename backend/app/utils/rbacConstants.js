@@ -2,6 +2,7 @@ export const RBAC_MODULES = [
   "dashboard",
   "courses",
   "employees",
+  "test_studio",
   "students",
   "attendance",
   "accounting",

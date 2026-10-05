@@ -1,6 +1,7 @@
 import {
   Award,
   BookOpen,
+  ClipboardList,
   CalendarCheck,
   DollarSign,
   GraduationCap,
@@ -15,6 +16,7 @@ export const RBAC_MODULES = [
   "dashboard",
   "courses",
   "employees",
+  "test_studio",
   "students",
   "attendance",
   "accounting",
@@ -74,8 +76,14 @@ export const DASHBOARD_MODULE_LINKS = [
   {
     key: "employees",
     label: "Employees",
-    path: "/dashboard/teachers",
+    path: "/dashboard/employees",
     icon: Users,
+  },
+  {
+    key: "test_studio",
+    label: "Test Studio",
+    path: "/dashboard/test-studio",
+    icon: ClipboardList,
   },
   {
     key: "students",
@@ -126,7 +134,12 @@ export const DASHBOARD_MODULE_LINKS = [
 export const getFirstAccessibleDashboardPath = ({
   permissions = {},
   isSuperAdmin = false,
+  role = "",
 }) => {
+  if (String(role || "").toLowerCase() === "employee") {
+    return "/employee-dashboard";
+  }
+
   if (isSuperAdmin) {
     return "/dashboard/super-admin?section=overview";
   }

@@ -5,8 +5,10 @@ import {
   MdKeyboardArrowDown,
   MdKeyboardArrowRight,
   MdMenuBook,
+  MdAssignment,
   MdOutlineManageAccounts,
   MdOutlineCategory,
+  MdPeopleAlt,
   MdOutlineSecurity,
   MdOutlineTune,
   MdPayments,
@@ -27,10 +29,14 @@ const SideBarManu = () => {
   const location = useLocation();
   const superAdminMode =
     isSuperAdmin === true || adminInfo?.userData?.isSuperAdmin === true;
+  const employeeMode =
+    String(adminInfo?.userData?.role || "").toLowerCase() === "employee";
   const currentSection = new URLSearchParams(location.search).get("section") || "roles";
   const isSuperAdminSectionActive =
     (location.pathname === "/dashboard/super-admin" && currentSection !== "overview") ||
-    location.pathname === "/dashboard/app-settings";
+    location.pathname === "/dashboard/app-settings" ||
+    location.pathname === "/dashboard/employees" ||
+    location.pathname === "/dashboard/test-studio";
   const isStudentsSectionActive = location.pathname.startsWith("/dashboard/students");
 
   const navLinks = useMemo(
@@ -52,12 +58,31 @@ const SideBarManu = () => {
           }));
       }
 
-      return links.filter((item) => {
+      const visibleLinks = links.filter((item) => {
         if (item.superAdminOnly) return superAdminMode;
+        if (employeeMode && item.key === "test_studio") return true;
         return permissions?.[item.key]?.view === true;
       });
+
+      const orderedLinks = employeeMode
+        ? visibleLinks.sort((left, right) => {
+            const order = { dashboard: 0, test_studio: 1 };
+            return (order[left.key] ?? 10) - (order[right.key] ?? 10);
+          })
+        : visibleLinks;
+
+      return orderedLinks.map((item) => {
+        if (!employeeMode) return item;
+        if (item.key === "dashboard") {
+          return { ...item, path: "/employee-dashboard" };
+        }
+        if (item.key === "test_studio") {
+          return { ...item, path: "/employee-dashboard/test-studio" };
+        }
+        return item;
+      });
     },
-    [superAdminMode, permissions],
+    [superAdminMode, permissions, employeeMode],
   );
 
   useEffect(() => {
@@ -131,6 +156,18 @@ const SideBarManu = () => {
   ];
 
   const superAdminLinks = [
+    {
+      key: "employees",
+      title: "Employees",
+      path: "/dashboard/employees",
+      icon: MdPeopleAlt,
+    },
+    {
+      key: "test-studio",
+      title: "Test Studio",
+      path: "/dashboard/test-studio",
+      icon: MdAssignment,
+    },
     {
       key: "roles",
       title: "Roles & Users",
@@ -259,7 +296,7 @@ const SideBarManu = () => {
                   ) : (
                     <NavLink
                       to={link.path}
-                      end={link.path === "/dashboard"}
+                      end={link.path === "/dashboard" || link.path === "/employee-dashboard"}
                       className={({ isActive: navIsActive }) =>
                         `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border hover:bg-[#0e215fc7] ${
                           appMinMixView ? "w-[60px]" : "w-full"
@@ -311,7 +348,11 @@ const SideBarManu = () => {
                 <ul className="mt-2 space-y-1 pl-4">
                   {superAdminLinks.map((item) => {
                     const active =
-                      item.key === "app-settings"
+                      item.key === "employees"
+                        ? location.pathname === "/dashboard/employees"
+                        : item.key === "test-studio"
+                        ? location.pathname === "/dashboard/test-studio"
+                        : item.key === "app-settings"
                         ? location.pathname === "/dashboard/app-settings"
                         : location.pathname === "/dashboard/super-admin" &&
                           currentSection === item.key;

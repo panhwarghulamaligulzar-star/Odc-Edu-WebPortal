@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   DatePicker,
   Button,
@@ -52,6 +52,7 @@ const moduleLabels = {
   dashboard: "Dashboard",
   courses: "Courses",
   employees: "Employees",
+  test_studio: "Test Studio",
   students: "Students",
   attendance: "Attendance",
   accounting: "Accounting",
@@ -273,6 +274,7 @@ const PermissionModuleCard = ({ moduleKey, permissions, setPermissions }) => {
 };
 
 const SuperAdmin = () => {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [roles, setRoles] = useState([]);
   const [users, setUsers] = useState([]);
@@ -1058,6 +1060,9 @@ const SuperAdmin = () => {
           </div>
 
           <div className="flex flex-wrap gap-2">
+            <Button type="primary" onClick={() => navigate("/dashboard/employees")}>
+              Open Employee Management
+            </Button>
             <Button icon={<ReloadOutlined />} onClick={() => Promise.all([loadRoles(), loadUsers()])}>
               Refresh
             </Button>
