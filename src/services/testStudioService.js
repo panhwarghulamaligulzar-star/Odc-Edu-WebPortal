@@ -36,6 +36,24 @@ export const getTestById = async (id) => {
   }
 };
 
+export const getTeacherPaperHeader = async () => {
+  try {
+    const response = await api.get("/test-studio/paper-header");
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
+export const updateTeacherPaperHeader = async (payload) => {
+  try {
+    const response = await api.put("/test-studio/paper-header", payload);
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
 export const createTest = async (payload) => {
   try {
     const response = await api.post("/test-studio/tests", payload);
@@ -57,6 +75,33 @@ export const updateTest = async (id, payload) => {
 export const publishTest = async (id) => {
   try {
     const response = await api.post(`/test-studio/tests/${id}/publish`);
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
+export const pauseTestTimer = async (id) => {
+  try {
+    const response = await api.post(`/test-studio/tests/${id}/pause`);
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
+export const resumeTestTimer = async (id) => {
+  try {
+    const response = await api.post(`/test-studio/tests/${id}/resume`);
+    return response.data;
+  } catch (error) {
+    throw error.response?.data || { message: "Something went wrong" };
+  }
+};
+
+export const updateTestPaperHeader = async (id, payload) => {
+  try {
+    const response = await api.put(`/test-studio/tests/${id}/paper-header`, payload);
     return response.data;
   } catch (error) {
     throw error.response?.data || { message: "Something went wrong" };

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { FaSearch, FaSignOutAlt, FaCog } from 'react-icons/fa';
+import { FaSearch, FaSignOutAlt, FaCog, FaUserEdit, FaLock } from 'react-icons/fa';
 import { NavLink, useNavigate } from 'react-router-dom';
 import useZustandStore from '../stores/zustandStore';
 import { TbArrowsMaximize } from "react-icons/tb";
@@ -11,12 +11,24 @@ const profileMenuRef = useRef(null);
 const navigate = useNavigate()
 
   const {adminInfo,setAppMinMaxWidth,appMinMixView,isSuperAdmin}=useZustandStore();
+const employeeMode =
+  String(adminInfo?.userData?.role || "").toLowerCase() === "employee";
 const handleLogout = () => {
   setDropdownOpen(false);
   const { clearToken, } = useZustandStore.getState();
   clearToken();
   localStorage.clear();
   navigate("/login", { replace: true });
+};
+
+const handleProfileUpdate = () => {
+  setDropdownOpen(false);
+  navigate("/employee-dashboard?profile=edit");
+};
+
+const handlePasswordUpdate = () => {
+  setDropdownOpen(false);
+  navigate("/employee-dashboard?password=change");
 };
 
 const getProfileImageSrc = (profile) => {
@@ -133,6 +145,24 @@ const profileInitials = getUserInitials(adminInfo?.userData?.name);
                         {adminInfo?.userData?.name || "Profile"}
                       </div>
                     </div>
+                  {employeeMode && (
+                    <>
+                      <button
+                        onClick={handleProfileUpdate}
+                        className="w-full text-left px-4 py-3 text-gray-700 hover:bg-gray-100 flex items-center"
+                      >
+                        <FaUserEdit className="mr-2" />
+                        Update Profile
+                      </button>
+                      <button
+                        onClick={handlePasswordUpdate}
+                        className="w-full text-left px-4 py-3 text-gray-700 hover:bg-gray-100 flex items-center"
+                      >
+                        <FaLock className="mr-2" />
+                        Change Password
+                      </button>
+                    </>
+                  )}
                   <button
                     onClick={handleLogout}
                     className="w-full text-left px-4 py-3 text-gray-700 hover:bg-gray-100 flex items-center"

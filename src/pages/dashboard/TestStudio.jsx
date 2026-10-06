@@ -25,14 +25,18 @@ import {
 import {
   CopyOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   EditOutlined,
   FileExcelOutlined,
   PlusOutlined,
+  PauseCircleOutlined,
+  PlayCircleOutlined,
   ReloadOutlined,
   SaveOutlined,
   SendOutlined,
 } from "@ant-design/icons";
 import dayjs from "dayjs";
+import jsPDF from "jspdf";
 import * as XLSX from "xlsx";
 import { ClipboardList, Clock, FileQuestion, Users } from "lucide-react";
 import { useModulePermissions } from "../../hooks/usePermissions";
@@ -41,11 +45,14 @@ import {
   createTest,
   deleteTest,
   duplicateTest,
+  getTeacherPaperHeader,
   getQuestionBank,
   getTests,
   getTestStudioOptions,
+  pauseTestTimer,
   previewTestAssignment,
   publishTest,
+  resumeTestTimer,
   updateTest,
 } from "../../services/testStudioService";
 
@@ -97,6 +104,17 @@ const statusColors = {
   cancelled: "red",
 };
 
+const defaultPaperHeader = {
+  logo: "",
+  logoText: "",
+  academyName: "",
+  address: "",
+  phone: "",
+  email: "",
+  website: "",
+  note: "",
+};
+
 const TestStudio = ({ setupMode = false }) => {
   const navigate = useNavigate();
   const permissions = useModulePermissions("test_studio");
@@ -120,6 +138,8 @@ const TestStudio = ({ setupMode = false }) => {
   const [assignmentPreview, setAssignmentPreview] = useState(null);
   const [filters, setFilters] = useState({ status: "all", search: "" });
   const [detailTest, setDetailTest] = useState(null);
+  const [teacherPaperHeader, setTeacherPaperHeader] = useState(defaultPaperHeader);
+  const [nowTick, setNowTick] = useState(dayjs());
   const [form] = Form.useForm();
   const selectedCourse = Form.useWatch("course", form);
   const selectedBatchIds = Form.useWatch("batchIds", form) || [];
@@ -149,6 +169,23 @@ const TestStudio = ({ setupMode = false }) => {
   useEffect(() => {
     loadData();
   }, [filters.status]);
+
+  useEffect(() => {
+    const loadPaperHeader = async () => {
+      try {
+        const response = await getTeacherPaperHeader();
+        setTeacherPaperHeader({ ...defaultPaperHeader, ...(response.data || {}) });
+      } catch {
+        setTeacherPaperHeader(defaultPaperHeader);
+      }
+    };
+    loadPaperHeader();
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(dayjs()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const loadBank = async () => {
@@ -190,6 +227,31 @@ const TestStudio = ({ setupMode = false }) => {
   );
   const selectedCourseRecord = options.find((course) => course._id === selectedCourse);
 
+  const createScheduleWindow = (dayOffset = 0) => {
+    const durationMinutes = Number(form.getFieldValue(["schedule", "durationMinutes"]) || 60);
+    const startAt = dayjs()
+      .add(dayOffset, "day")
+      .add(dayOffset === 0 ? 10 : 0, "minute")
+      .second(0)
+      .millisecond(0);
+
+    return {
+      startAt,
+      endAt: startAt.add(durationMinutes, "minute"),
+      durationMinutes,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Karachi",
+    };
+  };
+
+  const applyQuickSchedule = (dayOffset = 0) => {
+    form.setFieldsValue({
+      schedule: {
+        ...form.getFieldValue("schedule"),
+        ...createScheduleWindow(dayOffset),
+      },
+    });
+  };
+
   const summary = useMemo(
     () => ({
       total: tests.length,
@@ -225,8 +287,7 @@ const TestStudio = ({ setupMode = false }) => {
       totalMarks: 1,
       passingMarks: 0,
       schedule: {
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Karachi",
-        durationMinutes: 60,
+        ...createScheduleWindow(0),
         allowLateEntry: true,
         graceMinutes: 0,
       },
@@ -408,6 +469,62 @@ const TestStudio = ({ setupMode = false }) => {
     }
   };
 
+  const handleDeleteTest = async (test) => {
+    try {
+      await deleteTest(test._id);
+      message.success("Draft deleted");
+      await loadData();
+    } catch (error) {
+      message.error(error.message || "Failed to delete draft");
+    }
+  };
+
+  const handleTimerControl = async (test) => {
+    try {
+      const response = test.schedule?.isPaused
+        ? await resumeTestTimer(test._id)
+        : await pauseTestTimer(test._id);
+      message.success(response.message || (test.schedule?.isPaused ? "Test timer continued" : "Test timer paused"));
+      await loadData();
+    } catch (error) {
+      message.error(error.message || "Failed to update timer");
+    }
+  };
+
+  const formatCountdown = (milliseconds) => {
+    const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return [hours, minutes, seconds]
+      .map((value) => String(value).padStart(2, "0"))
+      .join(":");
+  };
+
+  const getRemainingMs = (test) => {
+    if (!test.schedule?.endAt) return 0;
+    const referenceTime = test.schedule?.isPaused && test.schedule?.pausedAt
+      ? dayjs(test.schedule.pausedAt)
+      : nowTick;
+    return dayjs(test.schedule.endAt).diff(referenceTime);
+  };
+
+  const renderTimer = (test) => {
+    if (test.status === "live") {
+      const remainingMs = getRemainingMs(test);
+      return (
+        <Space direction="vertical" size={2}>
+          <span className="font-ArialBold text-primary">{formatCountdown(remainingMs)}</span>
+          {test.schedule?.isPaused ? <Tag color="orange">Paused</Tag> : <Tag color="green">Running</Tag>}
+        </Space>
+      );
+    }
+    if (test.status === "scheduled" && test.schedule?.startAt) {
+      return <span className="text-slate-500">Starts in {formatCountdown(dayjs(test.schedule.startAt).diff(nowTick))}</span>;
+    }
+    return <span className="text-slate-400">-</span>;
+  };
+
   const handleAssignmentPreview = async () => {
     try {
       const values = form.getFieldsValue(true);
@@ -471,6 +588,127 @@ const TestStudio = ({ setupMode = false }) => {
     ]);
     XLSX.utils.book_append_sheet(workbook, sheet, "Questions");
     XLSX.writeFile(workbook, "test-studio-question-template.xlsx");
+  };
+
+  const addPdfText = (doc, text, x, y, options = {}) => {
+    if (!text) return y;
+    const lines = doc.splitTextToSize(String(text), options.maxWidth || 180);
+    doc.text(lines, x, y, options);
+    return y + lines.length * (options.lineHeight || 6);
+  };
+
+  const drawTestPaperHeader = (doc, test) => {
+    const paperHeader = {
+      ...defaultPaperHeader,
+      ...teacherPaperHeader,
+      ...(teacherPaperHeader.academyName ? {} : test.settings?.paperHeader || {}),
+    };
+    const academyName = paperHeader.academyName || "Academy / Institute Name";
+    let y = 14;
+
+    const hasBrandRow = paperHeader.logo || paperHeader.logoText;
+    if (paperHeader.logo) {
+      try {
+        doc.addImage(paperHeader.logo, "PNG", 14, 12, 22, 22);
+      } catch {
+        try {
+          doc.addImage(paperHeader.logo, "JPEG", 14, 12, 22, 22);
+        } catch {
+          // Ignore invalid image data so PDF download still works.
+        }
+      }
+    }
+    if (paperHeader.logoText) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.text(paperHeader.logoText, paperHeader.logo ? 40 : 14, 25);
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text(academyName, hasBrandRow ? 118 : 105, y, { align: "center" });
+    y += 7;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    [paperHeader.address, [paperHeader.phone, paperHeader.email, paperHeader.website].filter(Boolean).join(" | "), paperHeader.note]
+      .filter(Boolean)
+      .forEach((line) => {
+        doc.text(String(line), 105, y, { align: "center", maxWidth: 130 });
+        y += 5;
+      });
+
+    doc.setDrawColor(20, 40, 90);
+    doc.line(14, Math.max(y, 39), 196, Math.max(y, 39));
+    return Math.max(y + 8, 47);
+  };
+
+  const downloadTestPaperPdf = (test) => {
+    try {
+      const doc = new jsPDF({ unit: "mm", format: "a4" });
+      let y = drawTestPaperHeader(doc, test);
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const addPageIfNeeded = (space = 20) => {
+        if (y + space <= pageHeight - 15) return;
+        doc.addPage();
+        y = drawTestPaperHeader(doc, test);
+      };
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      y = addPdfText(doc, test.title || "Test Paper", 14, y, { maxWidth: 180, lineHeight: 7 });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      y = addPdfText(doc, `Course: ${test.course?.courseName || "N/A"}    Topic: ${test.topic || "N/A"}    Marks: ${test.totalMarks || 0}`, 14, y + 1);
+      y = addPdfText(doc, `Duration: ${test.schedule?.durationMinutes || "-"} minutes    Date: ${dayjs().format("DD MMM YYYY")}`, 14, y);
+      if (test.instructions) {
+        y += 3;
+        doc.setFont("helvetica", "bold");
+        y = addPdfText(doc, "Instructions", 14, y);
+        doc.setFont("helvetica", "normal");
+        y = addPdfText(doc, test.instructions, 14, y, { maxWidth: 180 });
+      }
+
+      (test.questions || []).forEach((question, index) => {
+        addPageIfNeeded(30);
+        y += 4;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        y = addPdfText(doc, `${index + 1}. ${question.questionText || "Question"} (${question.marks || 0} marks)`, 14, y, { maxWidth: 180 });
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+
+        if (["mcq_single", "mcq_multiple", "true_false"].includes(question.questionType)) {
+          (question.options || []).forEach((option, optionIndex) => {
+            addPageIfNeeded(8);
+            const label = String.fromCharCode(65 + optionIndex);
+            y = addPdfText(doc, `${label}. ${option.text || ""}`, 20, y, { maxWidth: 170, lineHeight: 5 });
+          });
+        } else {
+          addPageIfNeeded(24);
+          doc.setDrawColor(210, 210, 210);
+          for (let line = 0; line < 4; line += 1) {
+            doc.line(20, y + line * 8, 190, y + line * 8);
+          }
+          y += 34;
+        }
+      });
+
+      const pageCount = doc.getNumberOfPages();
+      for (let page = 1; page <= pageCount; page += 1) {
+        doc.setPage(page);
+        doc.setFontSize(8);
+        doc.setTextColor(120);
+        doc.text(`Page ${page} of ${pageCount}`, 196, 287, { align: "right" });
+        doc.setTextColor(0);
+      }
+
+      doc.save(`${test.title || "test-paper"}.pdf`);
+      message.success("Test paper PDF downloaded");
+    } catch (error) {
+      console.error("Test paper PDF failed:", error);
+      message.error("Failed to download test paper PDF");
+    }
   };
 
   const stepItems = [
@@ -667,11 +905,25 @@ const TestStudio = ({ setupMode = false }) => {
 
   const renderScheduleStep = () => (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <div className="md:col-span-2">
+        <Space wrap>
+          <Button onClick={() => applyQuickSchedule(0)}>Today</Button>
+          <Button onClick={() => applyQuickSchedule(1)}>Tomorrow</Button>
+        </Space>
+      </div>
       <Form.Item name={["schedule", "startAt"]} label="Start Date & Time" rules={[{ required: true }]}>
-        <DatePicker showTime className="w-full" />
+        <DatePicker
+          showTime
+          className="w-full"
+          disabledDate={(current) => current && current < dayjs().startOf("day")}
+        />
       </Form.Item>
       <Form.Item name={["schedule", "endAt"]} label="End Date & Time" rules={[{ required: true }]}>
-        <DatePicker showTime className="w-full" />
+        <DatePicker
+          showTime
+          className="w-full"
+          disabledDate={(current) => current && current < dayjs().startOf("day")}
+        />
       </Form.Item>
       <Form.Item name={["schedule", "durationMinutes"]} label="Duration (minutes)" rules={[{ required: true }]}>
         <InputNumber className="w-full form-input" min={1} />
@@ -859,16 +1111,29 @@ const TestStudio = ({ setupMode = false }) => {
     { title: "Marks", dataIndex: "totalMarks" },
     { title: "Students", dataIndex: "studentCount", render: (value) => value || 0 },
     { title: "Start", render: (_, test) => test.schedule?.startAt ? dayjs(test.schedule.startAt).format("DD MMM YYYY, hh:mm A") : "Not set" },
+    { title: "Time Left", render: (_, test) => renderTimer(test) },
     {
       title: "Actions",
       render: (_, test) => (
         <Space>
           <Button size="small" onClick={() => setDetailTest(test)}>Details</Button>
+          <Button size="small" icon={<DownloadOutlined />} onClick={() => downloadTestPaperPdf(test)}>
+            PDF
+          </Button>
           {canUpdateTest && !["live", "completed"].includes(test.status) ? <Button size="small" icon={<EditOutlined />} onClick={() => openEditWizard(test)} /> : null}
           {canCreateTest ? <Button size="small" icon={<CopyOutlined />} onClick={async () => { await duplicateTest(test._id); message.success("Test duplicated"); loadData(); }} /> : null}
           {canPublishTest && test.status === "draft" ? <Button size="small" icon={<SendOutlined />} onClick={async () => { await publishTest(test._id); message.success("Test published"); loadData(); }} /> : null}
+          {canPublishTest && test.status === "live" ? (
+            <Button
+              size="small"
+              icon={test.schedule?.isPaused ? <PlayCircleOutlined /> : <PauseCircleOutlined />}
+              onClick={() => handleTimerControl(test)}
+            >
+              {test.schedule?.isPaused ? "Continue" : "Pause"}
+            </Button>
+          ) : null}
           {canDeleteTest && test.status === "draft" ? (
-            <Popconfirm title="Delete draft test?" onConfirm={async () => { await deleteTest(test._id); message.success("Draft deleted"); loadData(); }}>
+            <Popconfirm title="Delete draft test?" onConfirm={() => handleDeleteTest(test)}>
               <Button size="small" danger icon={<DeleteOutlined />} />
             </Popconfirm>
           ) : null}
@@ -972,6 +1237,7 @@ const TestStudio = ({ setupMode = false }) => {
           </div>
         ) : null}
       </Modal>
+
     </div>
   );
 };

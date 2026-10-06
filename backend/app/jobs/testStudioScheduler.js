@@ -2,6 +2,7 @@ import { Test, TestAttempt, TestAuditLog } from "../modules/testStudioModule.js"
 
 const computeStatus = (test, now) => {
   if (["draft", "cancelled"].includes(test.status)) return test.status;
+  if (test.status === "live" && test.schedule?.isPaused) return "live";
   if (test.schedule?.endAt && now >= new Date(test.schedule.endAt)) return "completed";
   if (test.schedule?.startAt && now >= new Date(test.schedule.startAt)) return "live";
   return "scheduled";
@@ -35,8 +36,14 @@ export const runTestStudioScheduler = async () => {
     status: "in_progress",
     expiresAt: { $lte: now },
   });
+  const pausedTestIds = new Set(
+    tests
+      .filter((test) => test.status === "live" && test.schedule?.isPaused)
+      .map((test) => String(test._id)),
+  );
 
   for (const attempt of expiredAttempts) {
+    if (pausedTestIds.has(String(attempt.test))) continue;
     attempt.status = "auto_submitted";
     attempt.submittedAt = now;
     await attempt.save();

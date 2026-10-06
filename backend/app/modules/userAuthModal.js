@@ -95,6 +95,16 @@ const authSchema = new mongoose.Schema(
         instagram: { type: String },
       },
     },
+    testPaperHeader: {
+      logo: { type: String, default: "" },
+      logoText: { type: String, default: "" },
+      academyName: { type: String, default: "" },
+      address: { type: String, default: "" },
+      phone: { type: String, default: "" },
+      email: { type: String, default: "" },
+      website: { type: String, default: "" },
+      note: { type: String, default: "" },
+    },
     permissions: {
       type: [permissionSchema],
       default: [],

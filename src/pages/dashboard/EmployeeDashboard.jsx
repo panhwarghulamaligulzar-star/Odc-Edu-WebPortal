@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   Avatar,
   Button,
@@ -15,7 +15,7 @@ import {
   Upload,
   message,
 } from "antd";
-import { LockOutlined, ReloadOutlined, UploadOutlined, UserOutlined } from "@ant-design/icons";
+import { UploadOutlined, UserOutlined } from "@ant-design/icons";
 import { BookOpen, GraduationCap, Layers } from "lucide-react";
 import {
   changeMyEmployeePassword,
@@ -38,6 +38,7 @@ const beforeUpload = (file) => {
 
 const EmployeeDashboard = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(false);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
@@ -98,6 +99,26 @@ const EmployeeDashboard = () => {
     setProfileModalOpen(true);
   };
 
+  const closeProfileModal = () => {
+    setProfileModalOpen(false);
+    if (location.search) navigate("/employee-dashboard", { replace: true });
+  };
+
+  const closePasswordModal = () => {
+    setPasswordModalOpen(false);
+    if (location.search) navigate("/employee-dashboard", { replace: true });
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get("profile") === "edit" && profile.name) {
+      openProfileModal();
+    }
+    if (params.get("password") === "change") {
+      setPasswordModalOpen(true);
+    }
+  }, [location.search, profile.name]);
+
   const handleProfileSave = async (values) => {
     setSaving(true);
     try {
@@ -107,7 +128,7 @@ const EmployeeDashboard = () => {
         profile: values.profile?.fileList || values.profile || [],
       });
       setDashboard((prev) => ({ ...prev, profile: response.data }));
-      setProfileModalOpen(false);
+      closeProfileModal();
       message.success("Profile updated successfully");
     } catch (error) {
       message.error(error.message || "Failed to update profile");
@@ -121,7 +142,7 @@ const EmployeeDashboard = () => {
     try {
       await changeMyEmployeePassword(values);
       passwordForm.resetFields();
-      setPasswordModalOpen(false);
+      closePasswordModal();
       message.success("Password changed successfully");
     } catch (error) {
       message.error(error.message || "Failed to change password");
@@ -153,12 +174,6 @@ const EmployeeDashboard = () => {
             <h2 className="module-title">Employee Dashboard</h2>
             <p className="module-subtitle">{profile.name || "Employee"} · {profile.designation || "Employee"}</p>
           </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={loadDashboard}>Refresh</Button>
-          <Button icon={<BookOpen size={14} />} onClick={() => navigate("/employee-dashboard/test-studio")}>Test Studio</Button>
-          <Button icon={<UserOutlined />} onClick={openProfileModal}>Edit Profile</Button>
-          <Button icon={<LockOutlined />} onClick={() => setPasswordModalOpen(true)}>Change Password</Button>
         </div>
       </div>
 
@@ -248,7 +263,7 @@ const EmployeeDashboard = () => {
       <Modal
         title="Update Profile"
         open={profileModalOpen}
-        onCancel={() => setProfileModalOpen(false)}
+        onCancel={closeProfileModal}
         onOk={() => profileForm.submit()}
         confirmLoading={saving}
       >
@@ -270,7 +285,7 @@ const EmployeeDashboard = () => {
       <Modal
         title="Change Password"
         open={passwordModalOpen}
-        onCancel={() => setPasswordModalOpen(false)}
+        onCancel={closePasswordModal}
         onOk={() => passwordForm.submit()}
         confirmLoading={saving}
       >

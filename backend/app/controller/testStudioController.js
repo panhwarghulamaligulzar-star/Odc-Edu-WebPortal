@@ -3,6 +3,7 @@ import Course from "../modules/courseModule.js";
 import Batch from "../modules/batchModule.js";
 import Enrollment from "../modules/enrollmentModule.js";
 import EmployeeCourse from "../modules/employeeCourseModule.js";
+import UserAuth from "../modules/userAuthModal.js";
 import {
   QuestionBank,
   Test,
@@ -81,6 +82,7 @@ const assertBatchAccess = async (req, courseId, batchIds = []) => {
 
 const computeLifecycleStatus = (test, now = new Date()) => {
   if (test.status === "cancelled" || test.status === "draft") return test.status;
+  if (test.status === "live" && test.schedule?.isPaused) return "live";
   const startAt = test.schedule?.startAt ? new Date(test.schedule.startAt) : null;
   const endAt = test.schedule?.endAt ? new Date(test.schedule.endAt) : null;
   if (endAt && now >= endAt) return "completed";
@@ -133,6 +135,17 @@ const normalizeSections = (sections = []) =>
         : Number(section.attemptAny),
   }));
 
+const normalizePaperHeader = (paperHeader = {}) => ({
+  logo: stripUnsafeHtml(paperHeader.logo || ""),
+  logoText: stripUnsafeHtml(paperHeader.logoText || ""),
+  academyName: stripUnsafeHtml(paperHeader.academyName || ""),
+  address: stripUnsafeHtml(paperHeader.address || ""),
+  phone: stripUnsafeHtml(paperHeader.phone || ""),
+  email: stripUnsafeHtml(paperHeader.email || ""),
+  website: stripUnsafeHtml(paperHeader.website || ""),
+  note: stripUnsafeHtml(paperHeader.note || ""),
+});
+
 const buildTestPayload = (body = {}, currentTest = null) => {
   const schedule = body.schedule || {};
   const sections = normalizeSections(body.sections || currentTest?.sections || []);
@@ -170,6 +183,9 @@ const buildTestPayload = (body = {}, currentTest = null) => {
       allowLateEntry: schedule.allowLateEntry !== false,
       graceMinutes: Number(schedule.graceMinutes || 0),
       publishAt: schedule.publishAt ? new Date(schedule.publishAt) : null,
+      isPaused: Boolean(schedule.isPaused),
+      pausedAt: schedule.pausedAt ? new Date(schedule.pausedAt) : null,
+      totalPausedMs: Number(schedule.totalPausedMs || 0),
     },
     assignedBatches: normalizeArray(body.batchIds).map((batchId) => ({
       batch: batchId,
@@ -194,6 +210,7 @@ const buildTestPayload = (body = {}, currentTest = null) => {
         disableCopyPaste: body.settings?.antiCheating?.disableCopyPaste !== false,
         disableRightClick: body.settings?.antiCheating?.disableRightClick !== false,
       },
+      paperHeader: normalizePaperHeader(body.settings?.paperHeader || currentTest?.settings?.paperHeader || {}),
     },
   };
 };
@@ -455,6 +472,126 @@ export const publishTest = async (req, res) => {
     await test.save();
     await createAudit(test, req, "published", before, test.toObject());
     res.status(200).json({ success: true, message: "Test published", data: await attachAssignmentStats(test) });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
+};
+
+export const pauseTestTimer = async (req, res) => {
+  try {
+    const test = await Test.findOne({ _id: req.params.id, isDeleted: false });
+    if (!test) return res.status(404).json({ success: false, message: "Test not found" });
+    await assertCourseAccess(req, test.course);
+    if (!(req.currentUser?.isSuperAdmin || req.user?.isSuperAdmin) && String(test.teacherUser) !== String(getUserId(req))) {
+      return res.status(403).json({ success: false, message: "You can only pause your own tests." });
+    }
+
+    const now = new Date();
+    const nextStatus = computeLifecycleStatus(test, now);
+    if (nextStatus !== "live") {
+      return res.status(400).json({ success: false, message: "Only live tests can be paused." });
+    }
+    if (test.schedule?.isPaused) {
+      return res.status(200).json({ success: true, message: "Test timer is already paused", data: await attachAssignmentStats(test) });
+    }
+
+    const before = test.toObject();
+    test.status = "live";
+    test.schedule.isPaused = true;
+    test.schedule.pausedAt = now;
+    await test.save();
+    await createAudit(test, req, "timer_paused", before, test.toObject());
+    res.status(200).json({ success: true, message: "Test timer paused", data: await attachAssignmentStats(test) });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
+};
+
+export const resumeTestTimer = async (req, res) => {
+  try {
+    const test = await Test.findOne({ _id: req.params.id, isDeleted: false });
+    if (!test) return res.status(404).json({ success: false, message: "Test not found" });
+    await assertCourseAccess(req, test.course);
+    if (!(req.currentUser?.isSuperAdmin || req.user?.isSuperAdmin) && String(test.teacherUser) !== String(getUserId(req))) {
+      return res.status(403).json({ success: false, message: "You can only continue your own tests." });
+    }
+    if (test.status !== "live" || !test.schedule?.isPaused || !test.schedule?.pausedAt) {
+      return res.status(400).json({ success: false, message: "This test timer is not paused." });
+    }
+
+    const now = new Date();
+    const pausedMs = Math.max(0, now.getTime() - new Date(test.schedule.pausedAt).getTime());
+    const before = test.toObject();
+    test.schedule.endAt = test.schedule.endAt
+      ? new Date(new Date(test.schedule.endAt).getTime() + pausedMs)
+      : test.schedule.endAt;
+    test.schedule.totalPausedMs = Number(test.schedule.totalPausedMs || 0) + pausedMs;
+    test.schedule.isPaused = false;
+    test.schedule.pausedAt = null;
+    await test.save();
+
+    const inProgressAttempts = await TestAttempt.find({ test: test._id, status: "in_progress", expiresAt: { $ne: null } });
+    await Promise.all(
+      inProgressAttempts.map((attempt) => {
+        attempt.expiresAt = new Date(new Date(attempt.expiresAt).getTime() + pausedMs);
+        return attempt.save();
+      }),
+    );
+
+    await createAudit(test, req, "timer_resumed", before, test.toObject());
+    res.status(200).json({ success: true, message: "Test timer continued", data: await attachAssignmentStats(test) });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
+};
+
+export const getTeacherPaperHeader = async (req, res) => {
+  try {
+    const user = await UserAuth.findById(getUserId(req)).lean();
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    res.status(200).json({
+      success: true,
+      data: normalizePaperHeader(user.testPaperHeader || {}),
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
+};
+
+export const updateTeacherPaperHeader = async (req, res) => {
+  try {
+    const user = await UserAuth.findById(getUserId(req));
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    user.testPaperHeader = normalizePaperHeader(req.body || {});
+    await user.save();
+    res.status(200).json({
+      success: true,
+      message: "Test paper header saved",
+      data: normalizePaperHeader(user.testPaperHeader || {}),
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
+};
+
+export const updateTestPaperHeader = async (req, res) => {
+  try {
+    const test = await Test.findOne({ _id: req.params.id, isDeleted: false });
+    if (!test) return res.status(404).json({ success: false, message: "Test not found" });
+    await assertCourseAccess(req, test.course);
+    if (!(req.currentUser?.isSuperAdmin || req.user?.isSuperAdmin) && String(test.teacherUser) !== String(getUserId(req))) {
+      return res.status(403).json({ success: false, message: "You can only update your own test paper header." });
+    }
+
+    const before = test.toObject();
+    test.settings = {
+      ...(test.settings?.toObject ? test.settings.toObject() : test.settings || {}),
+      paperHeader: normalizePaperHeader(req.body || {}),
+    };
+    await test.save();
+    await createAudit(test, req, "paper_header_updated", before, test.toObject());
+    res.status(200).json({ success: true, message: "Test paper header saved", data: await attachAssignmentStats(test) });
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }

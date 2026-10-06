@@ -6,6 +6,7 @@ import {
   MdKeyboardArrowRight,
   MdMenuBook,
   MdAssignment,
+  MdDescription,
   MdOutlineManageAccounts,
   MdOutlineCategory,
   MdPeopleAlt,
@@ -314,6 +315,27 @@ const SideBarManu = () => {
                     </NavLink>
                   )}
                 </li>
+                {employeeMode && link.key === "test_studio" && (
+                  <li>
+                    <NavLink
+                      to="/employee-dashboard/test-paper-header"
+                      className={({ isActive: navIsActive }) =>
+                        `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border hover:bg-[#0e215fc7] ${
+                          appMinMixView ? "w-[60px]" : "w-full"
+                        } ${
+                          navIsActive
+                            ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
+                            : "bg-transparent border-primary"
+                        }`
+                      }
+                    >
+                      <MdDescription size={22} />
+                      {!appMinMixView && (
+                        <span className="text-[14px] text-accent">Test Paper Header</span>
+                      )}
+                    </NavLink>
+                  </li>
+                )}
                 {link.key === "employees" && renderStudentsSection()}
               </React.Fragment>
             );

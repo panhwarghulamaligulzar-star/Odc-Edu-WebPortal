@@ -5,15 +5,20 @@ import authorize from "../midlewear/authorize.js";
 import {
   deleteTest,
   duplicateTest,
+  getTeacherPaperHeader,
   getQuestionBank,
   getTeacherTestStudioOptions,
   getTestById,
   getTests,
   importQuestionBank,
+  pauseTestTimer,
   previewTestAssignment,
   publishTest,
+  resumeTestTimer,
   saveTest,
+  updateTeacherPaperHeader,
   updateTest,
+  updateTestPaperHeader,
 } from "../controller/testStudioController.js";
 
 const router = express.Router();
@@ -25,12 +30,17 @@ const upload = multer({
 router.use(authMiddleware);
 
 router.get("/options", authorize("test_studio", "view"), getTeacherTestStudioOptions);
+router.get("/paper-header", authorize("test_studio", "view"), getTeacherPaperHeader);
+router.put("/paper-header", authorize("test_studio", "update"), updateTeacherPaperHeader);
 router.post("/assignments/preview", authorize("test_studio", "view"), previewTestAssignment);
 router.get("/tests", authorize("test_studio", "view"), getTests);
 router.post("/tests", authorize("test_studio", "create"), saveTest);
 router.get("/tests/:id", authorize("test_studio", "view"), getTestById);
 router.put("/tests/:id", authorize("test_studio", "update"), updateTest);
 router.post("/tests/:id/publish", authorize("test_studio", "approve"), publishTest);
+router.post("/tests/:id/pause", authorize("test_studio", "approve"), pauseTestTimer);
+router.post("/tests/:id/resume", authorize("test_studio", "approve"), resumeTestTimer);
+router.put("/tests/:id/paper-header", authorize("test_studio", "update"), updateTestPaperHeader);
 router.post("/tests/:id/duplicate", authorize("test_studio", "create"), duplicateTest);
 router.delete("/tests/:id", authorize("test_studio", "delete"), deleteTest);
 router.get("/question-bank", authorize("test_studio", "view"), getQuestionBank);

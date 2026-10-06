@@ -32,6 +32,7 @@ import Teachers from "../pages/dashboard/Teachers";
 import EmployeeManagement from "../pages/dashboard/EmployeeManagement";
 import EmployeeDashboard from "../pages/dashboard/EmployeeDashboard";
 import TestStudio from "../pages/dashboard/TestStudio";
+import TestPaperHeader from "../pages/dashboard/TestPaperHeader";
 import Students from "../pages/dashboard/Students";
 import EnrollmentManagement from "../pages/dashboard/EnrollmentManagement";
 import StudentProfile from "../pages/dashboard/StudentProfile";
@@ -147,6 +148,7 @@ function AppRouter() {
           <Route index element={<EmployeeDashboard />} />
           <Route path="test-studio" element={<TestStudio />} />
           <Route path="test-studio/create" element={<TestStudio setupMode />} />
+          <Route path="test-paper-header" element={<TestPaperHeader />} />
         </Route>
       </Routes>
     </Router>
