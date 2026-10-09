@@ -306,6 +306,97 @@ h3 {
     font-family: "Inter-sans", Arial, sans-serif !important;
   }
 
+  .student-portal-control,
+  .student-portal-control :where(.ant-select-selector, input),
+  .student-portal-search,
+  .student-portal-search :where(.ant-input, .ant-input-group-addon, button),
+  .student-portal-table,
+  .student-portal-table :where(.ant-table, .ant-table-cell, .ant-pagination, .ant-btn, .ant-tag) {
+    font-family: "Inter-sans", Arial, sans-serif !important;
+  }
+
+  .student-portal-control.ant-input {
+    height: 56px;
+    font-size: 14px;
+    line-height: 22px;
+  }
+
+  .student-portal-control .ant-select-selector {
+    height: 56px !important;
+    min-height: 56px !important;
+    border-radius: 10px !important;
+    border-color: #d1d6d4 !important;
+    background: #f6f6f6 !important;
+    padding: 8px 12px !important;
+    font-size: 14px;
+    overflow: hidden;
+    align-items: center !important;
+  }
+
+  .student-portal-control .ant-select-selection-overflow {
+    flex-wrap: nowrap !important;
+    max-height: 34px !important;
+    overflow: hidden !important;
+  }
+
+  .student-portal-control .ant-select-selection-item {
+    height: 24px;
+    line-height: 22px;
+    max-width: 160px;
+  }
+
+  .student-portal-control .ant-select-selection-overflow-item-rest .ant-select-selection-item {
+    max-width: none;
+  }
+
+  .student-portal-control .ant-select-selection-placeholder,
+  .student-portal-control .ant-select-selection-item,
+  .student-portal-search .ant-input::placeholder {
+    font-size: 13px;
+    color: #9ca3af;
+  }
+
+  .student-portal-search .ant-input {
+    height: 40px;
+    font-size: 13px;
+    border-radius: 8px 0 0 8px;
+  }
+
+  .student-portal-search .ant-input-group-addon {
+    height: 40px;
+    padding: 0;
+    vertical-align: top;
+  }
+
+  .student-portal-search .ant-input-search-button {
+    height: 40px;
+    width: 42px;
+    border-radius: 0 8px 8px 0 !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .student-portal-table .ant-table-thead > tr > th {
+    font-size: 13px;
+    font-weight: 700;
+    color: #0f172a;
+    background: #fafafa;
+    padding: 11px 12px;
+  }
+
+  .student-portal-table .ant-table-tbody > tr > td {
+    font-size: 13px;
+    padding: 10px 12px;
+  }
+
+  .student-portal-table .ant-btn {
+    height: 34px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+
   .test-studio-modal .ant-btn-primary,
   .test-studio-modal .ant-btn-primary:not(:disabled):not(.ant-btn-disabled) {
     background: #01134c !important;

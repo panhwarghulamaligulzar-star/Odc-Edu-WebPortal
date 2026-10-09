@@ -53,6 +53,25 @@ const authSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    accountType: {
+      type: String,
+      enum: ["admin", "employee", "student"],
+      default: "admin",
+      index: true,
+    },
+    student: {
+      type: String,
+      ref: "Admission",
+      default: null,
+      index: true,
+    },
+    studentPortal: {
+      academyEmail: { type: String, default: "" },
+      initialPassword: { type: String, default: "" },
+      courseIds: [{ type: String, ref: "Course" }],
+      batchIds: [{ type: String, ref: "Batch" }],
+      createdBy: { type: String, ref: "User" },
+    },
     isSuperAdmin: {
       type: Boolean,
       default: false,

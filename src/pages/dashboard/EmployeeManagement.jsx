@@ -30,6 +30,7 @@ import {
   updateEmployee,
   updateEmployeeStatus,
 } from "../../services/employeeService";
+import { createStudentPortalAccounts } from "../../services/studentPortalAccountService";
 import { useModulePermissions } from "../../hooks/usePermissions";
 
 const beforeUpload = (file) => {
@@ -127,6 +128,29 @@ const EmployeeManagement = () => {
     setModalOpen(true);
   };
 
+  const confirmCreateStudentAccounts = (courseIds = []) => {
+    const selectedCourseIds = (courseIds || []).filter(Boolean);
+    if (!selectedCourseIds.length) return;
+
+    Modal.confirm({
+      title: "Create student portal accounts?",
+      content:
+        "This will create login accounts for all enrolled students linked with the selected employee courses. Existing student accounts will be skipped.",
+      okText: "Yes, Create Accounts",
+      cancelText: "Cancel",
+      okButtonProps: { className: "!bg-primary !border-primary" },
+      onOk: async () => {
+        const response = await createStudentPortalAccounts({
+          courseIds: selectedCourseIds,
+          academyEmail: "odcacdemy@gmail.com",
+        });
+        const created = response.data?.created?.length || 0;
+        const skipped = response.data?.skipped?.length || 0;
+        message.success(`${created} student account(s) created. ${skipped} existing account(s) skipped.`);
+      },
+    });
+  };
+
   const handleSave = async (values) => {
     setSaving(true);
     try {
@@ -150,6 +174,7 @@ const EmployeeManagement = () => {
       setModalOpen(false);
       form.resetFields();
       await loadData();
+      confirmCreateStudentAccounts(payload.courseIds);
     } catch (error) {
       message.error(error.message || "Failed to save employee");
     } finally {

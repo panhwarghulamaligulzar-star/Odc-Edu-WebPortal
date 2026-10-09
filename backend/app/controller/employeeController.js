@@ -195,6 +195,7 @@ export const createEmployee = async (req, res) => {
       password: hashedPassword,
       role: employeeRole._id.toString(),
       legacyRole: employeeRole.name,
+      accountType: "employee",
       isSuperAdmin: false,
       isActive: status !== "inactive",
       profile,

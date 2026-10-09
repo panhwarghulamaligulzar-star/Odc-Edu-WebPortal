@@ -39,6 +39,7 @@ const SideBarManu = () => {
     location.pathname === "/dashboard/employees" ||
     location.pathname === "/dashboard/test-studio";
   const isStudentsSectionActive = location.pathname.startsWith("/dashboard/students");
+  const isStudentPortalAccountsActive = location.pathname === "/dashboard/students/portal-accounts";
 
   const navLinks = useMemo(
     () => {
@@ -106,6 +107,14 @@ const SideBarManu = () => {
       title: "Enroll Students",
       path: "/dashboard/students/enrolled",
     },
+    ...(superAdminMode
+      ? [
+          {
+            title: "Portal Accounts",
+            path: "/dashboard/students/portal-accounts",
+          },
+        ]
+      : []),
   ];
 
   const accountingLinks = [
@@ -398,6 +407,28 @@ const SideBarManu = () => {
                   })}
                 </ul>
               )}
+            </li>
+          )}
+
+          {superAdminMode && (
+            <li>
+              <NavLink
+                to="/dashboard/students/portal-accounts"
+                className={({ isActive: navIsActive }) =>
+                  `flex items-center gap-3 px-4 py-2 rounded-lg transition-all duration-200 border hover:bg-[#0e215fc7] ${
+                    appMinMixView ? "w-[60px]" : "w-full"
+                  } ${
+                    navIsActive || isStudentPortalAccountsActive
+                      ? "bg-[#0e215fc7] shadow-md border-[#2b418bc7]"
+                      : "bg-transparent border-primary"
+                  }`
+                }
+              >
+                {StudentIcon ? <StudentIcon size={22} /> : null}
+                {!appMinMixView && (
+                  <span className="text-[14px] text-accent">Student Accounts</span>
+                )}
+              </NavLink>
             </li>
           )}
 

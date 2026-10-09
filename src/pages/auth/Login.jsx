@@ -72,7 +72,7 @@ const Login = () => {
 
         navigate(firstPath || "/dashboard/no-access");
 
-        message.success(`welcom Admin ${response?.user?.name || ""}`.trim());
+        message.success(`Welcome ${response?.user?.name || ""}`.trim());
       }
     } catch (error) {
       message.error(error?.message);

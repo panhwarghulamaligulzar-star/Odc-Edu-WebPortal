@@ -36,6 +36,8 @@ import TestPaperHeader from "../pages/dashboard/TestPaperHeader";
 import Students from "../pages/dashboard/Students";
 import EnrollmentManagement from "../pages/dashboard/EnrollmentManagement";
 import StudentProfile from "../pages/dashboard/StudentProfile";
+import StudentPortalAccounts from "../pages/dashboard/StudentPortalAccounts";
+import StudentPortal from "../pages/dashboard/StudentPortal";
 import HeadsOfAccount from "../pages/dashboard/accounting/HeadsOfAccount";
 import Banks from "../pages/dashboard/accounting/Banks";
 import Transactions from "../pages/dashboard/accounting/Transactions";
@@ -114,6 +116,14 @@ function AppRouter() {
               </ProtectedRoute>
             }
           />
+          <Route
+            path="students/portal-accounts"
+            element={
+              <ProtectedRoute superAdminOnly>
+                <StudentPortalAccounts />
+              </ProtectedRoute>
+            }
+          />
           <Route path="students/:id" element={<ProtectedRoute moduleKey="students"><StudentProfile /></ProtectedRoute>} />
           <Route path="certification" element={<ProtectedRoute moduleKey="certifications"><Certification /></ProtectedRoute>} />
           <Route path="settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
@@ -137,6 +147,14 @@ function AppRouter() {
           <Route path="attendance" element={<ProtectedRoute moduleKey="attendance"><Attendance /></ProtectedRoute>} />
           <Route path="attendance/holidays" element={<ProtectedRoute moduleKey="attendance"><HolidayManagement /></ProtectedRoute>} />
         </Route>
+        <Route
+          path="/student-portal"
+          element={
+            <ProtectedRoute studentOnly>
+              <StudentPortal />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/employee-dashboard"
           element={

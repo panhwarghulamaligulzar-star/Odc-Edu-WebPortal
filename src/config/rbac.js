@@ -136,6 +136,10 @@ export const getFirstAccessibleDashboardPath = ({
   isSuperAdmin = false,
   role = "",
 }) => {
+  if (String(role || "").toLowerCase() === "student") {
+    return "/student-portal";
+  }
+
   if (String(role || "").toLowerCase() === "employee") {
     return "/employee-dashboard";
   }

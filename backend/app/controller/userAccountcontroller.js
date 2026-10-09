@@ -1,6 +1,10 @@
 import bcrypt from "bcrypt";
 import Role from "../modules/roleModule.js";
 import UserAuth from "../modules/userAuthModal.js";
+import Admission from "../modules/AdmissionModule.js";
+import Batch from "../modules/batchModule.js";
+import Course from "../modules/courseModule.js";
+import Enrollment from "../modules/enrollmentModule.js";
 import {
   buildPermissionsMap,
   isLegacyAdminUser,
@@ -10,6 +14,137 @@ import {
 } from "../utils/rbac.js";
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+const toArray = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean).map(String);
+  if (!value) return [];
+  return String(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+const unique = (values = []) => [...new Set(values.filter(Boolean).map(String))];
+const cleanSlug = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
+    .slice(0, 28);
+
+const studentPermissions = () => normalizePermissions([{ module: "dashboard", actions: { view: true } }]);
+
+const ensureStudentRole = async () => {
+  const existingRole = await Role.findOne({ name: /^Student$/i });
+  if (existingRole) {
+    existingRole.isSystem = true;
+    existingRole.description =
+      existingRole.description || "Student portal access for profile and password management.";
+    existingRole.permissions = studentPermissions();
+    await existingRole.save();
+    return existingRole;
+  }
+
+  return Role.create({
+    name: "Student",
+    description: "Student portal access for profile and password management.",
+    isSystem: true,
+    permissions: studentPermissions(),
+  });
+};
+
+const generatePassword = () =>
+  `Odc${Math.random().toString(36).slice(2, 6)}${Math.floor(1000 + Math.random() * 9000)}!`;
+
+const buildStudentEmail = async (student, academyEmail = "odcacdemy@gmail.com") => {
+  const [academyLocalRaw, academyDomainRaw] = String(academyEmail || "odcacdemy@gmail.com")
+    .toLowerCase()
+    .split("@");
+  const academyLocal = cleanSlug(academyLocalRaw) || "odcacdemy";
+  const academyDomain = academyDomainRaw || "gmail.com";
+  const firstName = cleanSlug(String(student?.studentName || "student").split(/\s+/)[0]) || "student";
+  const code = cleanSlug(student?.registrationNo || student?._id || Date.now()).replace(/\./g, "");
+  const base = `${academyLocal}.${firstName}${code ? `.${code}` : ""}`;
+  let email = `${base}@${academyDomain}`;
+  let counter = 1;
+
+  while (await UserAuth.exists({ email })) {
+    email = `${base}.${counter}@${academyDomain}`;
+    counter += 1;
+  }
+
+  return email;
+};
+
+const getSelectedEnrollmentStudents = async ({ courseIds = [], batchIds = [] }) => {
+  const courseFilter = unique(courseIds);
+  const batchFilter = unique(batchIds);
+  const query = { status: { $ne: "Dropped" } };
+  if (courseFilter.length) query.course = { $in: courseFilter };
+  if (batchFilter.length) query.batch = { $in: batchFilter };
+
+  const enrollments = await Enrollment.find(query)
+    .populate("student", "studentName registrationNo emailAddress mobileNumber profilePicture isActive")
+    .populate("course", "courseName courseId")
+    .populate("batch", "batchName batchCode")
+    .lean();
+
+  const students = new Map();
+  enrollments.forEach((enrollment) => {
+    const student = enrollment.student;
+    if (!student?._id || student.isActive === false) return;
+    const key = String(student._id);
+    if (!students.has(key)) {
+      students.set(key, {
+        student,
+        courseIds: new Set(),
+        batchIds: new Set(),
+        courses: [],
+        batches: [],
+      });
+    }
+    const item = students.get(key);
+    if (enrollment.course?._id && !item.courseIds.has(String(enrollment.course._id))) {
+      item.courseIds.add(String(enrollment.course._id));
+      item.courses.push(enrollment.course);
+    }
+    if (enrollment.batch?._id && !item.batchIds.has(String(enrollment.batch._id))) {
+      item.batchIds.add(String(enrollment.batch._id));
+      item.batches.push(enrollment.batch);
+    }
+  });
+
+  return [...students.values()].map((item) => ({
+    ...item,
+    courseIds: [...item.courseIds],
+    batchIds: [...item.batchIds],
+  }));
+};
+
+const serializeStudentAccount = async (user) => {
+  const [student, courses, batches] = await Promise.all([
+    user.student ? Admission.findById(user.student).lean() : null,
+    Course.find({ _id: { $in: user.studentPortal?.courseIds || [] } }, "courseName courseId").lean(),
+    Batch.find({ _id: { $in: user.studentPortal?.batchIds || [] } }, "batchName batchCode").lean(),
+  ]);
+
+  return {
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.legacyRole || "Student",
+    accountType: user.accountType,
+    studentId: user.student,
+    registrationNo: student?.registrationNo || "",
+    phone: student?.mobileNumber || user.details?.phone || "",
+    isActive: user.isActive,
+    profile: user.profile,
+    academyEmail: user.studentPortal?.academyEmail || "",
+    initialPassword: user.studentPortal?.initialPassword || "",
+    courses,
+    batches,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+  };
+};
 
 const findUserByAuthContext = async (authUser) => {
   const authId = authUser?._id || authUser?.id;
@@ -61,12 +196,42 @@ const canManageAllUsers = async (authUser) => {
 
 const serializeUser = async (user) => {
   const resolvedRole = await resolveRoleForUser(user);
+  const isStudentAccount = user.accountType === "student";
+  const [studentRecord, studentCourses, studentBatches] = isStudentAccount
+    ? await Promise.all([
+        user.student ? Admission.findById(user.student).lean() : null,
+        Course.find({ _id: { $in: user.studentPortal?.courseIds || [] } }, "courseName courseId courseCategory duration totalFee").lean(),
+        Batch.find({ _id: { $in: user.studentPortal?.batchIds || [] } }, "batchName batchCode course shift days status startDate endDate").lean(),
+      ])
+    : [null, [], []];
+
   return {
     _id: user._id,
     name: user.name,
     email: user.email,
     role: serializeRoleForClient(user, resolvedRole),
     roleId: typeof user.role === "string" ? user.role : user.role?._id || user.role || null,
+    accountType: user.accountType,
+    student: user.student,
+    studentInfo: studentRecord
+      ? {
+          _id: studentRecord._id,
+          registrationNo: studentRecord.registrationNo,
+          studentName: studentRecord.studentName,
+          fatherName: studentRecord.fatherName,
+          mobileNumber: studentRecord.mobileNumber,
+          emailAddress: studentRecord.emailAddress,
+          currentAddress: studentRecord.currentAddress,
+          permanentAddress: studentRecord.permanentAddress,
+        }
+      : null,
+    studentPortal: isStudentAccount
+      ? {
+          academyEmail: user.studentPortal?.academyEmail || "",
+          courses: studentCourses,
+          batches: studentBatches,
+        }
+      : null,
     profile: user.profile,
     details: user.details,
     isSuperAdmin: user.isSuperAdmin,
@@ -180,6 +345,24 @@ const updateUserAccount = async (req, res) => {
       updatedData.password = isSamePassword
         ? user.password
         : await bcrypt.hash(req.body.password, await bcrypt.genSalt(10));
+      if (!canViewAll && user.accountType === "student") {
+        updatedData["studentPortal.initialPassword"] = "";
+      }
+    }
+
+    const detailFields = ["phone", "city", "address", "age", "gender", "education"];
+    const nextDetails = {
+      ...(user.details?.toObject ? user.details.toObject() : user.details || {}),
+    };
+    let hasDetailUpdate = false;
+    detailFields.forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(req.body, field)) {
+        nextDetails[field] = req.body[field];
+        hasDetailUpdate = true;
+      }
+    });
+    if (hasDetailUpdate) {
+      updatedData.details = nextDetails;
     }
 
     if (req.file) {
@@ -279,6 +462,169 @@ const getAllProfileData = async (req, res) => {
       message: "Internal Server Error",
       error: error.message,
     });
+  }
+};
+
+const previewStudentPortalAccounts = async (req, res) => {
+  try {
+    const courseIds = toArray(req.body.courseIds);
+    const batchIds = toArray(req.body.batchIds);
+
+    if (!courseIds.length && !batchIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Select at least one course or batch.",
+      });
+    }
+
+    const selectedStudents = await getSelectedEnrollmentStudents({ courseIds, batchIds });
+    const studentIds = selectedStudents.map((item) => String(item.student._id));
+    const existingAccounts = await UserAuth.find({
+      accountType: "student",
+      student: { $in: studentIds },
+    }).lean();
+    const existingByStudent = new Map(existingAccounts.map((account) => [String(account.student), account]));
+
+    const rows = selectedStudents.map((item) => {
+      const existing = existingByStudent.get(String(item.student._id));
+      return {
+        studentId: item.student._id,
+        studentName: item.student.studentName,
+        registrationNo: item.student.registrationNo || "",
+        alreadyCreated: Boolean(existing),
+        email: existing?.email || "",
+        courses: item.courses,
+        batches: item.batches,
+      };
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalStudents: rows.length,
+        newAccounts: rows.filter((row) => !row.alreadyCreated).length,
+        existingAccounts: rows.filter((row) => row.alreadyCreated).length,
+        students: rows,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to preview student accounts", error: error.message });
+  }
+};
+
+const createStudentPortalAccounts = async (req, res) => {
+  try {
+    const courseIds = toArray(req.body.courseIds);
+    const batchIds = toArray(req.body.batchIds);
+    const academyEmail = normalizeEmail(req.body.academyEmail || "odcacdemy@gmail.com");
+
+    if (!courseIds.length && !batchIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: "Select at least one course or batch.",
+      });
+    }
+
+    const selectedStudents = await getSelectedEnrollmentStudents({ courseIds, batchIds });
+    const studentIds = selectedStudents.map((item) => String(item.student._id));
+    const existingAccounts = await UserAuth.find({
+      accountType: "student",
+      student: { $in: studentIds },
+    });
+    const existingByStudent = new Map(existingAccounts.map((account) => [String(account.student), account]));
+    const studentRole = await ensureStudentRole();
+    const created = [];
+    const skipped = [];
+
+    for (const item of selectedStudents) {
+      const studentId = String(item.student._id);
+      const existing = existingByStudent.get(studentId);
+      if (existing) {
+        const mergedCourses = unique([...(existing.studentPortal?.courseIds || []), ...item.courseIds]);
+        const mergedBatches = unique([...(existing.studentPortal?.batchIds || []), ...item.batchIds]);
+        existing.studentPortal = {
+          ...(existing.studentPortal?.toObject ? existing.studentPortal.toObject() : existing.studentPortal || {}),
+          academyEmail: existing.studentPortal?.academyEmail || academyEmail,
+          courseIds: mergedCourses,
+          batchIds: mergedBatches,
+        };
+        await existing.save();
+        skipped.push(await serializeStudentAccount(existing));
+        continue;
+      }
+
+      const initialPassword = generatePassword();
+      const email = await buildStudentEmail(item.student, academyEmail);
+      const hashedPassword = await bcrypt.hash(initialPassword, await bcrypt.genSalt(10));
+      const firstName = String(item.student.studentName || "Student").split(/\s+/)[0];
+      const user = await UserAuth.create({
+        name: item.student.studentName || firstName,
+        email,
+        password: hashedPassword,
+        role: studentRole._id.toString(),
+        legacyRole: studentRole.name,
+        accountType: "student",
+        student: studentId,
+        isSuperAdmin: false,
+        isActive: true,
+        profile: item.student.profilePicture || undefined,
+        details: {
+          phone: item.student.mobileNumber || "",
+          status: "active",
+        },
+        permissions: studentPermissions(),
+        studentPortal: {
+          academyEmail,
+          initialPassword,
+          courseIds: item.courseIds,
+          batchIds: item.batchIds,
+          createdBy: req.user?._id || req.user?.id,
+        },
+      });
+
+      created.push(await serializeStudentAccount(user));
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `${created.length} student portal account${created.length === 1 ? "" : "s"} created.`,
+      data: {
+        created,
+        skipped,
+        totalSelected: selectedStudents.length,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to create student portal accounts", error: error.message });
+  }
+};
+
+const listStudentPortalAccounts = async (req, res) => {
+  try {
+    const accounts = await UserAuth.find({ accountType: "student" }).sort({ createdAt: -1 });
+    const data = await Promise.all(accounts.map((account) => serializeStudentAccount(account)));
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to fetch student portal accounts", error: error.message });
+  }
+};
+
+const updateStudentPortalAccountStatus = async (req, res) => {
+  try {
+    const account = await UserAuth.findOne({ _id: req.params.id, accountType: "student" });
+    if (!account) {
+      return res.status(404).json({ success: false, message: "Student portal account not found." });
+    }
+    account.isActive = Boolean(req.body.isActive);
+    account.details = {
+      ...(account.details?.toObject ? account.details.toObject() : account.details || {}),
+      status: account.isActive ? "active" : "blocked",
+    };
+    if (account.isActive) account.failedLoginAttempts = 0;
+    await account.save();
+    res.status(200).json({ success: true, message: "Student account status updated.", data: await serializeStudentAccount(account) });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Failed to update student account status", error: error.message });
   }
 };
 
@@ -437,4 +783,8 @@ export {
   updateUserRole,
   updateUserStatus,
   getMyPermissions,
+  previewStudentPortalAccounts,
+  createStudentPortalAccounts,
+  listStudentPortalAccounts,
+  updateStudentPortalAccountStatus,
 };

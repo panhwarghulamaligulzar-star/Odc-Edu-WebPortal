@@ -8,6 +8,7 @@ export default function ProtectedRoute({
   action = "view",
   superAdminOnly = false,
   employeeOnly = false,
+  studentOnly = false,
 }) {
   const location = useLocation();
   const { token, permissions, isSuperAdmin, adminInfo } = useZustandStore();
@@ -16,6 +17,7 @@ export default function ProtectedRoute({
     isSuperAdmin === true || adminInfo?.userData?.isSuperAdmin === true;
   const roleName = adminInfo?.userData?.role || "";
   const employeeMode = String(roleName || "").toLowerCase() === "employee";
+  const studentMode = String(roleName || "").toLowerCase() === "student";
 
   if (!token && !localToken) {
     return <Navigate to="/login" replace />;
@@ -23,6 +25,14 @@ export default function ProtectedRoute({
 
   if (employeeOnly) {
     return employeeMode ? children : <Navigate to="/dashboard/no-access" replace />;
+  }
+
+  if (studentOnly) {
+    return studentMode ? children : <Navigate to="/dashboard/no-access" replace />;
+  }
+
+  if (studentMode && !studentOnly) {
+    return <Navigate to="/student-portal" replace />;
   }
 
   if (employeeMode && !employeeOnly) {

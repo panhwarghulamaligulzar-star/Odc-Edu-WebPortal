@@ -55,6 +55,10 @@ import {
   resumeTestTimer,
   updateTest,
 } from "../../services/testStudioService";
+import {
+  createStudentPortalAccounts,
+  previewStudentPortalAccounts,
+} from "../../services/studentPortalAccountService";
 
 const questionTypeOptions = [
   { label: "MCQ - Single Correct", value: "mcq_single" },
@@ -119,8 +123,11 @@ const TestStudio = ({ setupMode = false }) => {
   const navigate = useNavigate();
   const permissions = useModulePermissions("test_studio");
   const adminInfo = useZustandStore((state) => state.adminInfo);
+  const isSuperAdmin = useZustandStore((state) => state.isSuperAdmin);
   const employeeMode =
     String(adminInfo?.userData?.role || "").toLowerCase() === "employee";
+  const superAdminMode =
+    isSuperAdmin === true || adminInfo?.userData?.isSuperAdmin === true;
   const canCreateTest = employeeMode || permissions.create;
   const canUpdateTest = employeeMode || permissions.update;
   const canPublishTest = employeeMode || permissions.approve;
@@ -540,6 +547,91 @@ const TestStudio = ({ setupMode = false }) => {
       setAssignmentPreview(response.data);
     } catch (error) {
       message.error(error.message || "Failed to preview assignment");
+    }
+  };
+
+  const handleNextStep = async () => {
+    if (currentStep !== 4 || !superAdminMode) {
+      setCurrentStep((prev) => prev + 1);
+      return;
+    }
+
+    try {
+      await form.validateFields(["batchIds"]);
+      const values = form.getFieldsValue(true);
+      const batchIds = values.batchIds || [];
+      if (!batchIds.length) {
+        message.warning("Select at least one batch first.");
+        return;
+      }
+
+      const previewResponse = await previewStudentPortalAccounts({
+        batchIds,
+        academyEmail: "odcacdemy@gmail.com",
+      });
+      const preview = previewResponse.data || {};
+
+      Modal.confirm({
+        title: "Create student portal accounts?",
+        width: 720,
+        okText: "Yes, Create & Continue",
+        cancelText: "Skip",
+        okButtonProps: { className: "!bg-primary !border-primary" },
+        content: (
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Student login accounts will be created for students enrolled in the selected batches.
+              Existing student accounts will be skipped and kept as one account per student.
+            </p>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-lg border border-slate-200 p-3">
+                <div className="text-xs text-slate-500">Selected Students</div>
+                <div className="text-xl font-ArialBold text-primary">{preview.totalStudents || 0}</div>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <div className="text-xs text-slate-500">New Accounts</div>
+                <div className="text-xl font-ArialBold text-green-700">{preview.newAccounts || 0}</div>
+              </div>
+              <div className="rounded-lg border border-slate-200 p-3">
+                <div className="text-xs text-slate-500">Already Created</div>
+                <div className="text-xl font-ArialBold text-amber-700">{preview.existingAccounts || 0}</div>
+              </div>
+            </div>
+            <div className="max-h-[220px] overflow-auto rounded-lg border border-slate-200">
+              {(preview.students || []).map((student) => (
+                <div
+                  key={student.studentId}
+                  className="flex items-center justify-between border-b border-slate-100 px-3 py-2 last:border-b-0"
+                >
+                  <div>
+                    <div className="text-sm font-semibold text-primary">{student.studentName}</div>
+                    <div className="text-xs text-slate-500">{student.registrationNo || "No registration"}</div>
+                  </div>
+                  <Tag color={student.alreadyCreated ? "orange" : "green"}>
+                    {student.alreadyCreated ? "Existing" : "Ready"}
+                  </Tag>
+                </div>
+              ))}
+            </div>
+          </div>
+        ),
+        onOk: async () => {
+          const response = await createStudentPortalAccounts({
+            batchIds,
+            academyEmail: "odcacdemy@gmail.com",
+          });
+          const created = response.data?.created?.length || 0;
+          const skipped = response.data?.skipped?.length || 0;
+          message.success(`${created} account(s) created. ${skipped} existing account(s) skipped.`);
+          setCurrentStep((prev) => prev + 1);
+        },
+        onCancel: () => {
+          setCurrentStep((prev) => prev + 1);
+        },
+      });
+    } catch (error) {
+      if (error?.errorFields) return;
+      message.error(error.message || "Failed to preview student portal accounts");
     }
   };
 
@@ -1083,7 +1175,7 @@ const TestStudio = ({ setupMode = false }) => {
         <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
           <Button disabled={currentStep === 0} onClick={() => setCurrentStep((prev) => prev - 1)}>Back</Button>
           {currentStep < stepItems.length - 1 ? (
-            <Button type="primary" onClick={() => setCurrentStep((prev) => prev + 1)}>Next</Button>
+            <Button type="primary" onClick={handleNextStep}>Next</Button>
           ) : null}
           <Button icon={<SaveOutlined />} loading={saving} onClick={handleSaveDraft}>Save Draft</Button>
           <Button type="primary" icon={<SendOutlined />} loading={saving} onClick={handlePublish}>Publish</Button>
@@ -1200,7 +1292,7 @@ const TestStudio = ({ setupMode = false }) => {
         width={1100}
         footer={[
           <Button key="back" disabled={currentStep === 0} onClick={() => setCurrentStep((prev) => prev - 1)}>Back</Button>,
-          currentStep < stepItems.length - 1 ? <Button key="next" type="primary" onClick={() => setCurrentStep((prev) => prev + 1)}>Next</Button> : null,
+          currentStep < stepItems.length - 1 ? <Button key="next" type="primary" onClick={handleNextStep}>Next</Button> : null,
           <Button key="draft" icon={<SaveOutlined />} loading={saving} onClick={handleSaveDraft}>Save Draft</Button>,
           <Button key="publish" type="primary" icon={<SendOutlined />} loading={saving} onClick={handlePublish}>Publish</Button>,
         ]}
