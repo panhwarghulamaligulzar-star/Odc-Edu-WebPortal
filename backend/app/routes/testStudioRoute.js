@@ -2,13 +2,16 @@ import express from "express";
 import multer from "multer";
 import authMiddleware from "../midlewear/authMiddleware.js";
 import authorize from "../midlewear/authorize.js";
+import requireAuth from "../midlewear/requireAuth.js";
 import {
   deleteTest,
   duplicateTest,
+  getMyStudentTests,
   getTeacherPaperHeader,
   getQuestionBank,
   getTeacherTestStudioOptions,
   getTestById,
+  getTestAttempts,
   getTests,
   importQuestionBank,
   pauseTestTimer,
@@ -16,6 +19,8 @@ import {
   publishTest,
   resumeTestTimer,
   saveTest,
+  startMyStudentTest,
+  submitMyStudentTest,
   updateTeacherPaperHeader,
   updateTest,
   updateTestPaperHeader,
@@ -29,6 +34,10 @@ const upload = multer({
 
 router.use(authMiddleware);
 
+router.get("/student/tests", requireAuth, getMyStudentTests);
+router.post("/student/tests/:id/start", requireAuth, startMyStudentTest);
+router.post("/student/tests/:id/submit", requireAuth, submitMyStudentTest);
+
 router.get("/options", authorize("test_studio", "view"), getTeacherTestStudioOptions);
 router.get("/paper-header", authorize("test_studio", "view"), getTeacherPaperHeader);
 router.put("/paper-header", authorize("test_studio", "update"), updateTeacherPaperHeader);
@@ -36,6 +45,7 @@ router.post("/assignments/preview", authorize("test_studio", "view"), previewTes
 router.get("/tests", authorize("test_studio", "view"), getTests);
 router.post("/tests", authorize("test_studio", "create"), saveTest);
 router.get("/tests/:id", authorize("test_studio", "view"), getTestById);
+router.get("/tests/:id/attempts", authorize("test_studio", "view"), getTestAttempts);
 router.put("/tests/:id", authorize("test_studio", "update"), updateTest);
 router.post("/tests/:id/publish", authorize("test_studio", "approve"), publishTest);
 router.post("/tests/:id/pause", authorize("test_studio", "approve"), pauseTestTimer);

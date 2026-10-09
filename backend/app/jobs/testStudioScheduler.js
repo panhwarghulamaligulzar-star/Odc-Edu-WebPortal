@@ -1,4 +1,5 @@
 import { Test, TestAttempt, TestAuditLog } from "../modules/testStudioModule.js";
+import { gradeTestAttempt } from "../utils/testStudioGrading.js";
 
 const computeStatus = (test, now) => {
   if (["draft", "cancelled"].includes(test.status)) return test.status;
@@ -44,6 +45,14 @@ export const runTestStudioScheduler = async () => {
 
   for (const attempt of expiredAttempts) {
     if (pausedTestIds.has(String(attempt.test))) continue;
+    const test = await Test.findById(attempt.test).lean();
+    if (test) {
+      const grading = gradeTestAttempt(test, attempt.answers || []);
+      attempt.answers = grading.answers;
+      attempt.score = grading.score;
+      attempt.percentage = grading.percentage;
+      attempt.passed = grading.passed;
+    }
     attempt.status = "auto_submitted";
     attempt.submittedAt = now;
     await attempt.save();

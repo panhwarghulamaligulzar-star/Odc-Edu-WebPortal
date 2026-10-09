@@ -3,12 +3,16 @@ import { useNavigate } from "react-router-dom";
 import {
   Avatar,
   Button,
+  Card,
+  Checkbox,
   Descriptions,
   Dropdown,
   Empty,
   Form,
   Input,
   Modal,
+  Radio,
+  Space,
   Table,
   Tag,
   Upload,
@@ -19,12 +23,19 @@ import {
   LockOutlined,
   LogoutOutlined,
   SaveOutlined,
+  SendOutlined,
   UploadOutlined,
   UserOutlined,
 } from "@ant-design/icons";
 import { FaSearch, FaCog } from "react-icons/fa";
 import { TbArrowsMaximize } from "react-icons/tb";
+import dayjs from "dayjs";
 import { getAdminInformation, updateAdminInfo } from "../../services/adminService";
+import {
+  getMyStudentTests,
+  startMyStudentTest,
+  submitMyStudentTest,
+} from "../../services/testStudioService";
 import useZustandStore from "../../stores/zustandStore";
 import { getSidebarLogo } from "../../utils/branding";
 
@@ -44,6 +55,12 @@ const StudentPortal = () => {
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
   const [selectedCourseInfo, setSelectedCourseInfo] = useState(null);
+  const [studentTests, setStudentTests] = useState([]);
+  const [testsLoading, setTestsLoading] = useState(false);
+  const [activePaper, setActivePaper] = useState(null);
+  const [answers, setAnswers] = useState({});
+  const [submittingTest, setSubmittingTest] = useState(false);
+  const [nowTick, setNowTick] = useState(dayjs());
   const user = adminInfo?.userData;
   const profileImage = getProfileImageSrc(user?.profile);
 
@@ -62,6 +79,29 @@ const StudentPortal = () => {
         user?.studentInfo?.permanentAddress,
     });
   }, [profileForm, user]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowTick(dayjs()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const loadStudentTests = async () => {
+    setTestsLoading(true);
+    try {
+      const response = await getMyStudentTests();
+      setStudentTests(response.data || []);
+    } catch (error) {
+      message.error(error.message || "Failed to load tests");
+    } finally {
+      setTestsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "student-tests") {
+      loadStudentTests();
+    }
+  }, [activeTab]);
 
   const refreshProfile = async () => {
     if (!user?._id) return;
@@ -113,6 +153,67 @@ const StudentPortal = () => {
       setSavingPassword(false);
     }
   };
+
+  const getRemainingMs = (dateValue) => {
+    if (!dateValue) return 0;
+    return Math.max(0, dayjs(dateValue).diff(nowTick));
+  };
+
+  const formatDuration = (milliseconds) => {
+    const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return [hours, minutes, seconds].map((value) => String(value).padStart(2, "0")).join(":");
+  };
+
+  const startTest = async (testId) => {
+    try {
+      const response = await startMyStudentTest(testId);
+      setActivePaper(response.data?.test || null);
+      setAnswers({});
+    } catch (error) {
+      message.error(error.message || "Failed to start test");
+    }
+  };
+
+  const submitTest = async (auto = false) => {
+    if (!activePaper?._id || submittingTest) return;
+    setSubmittingTest(true);
+    try {
+      const payload = {
+        answers: (activePaper.questions || []).map((question) => ({
+          questionId: question._id,
+          selectedOptions: Array.isArray(answers[question._id])
+            ? answers[question._id]
+            : answers[question._id]
+              ? [answers[question._id]]
+              : [],
+          textAnswer: typeof answers[question._id] === "string" ? answers[question._id] : "",
+        })),
+      };
+      const response = await submitMyStudentTest(activePaper._id, payload);
+      message.success(auto ? "Time ended. Test auto-submitted." : "Test submitted successfully");
+      setActivePaper(null);
+      setAnswers({});
+      await loadStudentTests();
+      Modal.success({
+        title: "Result",
+        content: `Score: ${response.data?.score || 0} (${response.data?.percentage || 0}%). ${response.data?.passed ? "Passed" : "Not passed"}`,
+      });
+    } catch (error) {
+      message.error(error.message || "Failed to submit test");
+    } finally {
+      setSubmittingTest(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!activePaper?.schedule?.endAt) return;
+    if (getRemainingMs(activePaper.schedule.endAt) <= 0) {
+      submitTest(true);
+    }
+  }, [nowTick, activePaper]);
 
   const profileMenu = {
     items: [
@@ -301,6 +402,169 @@ const StudentPortal = () => {
     </div>
   );
 
+  const renderQuestionInput = (question) => {
+    if (question.questionType === "mcq_single" || question.questionType === "true_false") {
+      return (
+        <Radio.Group
+          value={answers[question._id]}
+          onChange={(event) => setAnswers((prev) => ({ ...prev, [question._id]: event.target.value }))}
+          className="flex flex-col gap-2"
+        >
+          {(question.options || []).map((option) => (
+            <Radio key={option._id} value={option._id}>{option.text}</Radio>
+          ))}
+        </Radio.Group>
+      );
+    }
+
+    if (question.questionType === "mcq_multiple") {
+      return (
+        <Checkbox.Group
+          value={answers[question._id] || []}
+          onChange={(values) => setAnswers((prev) => ({ ...prev, [question._id]: values }))}
+          className="flex flex-col gap-2"
+        >
+          {(question.options || []).map((option) => (
+            <Checkbox key={option._id} value={option._id}>{option.text}</Checkbox>
+          ))}
+        </Checkbox.Group>
+      );
+    }
+
+    return (
+      <Input.TextArea
+        rows={3}
+        value={answers[question._id] || ""}
+        onChange={(event) => setAnswers((prev) => ({ ...prev, [question._id]: event.target.value }))}
+        placeholder="Write your answer"
+      />
+    );
+  };
+
+  const renderTestPaper = () => (
+    <div className="space-y-4">
+      <Card className="rounded-[16px]">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="module-title !text-[20px]">{activePaper.title}</h2>
+            <p className="module-subtitle">{activePaper.instructions || "Answer all questions carefully."}</p>
+          </div>
+          <Tag color="red" className="!px-3 !py-1 !text-[13px]">
+            Time Left: {formatDuration(getRemainingMs(activePaper.schedule?.endAt))}
+          </Tag>
+        </div>
+      </Card>
+
+      {(activePaper.questions || []).map((question, index) => (
+        <Card key={question._id} className="rounded-[16px]" title={`Question ${index + 1} (${question.marks || 0} marks)`}>
+          <div className="mb-4 text-[15px] font-semibold text-primary">{question.questionText}</div>
+          {question.imageUrl ? <img src={question.imageUrl} alt="Question" className="mb-4 max-h-[240px] rounded-lg object-contain" /> : null}
+          {renderQuestionInput(question)}
+        </Card>
+      ))}
+
+      <div className="flex justify-end">
+        <Button
+          type="primary"
+          icon={<SendOutlined />}
+          loading={submittingTest}
+          onClick={() => submitTest(false)}
+          className="h-10 !bg-primary !border-primary"
+        >
+          Submit Test
+        </Button>
+      </div>
+    </div>
+  );
+
+  const renderStudentTests = () => {
+    if (activePaper) return renderTestPaper();
+
+    const columns = [
+      {
+        title: "Test",
+        key: "test",
+        render: (_, test) => (
+          <div>
+            <div className="font-semibold text-primary">{test.title}</div>
+            <div className="text-xs text-slate-500">{test.course?.courseName || "Course"} {test.topic ? `- ${test.topic}` : ""}</div>
+          </div>
+        ),
+      },
+      {
+        title: "Teacher",
+        key: "teacher",
+        render: (_, test) => (
+          <div>
+            <div className="text-[13px] text-slate-700">{test.teacher?.name || "Teacher"}</div>
+            <div className="text-xs text-slate-500">{test.teacher?.email || ""}</div>
+          </div>
+        ),
+      },
+      {
+        title: "Timing",
+        key: "timing",
+        render: (_, test) => (
+          <div className="text-[12px] text-slate-600">
+            <div>{test.schedule?.startAt ? dayjs(test.schedule.startAt).format("DD MMM YYYY, hh:mm A") : "Not set"}</div>
+            <div>{test.schedule?.endAt ? dayjs(test.schedule.endAt).format("DD MMM YYYY, hh:mm A") : ""}</div>
+          </div>
+        ),
+      },
+      {
+        title: "Status",
+        key: "status",
+        render: (_, test) => {
+          if (["submitted", "auto_submitted", "graded"].includes(test.attempt?.status)) return <Tag color="green">Submitted</Tag>;
+          if (test.status === "live") return <Tag color="green">Live</Tag>;
+          if (test.status === "completed") return <Tag color="purple">Completed</Tag>;
+          return <Tag color="blue">Upcoming</Tag>;
+        },
+      },
+      {
+        title: "Action",
+        key: "action",
+        render: (_, test) => {
+          if (["submitted", "auto_submitted", "graded"].includes(test.attempt?.status)) {
+            return <Tag color={test.attempt?.passed ? "green" : "red"}>{test.attempt?.percentage || 0}%</Tag>;
+          }
+          if (test.canStart) {
+            return <Button type="primary" className="!bg-primary !border-primary" onClick={() => startTest(test._id)}>Start Paper</Button>;
+          }
+          if (test.status === "scheduled") {
+            return <span className="text-xs text-slate-500">Starts in {formatDuration(getRemainingMs(test.schedule?.startAt))}</span>;
+          }
+          return <span className="text-xs text-slate-400">Not available</span>;
+        },
+      },
+    ];
+
+    return (
+      <div className="rounded-[16px] border border-slate-200 bg-white p-5">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <SendOutlined className="text-primary" />
+            <h2 className="module-title !text-[20px]">Upcoming Tests</h2>
+          </div>
+          <Button className="h-9 rounded-lg" onClick={loadStudentTests}>Refresh</Button>
+        </div>
+        {studentTests.length ? (
+          <Table
+            rowKey="_id"
+            loading={testsLoading}
+            dataSource={studentTests}
+            columns={columns}
+            pagination={false}
+            scroll={{ x: "max-content" }}
+            className="student-portal-table custom-pagination-table"
+          />
+        ) : (
+          <Empty description={testsLoading ? "Loading tests..." : "No upcoming tests found"} />
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="theme-font flex h-screen overflow-hidden bg-gray-100">
       <aside className="hidden h-full w-[300px] shrink-0 bg-primary text-white shadow-lg lg:flex lg:flex-col">
@@ -338,6 +602,19 @@ const StudentPortal = () => {
               >
                 <BookOutlined className="shrink-0 text-[22px]" />
                 <span className="text-[14px] font-semibold">Assigned Courses</span>
+              </button>
+            </li>
+            <li>
+              <button
+                onClick={() => setActiveTab("student-tests")}
+                className={`flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left transition-all duration-200 ${
+                  activeTab === "student-tests"
+                    ? "border-[#2b418bc7] bg-[#0e215fc7] text-accent shadow-md"
+                    : "border-primary bg-transparent text-accent hover:bg-[#0e215fc7]"
+                }`}
+              >
+                <SendOutlined className="shrink-0 text-[22px]" />
+                <span className="text-[14px] font-semibold">Upcoming Tests</span>
               </button>
             </li>
           </ul>
@@ -409,9 +686,21 @@ const StudentPortal = () => {
               >
                 Assigned Courses
               </button>
+              <button
+                onClick={() => setActiveTab("student-tests")}
+                className={`rounded-lg border px-4 py-3 text-left text-sm font-semibold ${
+                  activeTab === "student-tests" ? "border-primary bg-primary text-accent" : "border-slate-200 bg-white text-primary"
+                }`}
+              >
+                Upcoming Tests
+              </button>
             </div>
 
-            {activeTab === "student-info" ? renderStudentInfo() : renderAssignedCourses()}
+            {activeTab === "student-info"
+              ? renderStudentInfo()
+              : activeTab === "assigned-courses"
+                ? renderAssignedCourses()
+                : renderStudentTests()}
           </div>
         </main>
       </div>

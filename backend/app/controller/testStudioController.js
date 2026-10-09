@@ -4,12 +4,14 @@ import Batch from "../modules/batchModule.js";
 import Enrollment from "../modules/enrollmentModule.js";
 import EmployeeCourse from "../modules/employeeCourseModule.js";
 import UserAuth from "../modules/userAuthModal.js";
+import Admission from "../modules/AdmissionModule.js";
 import {
   QuestionBank,
   Test,
   TestAttempt,
   TestAuditLog,
 } from "../modules/testStudioModule.js";
+import { gradeTestAttempt } from "../utils/testStudioGrading.js";
 
 const QUESTION_TYPES = new Set([
   "mcq_single",
@@ -41,6 +43,16 @@ const normalizeArray = (value) => {
 };
 
 const getUserId = (req) => req.user?._id || req.user?.id;
+
+const getStudentPortalUser = async (req) => {
+  const user = await UserAuth.findById(getUserId(req)).lean();
+  if (!user || user.accountType !== "student" || !user.student) {
+    const error = new Error("Student portal account required.");
+    error.statusCode = 403;
+    throw error;
+  }
+  return user;
+};
 
 const getAssignedCourseIds = async (req) => {
   if (req.currentUser?.isSuperAdmin || req.user?.isSuperAdmin) {
@@ -88,6 +100,62 @@ const computeLifecycleStatus = (test, now = new Date()) => {
   if (endAt && now >= endAt) return "completed";
   if (startAt && now >= startAt) return "live";
   return "scheduled";
+};
+
+const getStudentBatchIds = async (studentId) => {
+  const enrollments = await Enrollment.find({
+    student: studentId,
+    status: { $in: ["Active", "Completed", "On Hold"] },
+  }).lean();
+  return [...new Set(enrollments.map((enrollment) => String(enrollment.batch)).filter(Boolean))];
+};
+
+const sanitizeQuestionForStudent = (question = {}, index = 0) => ({
+  _id: question._id,
+  order: question.order ?? index,
+  questionType: question.questionType,
+  questionText: question.questionText,
+  imageUrl: question.imageUrl,
+  marks: question.marks,
+  options: (question.options || []).map((option, optionIndex) => ({
+    _id: String(option._id || optionIndex),
+    text: option.text,
+  })),
+});
+
+const serializeStudentTest = (test, attempt = null, now = new Date()) => {
+  const plain = test.toObject ? test.toObject() : test;
+  const status = computeLifecycleStatus(plain, now);
+  const startAt = plain.schedule?.startAt ? new Date(plain.schedule.startAt) : null;
+  const endAt = plain.schedule?.endAt ? new Date(plain.schedule.endAt) : null;
+  const canStart = status === "live" && !plain.schedule?.isPaused && (!endAt || now < endAt);
+  return {
+    _id: plain._id,
+    title: plain.title,
+    description: plain.description,
+    instructions: plain.instructions,
+    topic: plain.topic,
+    course: plain.course,
+    teacher: plain.teacherUser,
+    totalMarks: plain.totalMarks,
+    passingMarks: plain.passingMarks,
+    passingPercentage: plain.passingPercentage,
+    schedule: plain.schedule,
+    status,
+    canStart,
+    attempt: attempt
+      ? {
+          _id: attempt._id,
+          status: attempt.status,
+          startedAt: attempt.startedAt,
+          expiresAt: attempt.expiresAt,
+          submittedAt: attempt.submittedAt,
+          score: attempt.score,
+          percentage: attempt.percentage,
+          passed: attempt.passed,
+        }
+      : null,
+  };
 };
 
 const normalizeQuestion = (question = {}, index = 0, defaults = {}) => {
@@ -358,6 +426,148 @@ export const previewTestAssignment = async (req, res) => {
   }
 };
 
+export const getMyStudentTests = async (req, res) => {
+  try {
+    const studentUser = await getStudentPortalUser(req);
+    const studentId = String(studentUser.student);
+    const batchIds = await getStudentBatchIds(studentId);
+    const now = new Date();
+
+    const tests = batchIds.length
+      ? await Test.find({
+          isDeleted: false,
+          status: { $nin: ["draft", "cancelled"] },
+          "assignedBatches.batch": { $in: batchIds },
+          "excludedStudents.student": { $ne: studentId },
+        })
+          .populate("course", "courseId courseName")
+          .populate("teacherUser", "name email profile")
+          .sort({ "schedule.startAt": 1 })
+      : [];
+
+    const attempts = await TestAttempt.find({
+      student: studentId,
+      test: { $in: tests.map((test) => test._id) },
+    }).lean();
+    const attemptByTest = new Map(attempts.map((attempt) => [String(attempt.test), attempt]));
+
+    res.status(200).json({
+      success: true,
+      data: tests.map((test) => serializeStudentTest(test, attemptByTest.get(String(test._id)), now)),
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
+};
+
+export const startMyStudentTest = async (req, res) => {
+  try {
+    const studentUser = await getStudentPortalUser(req);
+    const studentId = String(studentUser.student);
+    const batchIds = await getStudentBatchIds(studentId);
+    const test = await Test.findOne({
+      _id: req.params.id,
+      isDeleted: false,
+      status: { $nin: ["draft", "cancelled"] },
+      "assignedBatches.batch": { $in: batchIds },
+      "excludedStudents.student": { $ne: studentId },
+    })
+      .populate("course", "courseId courseName")
+      .populate("teacherUser", "name email profile");
+
+    if (!test) return res.status(404).json({ success: false, message: "Assigned test not found." });
+
+    const now = new Date();
+    const status = computeLifecycleStatus(test, now);
+    const startAt = test.schedule?.startAt ? new Date(test.schedule.startAt) : null;
+    const endAt = test.schedule?.endAt ? new Date(test.schedule.endAt) : null;
+    if (status !== "live" || test.schedule?.isPaused || (startAt && now < startAt) || (endAt && now >= endAt)) {
+      return res.status(400).json({ success: false, message: "Test paper is available only during the selected test time." });
+    }
+
+    const assignedBatchIds = (test.assignedBatches || []).map((item) => String(item.batch));
+    const studentBatch = batchIds.find((batchId) => assignedBatchIds.includes(String(batchId)));
+    let attempt = await TestAttempt.findOne({ test: test._id, student: studentId });
+
+    if (attempt && ["submitted", "auto_submitted", "graded"].includes(attempt.status)) {
+      return res.status(400).json({ success: false, message: "You have already submitted this test." });
+    }
+
+    if (!attempt) {
+      attempt = await TestAttempt.create({
+        test: test._id,
+        student: studentId,
+        batch: studentBatch,
+        startedAt: now,
+        expiresAt: endAt,
+        status: "in_progress",
+      });
+    } else {
+      attempt.status = "in_progress";
+      attempt.startedAt = attempt.startedAt || now;
+      attempt.expiresAt = attempt.expiresAt || endAt;
+      await attempt.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        test: {
+          ...serializeStudentTest(test, attempt, now),
+          questions: (test.questions || []).map((question, index) => sanitizeQuestionForStudent(question, index)),
+          settings: {
+            layout: test.settings?.layout || "all_questions",
+            allowBackNavigation: test.settings?.allowBackNavigation !== false,
+          },
+        },
+        attempt,
+      },
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
+};
+
+export const submitMyStudentTest = async (req, res) => {
+  try {
+    const studentUser = await getStudentPortalUser(req);
+    const studentId = String(studentUser.student);
+    const test = await Test.findOne({ _id: req.params.id, isDeleted: false });
+    if (!test) return res.status(404).json({ success: false, message: "Test not found." });
+
+    const now = new Date();
+    const attempt = await TestAttempt.findOne({ test: test._id, student: studentId });
+    if (!attempt) return res.status(404).json({ success: false, message: "Start the test before submitting." });
+    if (["submitted", "auto_submitted", "graded"].includes(attempt.status)) {
+      return res.status(400).json({ success: false, message: "This test is already submitted." });
+    }
+
+    const endAt = test.schedule?.endAt ? new Date(test.schedule.endAt) : null;
+    const grading = gradeTestAttempt(test.toObject(), req.body.answers || []);
+    attempt.answers = grading.answers;
+    attempt.score = grading.score;
+    attempt.percentage = grading.percentage;
+    attempt.passed = grading.passed;
+    attempt.submittedAt = now;
+    attempt.status = endAt && now > endAt ? "auto_submitted" : "submitted";
+    await attempt.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Test submitted successfully",
+      data: {
+        attemptId: attempt._id,
+        status: attempt.status,
+        score: attempt.score,
+        percentage: attempt.percentage,
+        passed: attempt.passed,
+      },
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
+};
+
 export const getTests = async (req, res) => {
   try {
     const { status, search, courseId } = req.query;
@@ -408,6 +618,41 @@ export const getTestById = async (req, res) => {
       return res.status(403).json({ success: false, message: "You can only view your own tests." });
     }
     res.status(200).json({ success: true, data: await attachAssignmentStats(test) });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ success: false, message: error.message });
+  }
+};
+
+export const getTestAttempts = async (req, res) => {
+  try {
+    const test = await Test.findOne({ _id: req.params.id, isDeleted: false }).lean();
+    if (!test) return res.status(404).json({ success: false, message: "Test not found" });
+    await assertCourseAccess(req, test.course);
+    if (!(req.currentUser?.isSuperAdmin || req.user?.isSuperAdmin) && String(test.teacherUser) !== String(getUserId(req))) {
+      return res.status(403).json({ success: false, message: "You can only view submissions for your own tests." });
+    }
+
+    const attempts = await TestAttempt.find({ test: test._id })
+      .populate("student", "studentName registrationNo mobileNumber emailAddress")
+      .populate("batch", "batchName batchCode")
+      .sort({ submittedAt: -1, updatedAt: -1 })
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      data: attempts.map((attempt) => ({
+        _id: attempt._id,
+        status: attempt.status,
+        student: attempt.student,
+        batch: attempt.batch,
+        startedAt: attempt.startedAt,
+        submittedAt: attempt.submittedAt,
+        score: attempt.score,
+        percentage: attempt.percentage,
+        passed: attempt.passed,
+        answers: attempt.answers,
+      })),
+    });
   } catch (error) {
     res.status(error.statusCode || 500).json({ success: false, message: error.message });
   }

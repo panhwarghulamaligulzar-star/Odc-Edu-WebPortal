@@ -46,6 +46,7 @@ import {
   deleteTest,
   duplicateTest,
   getTeacherPaperHeader,
+  getTestAttempts,
   getQuestionBank,
   getTests,
   getTestStudioOptions,
@@ -145,6 +146,8 @@ const TestStudio = ({ setupMode = false }) => {
   const [assignmentPreview, setAssignmentPreview] = useState(null);
   const [filters, setFilters] = useState({ status: "all", search: "" });
   const [detailTest, setDetailTest] = useState(null);
+  const [detailAttempts, setDetailAttempts] = useState([]);
+  const [detailAttemptsLoading, setDetailAttemptsLoading] = useState(false);
   const [teacherPaperHeader, setTeacherPaperHeader] = useState(defaultPaperHeader);
   const [nowTick, setNowTick] = useState(dayjs());
   const [form] = Form.useForm();
@@ -209,6 +212,25 @@ const TestStudio = ({ setupMode = false }) => {
     };
     loadBank();
   }, [selectedCourse]);
+
+  useEffect(() => {
+    const loadAttempts = async () => {
+      if (!detailTest?._id) {
+        setDetailAttempts([]);
+        return;
+      }
+      setDetailAttemptsLoading(true);
+      try {
+        const response = await getTestAttempts(detailTest._id);
+        setDetailAttempts(response.data || []);
+      } catch (error) {
+        message.error(error.message || "Failed to load submitted papers");
+      } finally {
+        setDetailAttemptsLoading(false);
+      }
+    };
+    loadAttempts();
+  }, [detailTest?._id]);
 
   const courses = options;
   const allAssignedBatches = useMemo(
@@ -1325,6 +1347,35 @@ const TestStudio = ({ setupMode = false }) => {
               <div className="flex flex-wrap gap-2">
                 {(detailTest.assignedBatches || []).map((item) => <Tag key={item.batch?._id || item.batch}>{item.batch?.batchName || item.batch}</Tag>)}
               </div>
+            </Card>
+            <Card title="Submitted Papers">
+              <Table
+                rowKey="_id"
+                loading={detailAttemptsLoading}
+                dataSource={detailAttempts}
+                pagination={{ pageSize: 5 }}
+                scroll={{ x: "max-content" }}
+                columns={[
+                  {
+                    title: "Student",
+                    render: (_, attempt) => (
+                      <div>
+                        <div className="font-semibold text-primary">{attempt.student?.studentName || "Student"}</div>
+                        <div className="text-xs text-slate-500">{attempt.student?.registrationNo || "No registration"}</div>
+                      </div>
+                    ),
+                  },
+                  { title: "Batch", render: (_, attempt) => attempt.batch?.batchName || "N/A" },
+                  {
+                    title: "Status",
+                    dataIndex: "status",
+                    render: (value) => <Tag color={["submitted", "auto_submitted", "graded"].includes(value) ? "green" : "blue"}>{value}</Tag>,
+                  },
+                  { title: "Score", render: (_, attempt) => `${attempt.score || 0} (${attempt.percentage || 0}%)` },
+                  { title: "Result", render: (_, attempt) => <Tag color={attempt.passed ? "green" : "red"}>{attempt.passed ? "Passed" : "Not Passed"}</Tag> },
+                  { title: "Submitted", render: (_, attempt) => attempt.submittedAt ? dayjs(attempt.submittedAt).format("DD MMM YYYY, hh:mm A") : "Not submitted" },
+                ]}
+              />
             </Card>
           </div>
         ) : null}
