@@ -3,11 +3,10 @@ import BatchSchema from "../modules/batchModule.js";
 import AttendanceSchema from "../modules/attendanceModule.js";
 import EnrollmentSchema from "../modules/enrollmentModule.js";
 import TeacherSchema from "../modules/teacherModule.js";
-import dayjs from "dayjs";
 
 // ─── Helper: auto-mark attendance as Holiday for all affected batch members ───
 // Used when an academy holiday is created. Expands multi-day ranges.
-const autoMarkAcademyHolidayAttendance = async (holiday, userId) => {
+const autoMarkAcademyHolidayAttendance = async (holiday, userId, attendanceTypes) => {
   let batchIds = (holiday.affectedBatches || []).map((id) => id.toString());
   if (batchIds.length === 0) {
     const allBatches = await BatchSchema.find({}, "_id").lean();
@@ -32,10 +31,12 @@ const autoMarkAcademyHolidayAttendance = async (holiday, userId) => {
     const batch = await BatchSchema.findById(batchId, "course").lean();
     if (!batch) continue;
 
-    const enrollments = await EnrollmentSchema.find(
-      { batch: batchId, status: { $in: ["Active", "On Hold"] } },
-      "student"
-    ).lean();
+    const enrollments = attendanceTypes.includes("student")
+      ? await EnrollmentSchema.find(
+          { batch: batchId, status: { $in: ["Active", "On Hold"] } },
+          "student",
+        ).lean()
+      : [];
 
     for (const date of dates) {
       for (const en of enrollments) {
@@ -56,7 +57,7 @@ const autoMarkAcademyHolidayAttendance = async (holiday, userId) => {
         });
       }
 
-      if (batch.course) {
+      if (attendanceTypes.includes("teacher") && batch.course) {
         const teachers = await TeacherSchema.find({ courseId: batch.course }, "_id").lean();
         for (const t of teachers) {
           ops.push({
@@ -84,7 +85,7 @@ const autoMarkAcademyHolidayAttendance = async (holiday, userId) => {
   return ops.length;
 };
 
-const restoreAttendanceAfterHolidayRemoval = async (holiday, userId) => {
+const restoreAttendanceAfterHolidayRemoval = async (holiday, userId, attendanceTypes) => {
   const batchIds = await getAffectedBatchIds(holiday);
   const dates = getHolidayDateRange(holiday);
   const ops = [];
@@ -93,12 +94,14 @@ const restoreAttendanceAfterHolidayRemoval = async (holiday, userId) => {
     const batch = await BatchSchema.findById(batchId, "course").lean();
     if (!batch) continue;
 
-    const enrollments = await EnrollmentSchema.find(
-      { batch: batchId, status: { $in: ["Active", "On Hold"] } },
-      "student"
-    ).lean();
+    const enrollments = attendanceTypes.includes("student")
+      ? await EnrollmentSchema.find(
+          { batch: batchId, status: { $in: ["Active", "On Hold"] } },
+          "student",
+        ).lean()
+      : [];
 
-    const teachers = batch.course
+    const teachers = attendanceTypes.includes("teacher") && batch.course
       ? await TeacherSchema.find({ courseId: batch.course }, "_id").lean()
       : [];
 
@@ -262,7 +265,14 @@ export const createHoliday = async (req, res) => {
     let autoMarked = 0;
     if (type === "academy") {
       try {
-        autoMarked = await autoMarkAcademyHolidayAttendance(holiday, req.user?._id);
+        const attendanceTypes = ["student", "teacher"].filter(
+          (attendanceType) => req.permissions?.[`${attendanceType}Attendance`] !== false,
+        );
+        autoMarked = await autoMarkAcademyHolidayAttendance(
+          holiday,
+          req.user?._id,
+          attendanceTypes,
+        );
       } catch (markErr) {
         console.error("autoMarkAcademyHolidayAttendance error:", markErr);
         // Don't fail the request — holiday is created, just log the error
@@ -396,7 +406,14 @@ export const deleteHoliday = async (req, res) => {
 
     let restoredAttendance = 0;
     if (holiday.type === "academy") {
-      restoredAttendance = await restoreAttendanceAfterHolidayRemoval(holiday, req.user?._id);
+      const attendanceTypes = ["student", "teacher"].filter(
+        (attendanceType) => req.permissions?.[`${attendanceType}Attendance`] !== false,
+      );
+      restoredAttendance = await restoreAttendanceAfterHolidayRemoval(
+        holiday,
+        req.user?._id,
+        attendanceTypes,
+      );
     }
 
     holiday.isActive = false;

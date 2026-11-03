@@ -214,6 +214,16 @@ const Teachers = () => {
       if (response.success) {
         setSelectedCompensationMonth(resolvedMonthValue);
         setTeacherCompensation(response.data);
+        const monthSalaryConfig = response.data?.salaryConfig;
+        if (monthSalaryConfig?.salaryType) {
+          setSalaryModeDraft(monthSalaryConfig.salaryType);
+        }
+        if (monthSalaryConfig?.salaryType === "fixed") {
+          const salaryValue = Number.parseFloat(
+            String(monthSalaryConfig.monthlySalary ?? "").replace(/,/g, ""),
+          );
+          setFixedSalaryDraft(Number.isFinite(salaryValue) ? salaryValue : null);
+        }
         setSalaryConfigDraft({
           salaryPerStudent: response.data?.salaryConfig?.salaryPerStudent ?? null,
           attendanceThreshold:
@@ -1120,6 +1130,30 @@ const Teachers = () => {
           {salaryModePicker}
           <Card size="small" title="Fixed Monthly Salary">
             <div className="max-w-xl space-y-4">
+              <div>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
+                  Salary Month
+                </div>
+                <DatePicker
+                  size="large"
+                  className="w-full"
+                  picker="month"
+                  format="MMMM YYYY"
+                  allowClear={false}
+                  placeholder="Select salary month"
+                  value={
+                    selectedCompensationMonth
+                      ? dayjs(`${selectedCompensationMonth}-01`)
+                      : null
+                  }
+                  onChange={(value) => {
+                    if (value) {
+                      setSelectedCompensationMonth(value.format("YYYY-MM"));
+                    }
+                  }}
+                  disabled={!permissions.update}
+                />
+              </div>
               <div>
                 <div className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
                   Monthly Salary (PKR)

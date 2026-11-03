@@ -9,7 +9,10 @@ const actionSchema = new mongoose.Schema(
   RBAC_ACTIONS.reduce((acc, action) => {
     acc[action] = { type: Boolean, default: false };
     return acc;
-  }, {}),
+  }, {
+    studentAttendance: { type: Boolean, default: undefined },
+    teacherAttendance: { type: Boolean, default: undefined },
+  }),
   { _id: false },
 );
 

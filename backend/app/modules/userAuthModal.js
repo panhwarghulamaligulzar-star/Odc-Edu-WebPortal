@@ -10,6 +10,8 @@ const permissionActionSchema = new mongoose.Schema(
     export: { type: Boolean, default: false },
     print: { type: Boolean, default: false },
     approve: { type: Boolean, default: false },
+    studentAttendance: { type: Boolean, default: undefined },
+    teacherAttendance: { type: Boolean, default: undefined },
   },
   { _id: false },
 );

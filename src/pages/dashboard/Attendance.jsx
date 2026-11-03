@@ -29,6 +29,7 @@ import {
 } from "../../services/attendanceService";
 import { createHoliday, deleteHoliday, getHolidayDates, getHolidays } from "../../services/holidayService";
 import MonthlyAttendanceReport from "./MonthlyAttendanceReport";
+import useZustandStore from "../../stores/zustandStore";
 
 // ─── PDF Design Constants (matches Students.jsx) ──────────────────────────────
 const PDF_COLORS = {
@@ -508,10 +509,11 @@ const DOT_COLOR = {
   Holiday:   "#f97316",
 };
 
-function MarkAttendancePanel({ batches }) {
+function MarkAttendancePanel({ batches, attendanceTypes }) {
+  const defaultAttendanceType = attendanceTypes.includes("student") ? "student" : "teacher";
   const [selectedBatch, setSelectedBatch] = useState(null);
   const [selectedDate, setSelectedDate] = useState(dayjs());
-  const [activeTab, setActiveTab] = useState("student");
+  const [activeTab, setActiveTab] = useState(defaultAttendanceType);
   const [members, setMembers] = useState({ students: [], teachers: [], batch: null });
   const [qrRoster, setQrRoster] = useState([]);
   const [qrRosterLoading, setQrRosterLoading] = useState(false);
@@ -531,7 +533,7 @@ function MarkAttendancePanel({ batches }) {
   const [holidayReason, setHolidayReason] = useState("");
   const [holidaySaving, setHolidaySaving] = useState(false);
   // ── Person filter ────────────────────────────────────────────────────────────
-  const [personTypeFilter, setPersonTypeFilter] = useState("all"); // "all"|"student"|"teacher"
+  const [personTypeFilter, setPersonTypeFilter] = useState(attendanceTypes.length > 1 ? "all" : defaultAttendanceType);
   const [selectedPersonId, setSelectedPersonId] = useState(null);
   const [personCalendarData, setPersonCalendarData] = useState({}); // "YYYY-MM-DD" → status string
   const selectedBatchDetails = useMemo(
@@ -640,10 +642,20 @@ function MarkAttendancePanel({ batches }) {
               attendanceKey: `${batchDetails?._id || batch._id}:${student._id}`,
             }));
           });
+          const teachers = responses.flatMap(({ batch, data }) => {
+            const batchDetails = data.batch || batch;
+            return (data.teachers || []).map((teacher) => ({
+              ...teacher,
+              attendanceBatchId: batchDetails?._id || batch._id,
+              attendanceBatchName: batchDetails?.batchName || batch.batchName,
+              attendanceBatchLabel: getBatchOptionLabel(batchDetails),
+              attendanceKey: `${batchDetails?._id || batch._id}:${teacher._id}`,
+            }));
+          });
 
-          setMembers({ students, teachers: [], batch: null });
-          setActiveTab("student");
-          setPersonTypeFilter("student");
+          setMembers({ students, teachers, batch: null });
+          setActiveTab(defaultAttendanceType);
+          setPersonTypeFilter(attendanceTypes.length > 1 ? "all" : defaultAttendanceType);
         })
         .catch(() => message.error("Failed to load batch members"))
         .finally(() => setLoading(false));
@@ -678,13 +690,21 @@ function MarkAttendancePanel({ batches }) {
       })
       .catch(() => message.error("Failed to load batch members"))
       .finally(() => setLoading(false));
-  }, [batches, selectedBatch]);
+  }, [attendanceTypes, batches, defaultAttendanceType, selectedBatch]);
 
   useEffect(() => {
-    if (!members.teachers.length && activeTab !== "student") {
-      setActiveTab("student");
+    if (!attendanceTypes.includes(activeTab)) {
+      setActiveTab(defaultAttendanceType);
     }
-  }, [activeTab, members.teachers.length]);
+    if (attendanceTypes.length === 1 && personTypeFilter !== defaultAttendanceType) {
+      setPersonTypeFilter(defaultAttendanceType);
+    } else if (attendanceTypes.length > 1 && !attendanceTypes.includes(personTypeFilter)) {
+      setPersonTypeFilter("all");
+    }
+    if (!attendanceTypes.includes("student") && attendanceMode !== "manual") {
+      setAttendanceMode("manual");
+    }
+  }, [activeTab, attendanceMode, attendanceTypes, defaultAttendanceType, personTypeFilter]);
 
   useEffect(() => {
     if (!selectedBatchDetails) return;
@@ -2646,8 +2666,10 @@ function MarkAttendancePanel({ batches }) {
             onChange={setAttendanceMode}
             options={[
               { label: "Manual", value: "manual" },
-              { label: "QR Scan", value: "qr" },
-              { label: "Face Scan", value: "face" },
+              ...(attendanceTypes.includes("student") ? [
+                { label: "QR Scan", value: "qr" },
+                { label: "Face Scan", value: "face" },
+              ] : []),
             ]}
           />
         </div>
@@ -2680,9 +2702,9 @@ function MarkAttendancePanel({ batches }) {
                 value={personTypeFilter}
                 onChange={handlePersonTypeChange}
                 options={[
-                  { label: "All", value: "all" },
-                  { label: "Students", value: "student" },
-                  { label: "Teachers", value: "teacher" },
+                  ...(attendanceTypes.length > 1 ? [{ label: "All", value: "all" }] : []),
+                  ...(attendanceTypes.includes("student") ? [{ label: "Students", value: "student" }] : []),
+                  ...(attendanceTypes.includes("teacher") ? [{ label: "Teachers", value: "teacher" }] : []),
                 ]}
               />
             </div>
@@ -2743,7 +2765,7 @@ function MarkAttendancePanel({ batches }) {
             </div>
             <p className="text-sm text-gray-600">
               {isAcademyHoliday
-                ? `Attendance is closed for this batch because "${selectedHoliday?.name}" is marked as an academy holiday. All students and teachers are shown as Holiday.`
+                ? `Attendance is closed for this batch because "${selectedHoliday?.name}" is marked as an academy holiday.`
                 : isGovernmentHoliday
                   ? `This date is a government holiday${selectedHoliday?.name ? `: ${selectedHoliday.name}` : ""}, but attendance is still allowed because the academy can remain open.`
                   : isScheduledWorkingDay
@@ -2886,7 +2908,7 @@ function MarkAttendancePanel({ batches }) {
               </Button>
             }
             items={[
-              {
+              ...(attendanceTypes.includes("student") ? [{
                 key: "student",
                 label: <span className="flex items-center gap-1">Students <Badge count={members.students.length} showZero color="#3b82f6" /></span>,
                 children: (
@@ -2907,8 +2929,8 @@ function MarkAttendancePanel({ batches }) {
                       pagination={false} size="middle" locale={{ emptyText: "No students enrolled in this batch" }} />
                   </Spin>
                 ),
-              },
-              ...(members.teachers.length
+              }] : []),
+              ...(attendanceTypes.includes("teacher")
                 ? [{
                     key: "teacher",
                     label: <span className="flex items-center gap-1">Teachers <Badge count={members.teachers.length} showZero color="#8b5cf6" /></span>,
@@ -3932,11 +3954,12 @@ const exportSinglePersonPDF = async ({ personSummary, personRecords, dateRange, 
   }
 };
 
-function HistoryPanel({ batches }) {
+function HistoryPanel({ batches, attendanceTypes }) {
+  const defaultAttendanceType = attendanceTypes.includes("student") ? "student" : "teacher";
   const [selectedBatch, setSelectedBatch] = useState(null);
   const [batchName, setBatchName]         = useState("");
   const [dateRange, setDateRange] = useState([dayjs().startOf("month"), dayjs()]);
-  const [personType, setPersonType] = useState("all");
+  const [personType, setPersonType] = useState(attendanceTypes.length > 1 ? "all" : defaultAttendanceType);
   const [historyData, setHistoryData] = useState(null);
   const [loading, setLoading]     = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -3950,6 +3973,10 @@ function HistoryPanel({ batches }) {
   const [batchMembers, setBatchMembers] = useState({ students: [], teachers: [] });
   const [personPdfLoading, setPersonPdfLoading] = useState(false);
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    setPersonType(attendanceTypes.length > 1 ? "all" : defaultAttendanceType);
+  }, [attendanceTypes, defaultAttendanceType]);
 
   // Load batch members when batch changes
   useEffect(() => {
@@ -4142,9 +4169,9 @@ function HistoryPanel({ batches }) {
           <label className="text-xs font-semibold text-gray-600">Person Type</label>
           <Segmented value={personType} onChange={(v) => { setPersonType(v); setSelectedPersonSearch(null); setHistoryData(null); }}
             options={[
-              { label: "All", value: "all" },
-              { label: "Students", value: "student" },
-              { label: "Teachers", value: "teacher" },
+              ...(attendanceTypes.length > 1 ? [{ label: "All", value: "all" }] : []),
+              ...(attendanceTypes.includes("student") ? [{ label: "Students", value: "student" }] : []),
+              ...(attendanceTypes.includes("teacher") ? [{ label: "Teachers", value: "teacher" }] : []),
             ]} />
         </div>
         <div className="flex flex-col gap-1 min-w-[220px]">
@@ -4392,6 +4419,16 @@ function HistoryPanel({ batches }) {
 // MAIN PAGE
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function Attendance() {
+  const permissions = useZustandStore((state) => state.permissions);
+  const isSuperAdmin = useZustandStore((state) => state.isSuperAdmin);
+  const attendanceTypes = useMemo(
+    () => isSuperAdmin
+      ? ["student", "teacher"]
+      : ["student", "teacher"].filter((type) =>
+          permissions?.attendance?.[`${type}Attendance`] !== false
+        ),
+    [isSuperAdmin, permissions],
+  );
   const [batches, setBatches] = useState([]);
   const [batchesLoaded, setBatchesLoaded] = useState(false);
   const [mainTab, setMainTab] = useState("mark");
@@ -4417,6 +4454,11 @@ export default function Attendance() {
           No attendance batches are assigned to this account. Ask a super admin to assign batches in the account settings.
         </div>
       ) : null}
+      {!attendanceTypes.length ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Student and teacher attendance are both disabled for this account. Ask a super admin to update the Attendance permissions.
+        </div>
+      ) : null}
 
       {/* Main tab switcher */}
       <Tabs activeKey={mainTab} onChange={setMainTab}
@@ -4425,17 +4467,17 @@ export default function Attendance() {
           {
             key: "mark",
             label: <span className="flex items-center gap-2"><MdFactCheck size={18} />Mark Attendance</span>,
-            children: <MarkAttendancePanel batches={batches} />,
+            children: <MarkAttendancePanel batches={batches} attendanceTypes={attendanceTypes} />,
           },
           {
             key: "history",
             label: <span className="flex items-center gap-2"><MdHistory size={18} />Attendance History</span>,
-            children: <HistoryPanel batches={batches} />,
+            children: <HistoryPanel batches={batches} attendanceTypes={attendanceTypes} />,
           },
           {
             key: "monthly",
             label: <span className="flex items-center gap-2"><MdDownload size={18} />Monthly Report</span>,
-            children: <MonthlyAttendanceReport batches={batches} />,
+            children: <MonthlyAttendanceReport batches={batches} attendanceTypes={attendanceTypes} />,
           },
         ]}
       />

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   Select, DatePicker, Button, Spin, Tabs, Tooltip, message, Tag,
 } from "antd";
@@ -82,12 +82,20 @@ const drawHeader = (doc, logo, subtitle = "") => {
 };
 
 // ── MonthlyAttendanceReport ───────────────────────────────────────────────────
-export default function MonthlyAttendanceReport({ batches }) {
+export default function MonthlyAttendanceReport({ batches, attendanceTypes }) {
+  const defaultAttendanceType = attendanceTypes.includes("student") ? "student" : "teacher";
   const [selectedBatch, setSelectedBatch] = useState(null);
   const [selectedMonth, setSelectedMonth] = useState(dayjs());
-  const [personType, setPersonType]       = useState("student");
+  const [personType, setPersonType]       = useState(defaultAttendanceType);
   const [reportData, setReportData]       = useState(null);
   const [loading, setLoading]             = useState(false);
+
+  useEffect(() => {
+    if (!attendanceTypes.includes(personType)) {
+      setPersonType(defaultAttendanceType);
+      setReportData(null);
+    }
+  }, [attendanceTypes, defaultAttendanceType, personType]);
 
   // ── Build report ──────────────────────────────────────────────────────────
   const generateReport = useCallback(async () => {
@@ -316,8 +324,8 @@ export default function MonthlyAttendanceReport({ batches }) {
             value={personType}
             onChange={(v) => { setPersonType(v); setReportData(null); }}
             options={[
-              { value: "student", label: "Students" },
-              { value: "teacher", label: "Teachers" },
+              ...(attendanceTypes.includes("student") ? [{ value: "student", label: "Students" }] : []),
+              ...(attendanceTypes.includes("teacher") ? [{ value: "teacher", label: "Teachers" }] : []),
             ]}
             style={{ width: 130 }}
           />
