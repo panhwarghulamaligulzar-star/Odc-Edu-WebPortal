@@ -132,6 +132,17 @@ const normalizePermissionsState = (permissions = {}) => {
       };
     });
 
+    const attendanceActions =
+      permissions.find((item) => item?.module === "attendance")?.actions || {};
+    if (attendanceActions.view === true) {
+      if (typeof attendanceActions.studentAttendance !== "boolean") {
+        base.attendance.studentAttendance = true;
+      }
+      if (typeof attendanceActions.teacherAttendance !== "boolean") {
+        base.attendance.teacherAttendance = true;
+      }
+    }
+
     return base;
   }
 
@@ -139,15 +150,7 @@ const normalizePermissionsState = (permissions = {}) => {
 };
 
 const buildPermissionsFromRole = (role) => {
-  const base = createPermissionTemplate();
-
-  role?.permissions?.forEach((item) => {
-    base[item.module] = {
-      ...base[item.module],
-      ...(item.actions || {}),
-    };
-  });
-  return base;
+  return normalizePermissionsState(role?.permissions || []);
 };
 
 const toRolePayload = (permissions) =>
@@ -227,6 +230,14 @@ const getBatchIdsForCourseIds = (batches, courseIds = []) => {
     .map((batch) => String(batch._id));
 };
 
+const areAllBatchesSelected = (batches, selectedBatchIds = []) => {
+  const selectedBatchIdSet = new Set(selectedBatchIds.map(String));
+  return (
+    batches.length > 0 &&
+    batches.every((batch) => selectedBatchIdSet.has(String(batch._id)))
+  );
+};
+
 const shouldShowUserInTable = (user, roles) =>
   user?.isSuperAdmin === true ||
   isEmployeeAccount(user) ||
@@ -278,6 +289,10 @@ const PermissionModuleCard = ({ moduleKey, permissions, setPermissions }) => {
       acc[action] = value;
       return acc;
     }, {});
+    if (moduleKey === "attendance") {
+      nextActions.studentAttendance = value;
+      nextActions.teacherAttendance = value;
+    }
 
     updateModule(nextActions);
   };
@@ -307,6 +322,10 @@ const PermissionModuleCard = ({ moduleKey, permissions, setPermissions }) => {
                   }
                 : RBAC_ACTIONS.reduce((acc, action) => {
                     acc[action] = false;
+                    if (moduleKey === "attendance") {
+                      acc.studentAttendance = false;
+                      acc.teacherAttendance = false;
+                    }
                     return acc;
                   }, {}),
             )
@@ -353,6 +372,9 @@ const PermissionModuleCard = ({ moduleKey, permissions, setPermissions }) => {
                         [action]: checked,
                         view: action === "view" ? checked : currentActions.view || checked,
                       }),
+                  ...(moduleKey === "attendance" && action === "view" && !checked
+                    ? { studentAttendance: false, teacherAttendance: false }
+                    : {}),
                 });
               }}
             />
@@ -360,6 +382,40 @@ const PermissionModuleCard = ({ moduleKey, permissions, setPermissions }) => {
           </label>
         ))}
       </div>
+      {moduleKey === "attendance" ? (
+        <div className="mt-4 border-t border-slate-200 pt-3">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Attendance Types
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              ["studentAttendance", "Student Attendance"],
+              ["teacherAttendance", "Teacher Attendance"],
+            ].map(([key, label]) => (
+              <label
+                key={key}
+                className={`flex min-h-[42px] cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${
+                  currentActions[key]
+                    ? "border-primary bg-slate-50 text-primary"
+                    : "border-slate-200 bg-white text-slate-600"
+                }`}
+              >
+                <Checkbox
+                  checked={currentActions[key] === true}
+                  onChange={(event) => {
+                    if (!isEnabled) {
+                      message.warning("First enable the Attendance module, then choose attendance types.");
+                      return;
+                    }
+                    updateModule({ [key]: event.target.checked });
+                  }}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 };
@@ -400,6 +456,12 @@ const SuperAdmin = () => {
   const [userForm] = Form.useForm();
   const selectedAccountType = Form.useWatch("accountType", userForm) || "employee";
   const selectedEmployeeCourseIds = Form.useWatch("courseIds", userForm);
+  const selectedAttendanceBatchIds =
+    Form.useWatch("attendanceBatchIds", userForm) || [];
+  const selectAllBatches = areAllBatchesSelected(
+    batches,
+    selectedAttendanceBatchIds,
+  );
 
   const currentSection = ["overview", "roles", "permissions", "finance"].includes(
     searchParams.get("section"),
@@ -556,27 +618,6 @@ const SuperAdmin = () => {
     }
   }, [selectedUser]);
 
-  useEffect(() => {
-    if (
-      userModalOpen &&
-      selectedAccountType === "employee" &&
-      batchesLoaded &&
-      selectedEmployeeCourseIds?.length
-    ) {
-      userForm.setFieldValue(
-        "attendanceBatchIds",
-        getBatchIdsForCourseIds(batches, selectedEmployeeCourseIds),
-      );
-    }
-  }, [
-    batches,
-    batchesLoaded,
-    selectedAccountType,
-    selectedEmployeeCourseIds,
-    userForm,
-    userModalOpen,
-  ]);
-
   const setSection = (sectionKey) => {
     setSearchParams({ section: sectionKey });
   };
@@ -605,6 +646,9 @@ const SuperAdmin = () => {
     const employee = isEmployeeAccount(user)
       ? employeeRecords.find((record) => record._id === user._id)
       : null;
+    const employeeCourseIds = employee?.courseIds || [];
+    const attendanceBatchIds =
+      employee?.attendanceBatchIds || user.attendanceBatchIds || [];
     userForm.setFieldsValue({
       name: user.name,
       email: user.email,
@@ -615,8 +659,8 @@ const SuperAdmin = () => {
       phone: employee?.phone || user.details?.phone || "",
       designation: employee?.designation || user.details?.job || "",
       status: user.isActive ? "active" : "inactive",
-      courseIds: employee?.courseIds || [],
-      attendanceBatchIds: employee?.attendanceBatchIds || user.attendanceBatchIds || [],
+      courseIds: employeeCourseIds,
+      attendanceBatchIds,
       profile: [],
       password: "",
     });
@@ -1448,10 +1492,10 @@ const SuperAdmin = () => {
         </div>
       </div>
 
-      <div className="flex flex-col gap-6 xl:flex-row xl:items-start">
+      <div className="flex flex-col gap-6">
         <Card
           title="Permission Roles"
-          className="rounded-2xl shadow-sm xl:w-[42%] xl:min-w-[560px] xl:max-w-[680px]"
+          className="w-full rounded-2xl shadow-sm"
           bodyStyle={{ paddingBottom: 8 }}
         >
           <Table
@@ -1900,7 +1944,9 @@ const SuperAdmin = () => {
                               className="!h-auto !p-0"
                               onClick={() => {
                                 userForm.setFieldValue("courseIds", []);
-                                userForm.setFieldValue("attendanceBatchIds", []);
+                                if (!selectAllBatches) {
+                                  userForm.setFieldValue("attendanceBatchIds", []);
+                                }
                               }}
                             >
                               Clear
@@ -1936,14 +1982,45 @@ const SuperAdmin = () => {
                         value: course._id,
                         label: `${course.courseName} (${course.courseId})`,
                       }))}
+                      dropdownRender={(menu) => (
+                        <>
+                          <div className="px-3 py-2">
+                            <Checkbox
+                              checked={selectAllBatches}
+                              disabled={!batches.length}
+                              onChange={(event) => {
+                                const shouldSelectAll = event.target.checked;
+                                userForm.setFieldValue(
+                                  "attendanceBatchIds",
+                                  shouldSelectAll
+                                    ? batches.map((batch) => String(batch._id))
+                                    : [],
+                                );
+                              }}
+                            >
+                              Select all batches
+                            </Checkbox>
+                          </div>
+                          <div className="border-t border-slate-200">{menu}</div>
+                        </>
+                      )}
                       placeholder="Select courses for this employee"
                       className="form-input"
-                      onChange={(courseIds) =>
+                      onChange={(courseIds) => {
+                        const selectedBatchIds = new Set(
+                          getBatchIdsForCourseIds(batches, courseIds || []),
+                        );
+                        const currentBatchIds =
+                          userForm.getFieldValue("attendanceBatchIds") || [];
                         userForm.setFieldValue(
                           "attendanceBatchIds",
-                          getBatchIdsForCourseIds(batches, courseIds || []),
-                        )
-                      }
+                          selectAllBatches
+                            ? batches.map((batch) => String(batch._id))
+                            : currentBatchIds.filter((batchId) =>
+                                selectedBatchIds.has(String(batchId)),
+                              ),
+                        );
+                      }}
                     />
                   </Form.Item>
                   <Form.Item name="profile" label="Profile Picture">
@@ -1976,7 +2053,7 @@ const SuperAdmin = () => {
                   <div className="flex w-full items-center justify-between gap-3">
                     <span>Attendance Batches</span>
                     {selectedAccountType === "employee" && selectedEmployeeCourseIds?.length ? (
-                      <span className="text-xs font-normal text-slate-500">Auto-assigned from courses</span>
+                        <span className="text-xs font-normal text-slate-500">Based on your selection above</span>
                     ) : (
                       <Button
                         type="link"
@@ -1997,7 +2074,9 @@ const SuperAdmin = () => {
                 }
                 extra={
                   selectedAccountType === "employee" && selectedEmployeeCourseIds?.length
-                    ? "All batches belonging to the selected courses are automatically assigned for attendance."
+                    ? selectAllBatches
+                      ? "All batches are selected for attendance. Uncheck the option above to choose specific batches."
+                      : "Choose specific attendance batches below, or select all batches using the option above."
                     : "Attendance access is limited to students in these batches. Clear the selection to disable attendance batch access."
                 }
               >
@@ -2006,10 +2085,6 @@ const SuperAdmin = () => {
                     mode="multiple"
                     allowClear
                     showSearch
-                    disabled={
-                      selectedAccountType === "employee" &&
-                      Boolean(selectedEmployeeCourseIds?.length)
-                    }
                     optionFilterProp="label"
                     maxTagCount="responsive"
                     options={batches.map((batch) => ({

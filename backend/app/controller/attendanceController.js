@@ -64,6 +64,21 @@ const getAttendanceBatchIdsForRequest = (req) => {
   return assignedBatchIds === null ? null : new Set(assignedBatchIds);
 };
 
+const getAllowedAttendanceTypes = (req) =>
+  ["student", "teacher"].filter(
+    (type) => req.permissions?.[`${type}Attendance`] !== false,
+  );
+
+const applyAttendanceTypeFilter = (req, filter) => {
+  const allowedTypes = getAllowedAttendanceTypes(req);
+  filter.personType =
+    allowedTypes.length === 1 ? allowedTypes[0] : { $in: allowedTypes };
+  return filter;
+};
+
+const hasAttendanceType = (req, type) =>
+  getAllowedAttendanceTypes(req).includes(type);
+
 const getAttendanceBatches = async (req, res) => {
   try {
     const assignedBatchIds = getAttendanceBatchIdsForRequest(req);
@@ -148,6 +163,9 @@ const findQrEligibleStudentEnrollments = async ({ studentId, studentCode, attend
 
 const markQrAttendance = async (req, res) => {
   try {
+    if (!hasAttendanceType(req, "student")) {
+      return res.status(403).json({ success: false, message: "Student attendance is not enabled for this account." });
+    }
     const { date, studentId, studentCode } = req.body || {};
 
     if (!date || (!studentId && !studentCode)) {
@@ -288,6 +306,9 @@ const markQrAttendance = async (req, res) => {
 
 const enrollFaceAttendance = async (req, res) => {
   try {
+    if (!hasAttendanceType(req, "student")) {
+      return res.status(403).json({ success: false, message: "Student attendance is not enabled for this account." });
+    }
     const { studentId, faceDescriptors } = req.body || {};
     const normalizedDescriptors = normalizeFaceDescriptors(faceDescriptors);
     if (!studentId || !normalizedDescriptors) {
@@ -444,6 +465,9 @@ const enrollFaceAttendance = async (req, res) => {
 
 const markFaceAttendance = async (req, res) => {
   try {
+    if (!hasAttendanceType(req, "student")) {
+      return res.status(403).json({ success: false, message: "Student attendance is not enabled for this account." });
+    }
     const { batchId, date, faceDescriptor } = req.body || {};
     const [normalizedDescriptor] =
       normalizeFaceDescriptors([faceDescriptor]) || [];
@@ -723,16 +747,18 @@ const bulkMarkAttendance = async (req, res) => {
       return res.status(404).json({ success: false, message: "Batch not found" });
     }
 
-    const assignedBatchIds = getAttendanceBatchIdsForRequest(req);
-    if (assignedBatchIds !== null) {
-      if (records.some((record) => record.personType !== "student")) {
-        return res.status(403).json({
-          success: false,
-          message: "Assigned attendance accounts can mark student attendance only.",
-        });
-      }
+    if (records.some((record) => !["student", "teacher"].includes(record.personType))) {
+      return res.status(400).json({ success: false, message: "Each record must have a valid personType." });
+    }
+    if (records.some((record) => !hasAttendanceType(req, record.personType))) {
+      return res.status(403).json({ success: false, message: "This account is not permitted to mark one or more attendance types." });
+    }
 
-      const studentIds = [...new Set(records.map((record) => String(record.personId || "")))];
+    const studentIds = [...new Set(
+      records.filter((record) => record.personType === "student")
+        .map((record) => String(record.personId || "")),
+    )];
+    if (studentIds.length) {
       const enrollments = await EnrollmentSchema.find({
         batch: batchId,
         student: { $in: studentIds },
@@ -744,7 +770,25 @@ const bulkMarkAttendance = async (req, res) => {
       if (studentIds.some((studentId) => !enrolledStudentIds.has(studentId))) {
         return res.status(400).json({
           success: false,
-          message: "Attendance can only be marked for students enrolled in this assigned batch.",
+          message: "Attendance can only be marked for students enrolled in this batch.",
+        });
+      }
+    }
+
+    const teacherIds = [...new Set(
+      records.filter((record) => record.personType === "teacher")
+        .map((record) => String(record.personId || "")),
+    )];
+    if (teacherIds.length) {
+      const courseId = batch.course?._id || batch.course;
+      const teachers = await TeacherSchema.find({ _id: { $in: teacherIds }, courseId })
+        .select("_id")
+        .lean();
+      const assignedTeacherIds = new Set(teachers.map((teacher) => String(teacher._id)));
+      if (teacherIds.some((teacherId) => !assignedTeacherIds.has(teacherId))) {
+        return res.status(400).json({
+          success: false,
+          message: "Attendance can only be marked for teachers assigned to this batch's course.",
         });
       }
     }
@@ -825,9 +869,7 @@ const getAttendanceByBatchAndDate = async (req, res) => {
     const records = await AttendanceSchema.find({
       batch: batchId,
       date: { $gte: attendanceDate, $lt: nextDay },
-      ...(getAttendanceBatchIdsForRequest(req) === null
-        ? {}
-        : { personType: "student" }),
+      ...applyAttendanceTypeFilter(req, {}),
     })
       .populate("person")
       .lean();
@@ -848,13 +890,16 @@ const getPersonAttendance = async (req, res) => {
 
     const filter = { person: personId };
     if (assignedBatchIds !== null) {
-      filter.personType = "student";
       filter.batch = { $in: [...assignedBatchIds] };
       if (!assignedBatchIds.size) {
         return res.status(200).json({ success: true, data: [] });
       }
     }
-    if (assignedBatchIds === null && personType) filter.personType = personType;
+    if (personType && !hasAttendanceType(req, personType)) {
+      return res.status(403).json({ success: false, message: `${personType} attendance is not enabled for this account.` });
+    }
+    if (personType) filter.personType = personType;
+    else applyAttendanceTypeFilter(req, filter);
     if (from || to) {
       filter.date = {};
       if (from) {
@@ -933,12 +978,11 @@ const getBatchMembers = async (req, res) => {
     // Teachers assigned to this course — Teacher schema has no isActive field
     const courseId = batch.course?._id || batch.course;
     console.log(`[Attendance] Looking for teachers with courseId: ${courseId}`);
-    const assignedBatchIds = getAttendanceBatchIdsForRequest(req);
-    const teachers = assignedBatchIds !== null
-      ? []
-      : await TeacherSchema.find({ courseId })
+    const teachers = hasAttendanceType(req, "teacher")
+      ? await TeacherSchema.find({ courseId })
           .select("fullName teacherId gender designation")
-          .lean();
+          .lean()
+      : [];
 
     const teacherList = teachers.map((t) => ({
       _id: t._id,
@@ -953,7 +997,7 @@ const getBatchMembers = async (req, res) => {
       success: true,
       data: {
         batch,
-        students,
+        students: hasAttendanceType(req, "student") ? students : [],
         teachers: teacherList,
       },
     });
@@ -971,11 +1015,12 @@ const getAttendanceSummary = async (req, res) => {
     const { from, to, personType } = req.query;
 
     const filter = { batch: batchId };
-    if (getAttendanceBatchIdsForRequest(req) !== null) {
-      filter.personType = "student";
-    } else if (personType) {
-      filter.personType = personType;
+    if (personType && personType !== "all" && !hasAttendanceType(req, personType)) {
+      return res.status(403).json({ success: false, message: `${personType} attendance is not enabled for this account.` });
     }
+    if (personType && personType !== "all") {
+      filter.personType = personType;
+    } else applyAttendanceTypeFilter(req, filter);
     if (from || to) {
       filter.date = {};
       if (from) {
@@ -1100,9 +1145,7 @@ const getMonthCalendar = async (req, res) => {
     const records = await AttendanceSchema.find({
       batch: batchId,
       date: { $gte: from, $lte: to },
-      ...(getAttendanceBatchIdsForRequest(req) === null
-        ? {}
-        : { personType: "student" }),
+      ...applyAttendanceTypeFilter(req, {}),
     })
       .select("date status updatedAt")
       .lean();
@@ -1150,11 +1193,12 @@ const getAttendanceHistory = async (req, res) => {
       batch: batchId,
       date: { $gte: fromDate, $lte: toDate },
     };
-    if (getAttendanceBatchIdsForRequest(req) !== null) {
-      filter.personType = "student";
-    } else if (personType && personType !== "all") {
-      filter.personType = personType;
+    if (personType && personType !== "all" && !hasAttendanceType(req, personType)) {
+      return res.status(403).json({ success: false, message: `${personType} attendance is not enabled for this account.` });
     }
+    if (personType && personType !== "all") {
+      filter.personType = personType;
+    } else applyAttendanceTypeFilter(req, filter);
 
     const records = await AttendanceSchema.find(filter)
       .populate({
@@ -1243,6 +1287,7 @@ const markHolidayAttendance = async (req, res) => {
       ).lean();
 
       for (const en of enrollments) {
+        if (!hasAttendanceType(req, "student")) break;
         if (!en.student) continue;
         ops.push({
           updateOne: {
@@ -1266,7 +1311,7 @@ const markHolidayAttendance = async (req, res) => {
       }
 
       // Teachers assigned to the batch's course
-      if (assignedBatchIds !== null) continue;
+      if (!hasAttendanceType(req, "teacher")) continue;
       const courseId = batch.course;
       if (courseId) {
         const teachers = await TeacherSchema.find({ courseId }, "_id").lean();

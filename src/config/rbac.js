@@ -36,10 +36,14 @@ export const RBAC_ACTIONS = [
 ];
 
 export const createEmptyPermissionSet = () =>
-  RBAC_ACTIONS.reduce((acc, action) => {
-    acc[action] = false;
-    return acc;
-  }, {});
+  ({
+    ...RBAC_ACTIONS.reduce((acc, action) => {
+      acc[action] = false;
+      return acc;
+    }, {}),
+    studentAttendance: false,
+    teacherAttendance: false,
+  });
 
 export const createPermissionTemplate = () =>
   RBAC_MODULES.reduce((acc, moduleKey) => {
@@ -51,10 +55,19 @@ export const normalizePermissionTemplate = (permissions = {}) => {
   const template = createPermissionTemplate();
 
   RBAC_MODULES.forEach((moduleKey) => {
+    const sourceActions = permissions?.[moduleKey] || {};
     template[moduleKey] = {
       ...createEmptyPermissionSet(),
-      ...(permissions?.[moduleKey] || {}),
+      ...sourceActions,
     };
+    if (moduleKey === "attendance") {
+      if (typeof sourceActions.studentAttendance !== "boolean") {
+        template[moduleKey].studentAttendance = sourceActions.view === true;
+      }
+      if (typeof sourceActions.teacherAttendance !== "boolean") {
+        template[moduleKey].teacherAttendance = sourceActions.view === true;
+      }
+    }
   });
 
   return template;
