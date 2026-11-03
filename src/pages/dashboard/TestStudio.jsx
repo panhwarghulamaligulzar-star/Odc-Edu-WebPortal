@@ -1343,12 +1343,17 @@ const TestStudio = ({ setupMode = false, detailMode = false }) => {
     }
   };
 
-  const drawTestPaperHeader = async (doc, test) => {
+  const getConfiguredPaperHeader = (test) => {
     const savedHeader = test.settings?.paperHeader || {};
-    const paperHeader = Object.keys(defaultPaperHeader).reduce((acc, key) => {
-      acc[key] = teacherPaperHeader[key] || savedHeader[key] || defaultPaperHeader[key];
-      return acc;
+    return Object.keys(defaultPaperHeader).reduce((header, key) => {
+      header[key] =
+        teacherPaperHeader[key] || savedHeader[key] || defaultPaperHeader[key];
+      return header;
     }, {});
+  };
+
+  const drawTestPaperHeader = async (doc, test) => {
+    const paperHeader = getConfiguredPaperHeader(test);
     const logoData = await normalizePdfLogo(paperHeader.logo);
     const academyName = paperHeader.academyName || "Academy / Institute Name";
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -1623,34 +1628,74 @@ const TestStudio = ({ setupMode = false, detailMode = false }) => {
             String(left.student?.studentName || "").localeCompare(String(right.student?.studentName || "")),
           ),
       ];
+      const pdfPositionByAttemptId = new Map(
+        submitted.map((attempt, index) => [String(attempt._id), index + 1]),
+      );
+      const formatPosition = (position) => {
+        const lastTwoDigits = position % 100;
+        const suffix =
+          lastTwoDigits >= 11 && lastTwoDigits <= 13
+            ? "th"
+            : position % 10 === 1
+              ? "st"
+              : position % 10 === 2
+                ? "nd"
+                : position % 10 === 3
+                  ? "rd"
+                  : "th";
+        return `${position}${suffix}`;
+      };
 
       const pageWidth = doc.internal.pageSize.getWidth();
       const margin = 14;
-      const logoData = await normalizePdfLogo(getPdfBrandLogo(appSettings));
+      const paperHeader = getConfiguredPaperHeader(test);
+      const logoData = await normalizePdfLogo(
+        paperHeader.logo || getPdfBrandLogo(appSettings),
+      );
       const logoSize = 24;
       const headerTop = 9;
-      const logoX = (pageWidth - logoSize) / 2;
+      const logoX = margin;
       const logoRendered = addPdfImage(doc, logoData, logoX, headerTop, logoSize, logoSize);
-      const headerTextWidth = pageWidth - margin * 2;
       const headerTextCenter = pageWidth / 2;
-      let headerY = logoRendered ? headerTop + logoSize + 6 : headerTop + 6;
+      const headerTextWidth =
+        pageWidth - margin * 2 - (logoRendered ? logoSize + 24 : 0);
+      const academyName = paperHeader.academyName || getSchoolName(appSettings);
+      let headerY = headerTop + 10;
 
       doc.setFont("helvetica", "bold");
       doc.setFontSize(15);
-      const schoolNameLines = doc.splitTextToSize(getSchoolName(appSettings), headerTextWidth);
+      const schoolNameLines = doc.splitTextToSize(
+        academyName,
+        headerTextWidth,
+      );
       doc.text(schoolNameLines, headerTextCenter, headerY, {
         align: "center",
         maxWidth: headerTextWidth,
       });
       headerY += schoolNameLines.length * 6;
 
+      if (paperHeader.logoText && paperHeader.logoText !== academyName) {
+        doc.setFontSize(10);
+        const logoTextLines = doc.splitTextToSize(
+          paperHeader.logoText,
+          pageWidth - margin * 2,
+        );
+        doc.text(logoTextLines, headerTextCenter, headerY, { align: "center" });
+        headerY += logoTextLines.length * 4;
+      }
+
+      headerY = Math.max(headerY, logoRendered ? headerTop + logoSize : headerY);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
       const schoolDetails = [
-        appSettings?.tagline,
+        paperHeader.address || appSettings?.address,
+        [
+          paperHeader.phone || appSettings?.phone,
+          paperHeader.email || appSettings?.email,
+          paperHeader.website || appSettings?.website,
+        ].filter(Boolean).join(" | "),
+        paperHeader.note || appSettings?.tagline,
         appSettings?.pdfHeaderText,
-        appSettings?.address,
-        [appSettings?.phone, appSettings?.email, appSettings?.website].filter(Boolean).join(" | "),
       ].filter(Boolean);
       schoolDetails.forEach((detail) => {
         const detailLines = doc.splitTextToSize(String(detail), headerTextWidth);
@@ -1694,12 +1739,12 @@ const TestStudio = ({ setupMode = false, detailMode = false }) => {
         startY: summaryY + 6,
         head: [["S.No.", "Position", "Student", "Registration", "Batch", "Status", "Score", "Percent", "Result", "Answer summary", "Submitted"]],
         body: sortedAttempts.map((attempt, index) => {
-          const position = positionByAttemptId.get(String(attempt._id));
+          const position = pdfPositionByAttemptId.get(String(attempt._id));
           const isSubmitted = ["submitted", "auto_submitted", "graded"].includes(attempt.status);
           const counts = answerSummary(attempt);
           return [
             index + 1,
-            position ? `${position}${position === 1 ? "st" : position === 2 ? "nd" : "rd"}` : "-",
+            position ? formatPosition(position) : "-",
             attempt.student?.studentName || "Student",
             attempt.student?.registrationNo || "N/A",
             attempt.batch?.batchName || "N/A",
