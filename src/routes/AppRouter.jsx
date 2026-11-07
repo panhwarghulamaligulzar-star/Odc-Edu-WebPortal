@@ -52,6 +52,7 @@ import Payroll from "../pages/dashboard/accounting/Payroll";
 import Attendance from "../pages/dashboard/Attendance";
 import HolidayManagement from "../pages/dashboard/HolidayManagement";
 import SuperAdmin from "../pages/dashboard/SuperAdmin";
+import DatabaseBackupManagement from "../pages/dashboard/DatabaseBackupManagement";
 import AppSettingsPage from "../pages/dashboard/AppSettingsPage";
 import NoAccess from "../pages/dashboard/NoAccess";
 
@@ -134,6 +135,7 @@ function AppRouter() {
           <Route path="settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
           <Route path="no-access" element={<ProtectedRoute><NoAccess /></ProtectedRoute>} />
           <Route path="super-admin" element={<ProtectedRoute superAdminOnly><SuperAdmin /></ProtectedRoute>} />
+          <Route path="database-backups" element={<ProtectedRoute superAdminOnly><DatabaseBackupManagement /></ProtectedRoute>} />
           <Route path="app-settings" element={<ProtectedRoute superAdminOnly><AppSettingsPage /></ProtectedRoute>} />
           <Route path="announcements" element={<ProtectedRoute moduleKey="announcements"><Announcement /></ProtectedRoute>} />
           {/* Accounting Module */}

@@ -1,18 +1,17 @@
 # Database Commands
 
-This project uses MongoDB with the backend in [`backend`](./backend).
+This project uses MongoDB with the backend in [`backend`](./backend). The running backend selects its primary database by environment:
 
-The app reads database connection strings in this order:
-
-1. `LOCAL_DB_URI`
-2. `DEV_DB_URI`
-3. `DB_URI`
+1. In development, it uses `LOCAL_MONGO_URI`, `LOCAL_DB_URI`, or `DEV_DB_URI` (in that order). It never falls back to `DB_URI` or `MONGODB_URI`.
+2. In production (`NODE_ENV=production`), it uses `DB_URI` or `MONGODB_URI`.
 
 Current local database in [`backend/.env`](./backend/.env):
 
 ```env
-LOCAL_DB_URI=mongodb://127.0.0.1:27017/ODC_EDU_DB
+LOCAL_MONGO_URI=mongodb://127.0.0.1:27017/ODC_EDU_DB
 ```
+
+Keep the local application URI pointed at a local/test database. For the backup management module, configure the separate `PRODUCTION_MONGO_URI` only when intentionally enabling production backup operations. Do not use the live connection as `LOCAL_MONGO_URI`.
 
 ## Important
 

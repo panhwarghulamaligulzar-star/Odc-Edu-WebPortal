@@ -14,6 +14,7 @@ import {
   MdPayments,
   MdReceipt,
   MdSettings,
+  MdStorage,
   MdSwapHoriz,
   MdTrendingUp,
 } from "react-icons/md";
@@ -37,7 +38,8 @@ const SideBarManu = () => {
     location.pathname === "/dashboard/app-settings" ||
     location.pathname === "/dashboard/employees" ||
     location.pathname === "/dashboard/employee-accounts" ||
-    location.pathname === "/dashboard/test-studio";
+    location.pathname === "/dashboard/test-studio" ||
+    location.pathname === "/dashboard/database-backups";
   const isStudentsSectionActive = location.pathname.startsWith("/dashboard/students");
   const isStudentPortalAccountsActive = location.pathname === "/dashboard/students/portal-accounts";
 
@@ -191,6 +193,12 @@ const SideBarManu = () => {
       title: "Finance Monitor",
       path: "/dashboard/super-admin?section=finance",
       icon: MdAccountBalance,
+    },
+    {
+      key: "database-backups",
+      title: "Database Backup Management",
+      path: "/dashboard/database-backups",
+      icon: MdStorage,
     },
   ];
 
@@ -379,6 +387,8 @@ const SideBarManu = () => {
                     const active =
                       item.key === "test-studio"
                         ? location.pathname === "/dashboard/test-studio"
+                        : item.key === "database-backups"
+                        ? location.pathname === "/dashboard/database-backups"
                         : item.key === "app-settings"
                         ? location.pathname === "/dashboard/app-settings"
                         : location.pathname === "/dashboard/super-admin" &&

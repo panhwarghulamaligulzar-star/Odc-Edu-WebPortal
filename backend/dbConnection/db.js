@@ -5,16 +5,15 @@ const connectDB = async () => {
     const isProduction = process.env.NODE_ENV === "production";
     const mongoUri = isProduction
       ? process.env.DB_URI || process.env.MONGODB_URI
-      : process.env.LOCAL_DB_URI ||
-        process.env.DEV_DB_URI ||
-        process.env.DB_URI ||
-        process.env.MONGODB_URI;
+      : process.env.LOCAL_MONGO_URI ||
+        process.env.LOCAL_DB_URI ||
+        process.env.DEV_DB_URI;
 
     if (!mongoUri) {
       throw new Error(
         isProduction
           ? "Missing production DB connection string. Set DB_URI or MONGODB_URI."
-          : "Missing DB connection string. Add LOCAL_DB_URI, DEV_DB_URI, DB_URI, or MONGODB_URI to your .env file.",
+          : "Missing local DB connection string. Set LOCAL_MONGO_URI, LOCAL_DB_URI, or DEV_DB_URI. DB_URI is reserved for the production application connection.",
       );
     }
 

@@ -4,9 +4,12 @@ node_modules/
 # build output
 dist/
 build/
+var/database-backups/
 
 # environment variables
 .env
+.env.*
+!.env.example
 
 # logs
 npm-debug.log*

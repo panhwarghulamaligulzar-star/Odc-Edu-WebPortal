@@ -23,6 +23,7 @@ import roleRoutes from "./app/routes/roleRoutes.js";
 import appSettingsRoutes from "./app/routes/appSettingsRoutes.js";
 import employeeRoutes from "./app/routes/employeeRoute.js";
 import testStudioRoutes from "./app/routes/testStudioRoute.js";
+import databaseBackupRoutes from "./app/routes/databaseBackupRoutes.js";
 import { startTestStudioScheduler } from "./app/jobs/testStudioScheduler.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -115,6 +116,7 @@ app.use("/roles", roleRoutes);
 app.use("/settings", appSettingsRoutes);
 app.use("/employees", employeeRoutes);
 app.use("/test-studio", testStudioRoutes);
+app.use("/database-backups", databaseBackupRoutes);
 
 // ===== Serve Static Files (Built Frontend) AFTER API ROUTES =====
 const publicPath = path.join(__dirname, "public");
@@ -142,6 +144,7 @@ if (publicExists) {
       req.path.startsWith("/settings") ||
       req.path.startsWith("/employees") ||
       req.path.startsWith("/test-studio") ||
+      req.path.startsWith("/database-backups") ||
       req.path.startsWith("/uploads") ||
       req.path.startsWith("/health")
     ) {
