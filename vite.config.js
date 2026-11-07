@@ -13,7 +13,7 @@ import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, cwd(), "");
-  const backendUrl = env.VITE_API_URL || "http://localhost:5028";
+  const backendUrl = env.VITE_DEV_API_URL || "http://localhost:5028";
   const devHost = env.VITE_HOST || "127.0.0.1";
   const devPort = Number(env.VITE_PORT || 5173);
 
@@ -28,7 +28,7 @@ export default defineConfig(({ mode }) => {
       port: devPort,
       proxy: {
         // Proxy all API requests to backend server
-        "^/(auth|user|student|announcement|course|batch|teacher|employees|test-studio|enrollment|fee|health|accounting|attendance|holiday|roles|settings)(/|$)":
+        "^/(auth|user|student|announcement|course|batch|teacher|employees|test-studio|database-backups|enrollment|fee|health|accounting|attendance|holiday|roles|settings)(/|$)":
           {
             target: backendUrl,
             changeOrigin: true,

@@ -2,22 +2,18 @@ import axios from "axios";
 import useZustandStore from "../stores/zustandStore";
 
 const getApiBaseUrl = () => {
-  // Check environment variables first (works in both DEV and PROD)
-  const envUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL;
-  
-  if (envUrl) {
-    if (import.meta.env.PROD) {
-      const apiHost = new URL(envUrl, window.location.origin).hostname;
-      if (/^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[?::1\]?)$/i.test(apiHost)) {
-        throw new Error("Production API configuration must use a remote server URL.");
-      }
-    }
-    return envUrl;
-  }
-
-  // Fallback for local development if no env URL is set
   if (import.meta.env.DEV) {
     return "";
+  }
+
+  const envUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL;
+
+  if (envUrl) {
+    const apiHost = new URL(envUrl, window.location.origin).hostname;
+    if (/^(localhost|127(?:\.\d{1,3}){3}|0\.0\.0\.0|\[?::1\]?)$/i.test(apiHost)) {
+      throw new Error("Production API configuration must use a remote server URL.");
+    }
+    return envUrl;
   }
 
   return window.location.origin;

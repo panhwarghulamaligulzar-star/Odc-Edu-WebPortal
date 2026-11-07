@@ -73,9 +73,14 @@ const Login = () => {
         navigate(firstPath || "/dashboard/no-access");
 
         message.success(`Welcome ${response?.user?.name || ""}`.trim());
+      } else {
+        throw new Error(
+          response?.message ||
+            "Login failed: the server did not return an authentication token.",
+        );
       }
     } catch (error) {
-      message.error(error?.message);
+      message.error(error?.message || "Unable to sign in. Please try again.");
     } finally {
       setLoading(false);
     }
