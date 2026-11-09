@@ -6,7 +6,7 @@ const getApiBaseUrl = () => {
     return "";
   }
 
-  const envUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL;
+  const envUrl =  import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL;
 
   if (envUrl) {
     const apiHost = new URL(envUrl, window.location.origin).hostname;
