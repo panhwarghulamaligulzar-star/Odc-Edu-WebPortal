@@ -482,6 +482,14 @@ export const calculateTeacherCompensationData = async (
       .filter((course) => course?._id)
       .map((course) => [String(course._id), course]),
   );
+  const assignedBatches = assignedCourseIds.length
+    ? await BatchSchema.find({
+        course: { $in: assignedCourseIds },
+        isActive: true,
+      })
+        .select("batchName batchCode course")
+        .lean()
+    : [];
   const activeAssignments = await StudentTeacherAssignment.find({ isActive: true })
     .populate("student", "studentName registrationNo mobileNumber isActive")
     .populate("enrollment")
@@ -810,6 +818,17 @@ export const calculateTeacherCompensationData = async (
     },
     studentsForSalary: uniqueStudentSummaries,
     courses: Array.from(courseSummariesMap.values()),
+    assignedBatches: assignedBatches.map((batch) => {
+      const courseId = String(batch.course);
+      const course = teacherCourseMap.get(courseId);
+      return {
+        _id: String(batch._id),
+        batchName: batch.batchName,
+        batchCode: batch.batchCode,
+        courseId,
+        courseName: course?.courseName || "",
+      };
+    }),
   };
 };
 

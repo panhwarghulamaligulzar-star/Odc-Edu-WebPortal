@@ -21,9 +21,22 @@ Keep the same key across restarts and backend instances. Changing it makes
 existing registrations unreadable; those students must be registered again.
 Never commit or share the key.
 
+For the PM2 deployment, provide the key in PM2's environment when starting or
+restarting the app; `backend/ecosystem.config.cjs` forwards it to the backend:
+
+```sh
+export FACE_DESCRIPTOR_ENCRYPTION_KEY="<base64-encoded 32-byte key>"
+pm2 start backend/ecosystem.config.cjs --env production
+pm2 restart ODC_ALI --update-env
+```
+
+Set the secret in the deployment environment/secret manager rather than
+committing it. After changing the secret, restart the backend before using
+face setup or attendance on any device.
+
 Optional matching settings:
 
-- `- `FACE_MATCH_MAX_DISTANCE`: maximum Euclidean descriptor distance (default
+- `FACE_MATCH_MAX_DISTANCE`: maximum Euclidean descriptor distance (default
   `0.52`; valid range `(0, 1]`).
 - `FACE_MATCH_MIN_MARGIN`: required distance gap from the next candidate
   (default `0.06`).

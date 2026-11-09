@@ -512,6 +512,7 @@ const DOT_COLOR = {
 function MarkAttendancePanel({ batches, attendanceTypes }) {
   const defaultAttendanceType = attendanceTypes.includes("student") ? "student" : "teacher";
   const [selectedBatch, setSelectedBatch] = useState(null);
+  const [selectedBatchIds, setSelectedBatchIds] = useState([]);
   const [selectedDate, setSelectedDate] = useState(dayjs());
   const [activeTab, setActiveTab] = useState(defaultAttendanceType);
   const [members, setMembers] = useState({ students: [], teachers: [], batch: null });
@@ -543,6 +544,49 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
     [batches, selectedBatch],
   );
   const isAllBatchesSelected = selectedBatch === ALL_BATCHES_VALUE;
+
+  const handleBatchSelectionChange = (value) => {
+    if (isFaceMode) {
+      setSelectedBatch(value || null);
+      setSelectedBatchIds(value && value !== ALL_BATCHES_VALUE ? [value] : []);
+      setAttendanceMap({});
+      setTimeMap({});
+      setCalendarData({});
+      setHolidayMap(new Map());
+      setFaceSearch("");
+      setDirty(false);
+      return;
+    }
+
+    const values = Array.isArray(value) ? value : [];
+    const choosingFromAllBatches =
+      selectedBatch === ALL_BATCHES_VALUE && selectedBatchIds.length === 0;
+    const containsAllBatches = values.includes(ALL_BATCHES_VALUE);
+    const selectAllBatches = containsAllBatches && !choosingFromAllBatches;
+    const nextBatchIds = selectAllBatches
+      ? []
+      : values.filter((batchId) => batchId !== ALL_BATCHES_VALUE);
+
+    const nextBatch =
+      selectAllBatches || nextBatchIds.length > 1
+        ? ALL_BATCHES_VALUE
+        : nextBatchIds[0] || null;
+
+    setSelectedBatchIds(nextBatchIds);
+    setSelectedBatch(nextBatch);
+    const nextBatchDetails = batches.find(
+      (batch) => batch._id === nextBatchIds[0],
+    );
+    if (nextBatchIds.length === 1 && nextBatchDetails) {
+      setSelectedDate((current) => clampDateToBatchRange(current, nextBatchDetails));
+    }
+    setAttendanceMap({});
+    setTimeMap({});
+    setCalendarData({});
+    setHolidayMap(new Map());
+    setFaceSearch("");
+    setDirty(false);
+  };
   const [attendanceMode, setAttendanceMode] = useState("manual");
   const [qrScannerOpen, setQrScannerOpen] = useState(false);
   const [qrSupported, setQrSupported] = useState(false);
@@ -597,6 +641,11 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
   const loadCalendarRef = useRef(async () => {});
   const isQrMode = attendanceMode === "qr";
   const isFaceMode = attendanceMode === "face";
+  const selectedBatchSelectValue = isFaceMode
+    ? selectedBatch
+    : selectedBatch === ALL_BATCHES_VALUE && selectedBatchIds.length === 0
+      ? [ALL_BATCHES_VALUE]
+      : selectedBatchIds;
 
   useEffect(() => {
     faceLastMatchRef.current = { key: "", at: 0, descriptor: null };
@@ -605,6 +654,7 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
   useEffect(() => {
     if (!isQrMode) return;
     setSelectedBatch(null);
+    setSelectedBatchIds([]);
     setMembers({ students: [], teachers: [], batch: null });
     setAttendanceMap({});
     setTimeMap({});
@@ -616,8 +666,11 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
     if (!selectedBatch) return;
     setLoading(true);
     if (selectedBatch === ALL_BATCHES_VALUE) {
+      const targetBatches = selectedBatchIds.length
+        ? batches.filter((batch) => selectedBatchIds.includes(batch._id))
+        : batches;
       Promise.all(
-        batches.map((batch) =>
+        targetBatches.map((batch) =>
           getBatchMembers(batch._id)
             .then((res) => ({ batch, data: res.data || { students: [], teachers: [], batch: null } }))
             .catch(() => ({ batch, data: { students: [], teachers: [], batch: null } })),
@@ -642,16 +695,49 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
               attendanceKey: `${batchDetails?._id || batch._id}:${student._id}`,
             }));
           });
-          const teachers = responses.flatMap(({ batch, data }) => {
+          const teachersById = new Map();
+          responses.forEach(({ batch, data }) => {
             const batchDetails = data.batch || batch;
-            return (data.teachers || []).map((teacher) => ({
-              ...teacher,
-              attendanceBatchId: batchDetails?._id || batch._id,
-              attendanceBatchName: batchDetails?.batchName || batch.batchName,
-              attendanceBatchLabel: getBatchOptionLabel(batchDetails),
-              attendanceKey: `${batchDetails?._id || batch._id}:${teacher._id}`,
-            }));
+            const batchId = batchDetails?._id || batch._id;
+            (data.teachers || []).forEach((teacher) => {
+              const batchInfo = {
+                _id: batchId,
+                batchName: batchDetails?.batchName || batch.batchName,
+                batchLabel: getBatchOptionLabel(batchDetails),
+                days: batchDetails?.days || batch.days,
+                startDate: batchDetails?.startDate || batch.startDate,
+                endDate: batchDetails?.endDate || batch.endDate,
+              };
+              const existing = teachersById.get(String(teacher._id));
+              if (existing) {
+                if (!existing.attendanceBatchIds.includes(batchId)) {
+                  existing.attendanceBatchIds.push(batchId);
+                  existing.attendanceBatches.push(batchInfo);
+                  existing.attendanceKeys.push(`${batchId}:${teacher._id}`);
+                  if (batchInfo.batchLabel) {
+                    existing.attendanceBatchLabels.push(batchInfo.batchLabel);
+                  }
+                }
+                return;
+              }
+
+              teachersById.set(String(teacher._id), {
+                ...teacher,
+                attendanceBatchId: batchId,
+                attendanceBatchIds: [batchId],
+                attendanceBatchName: batchInfo.batchName,
+                attendanceBatchLabel: batchInfo.batchLabel,
+                attendanceBatchLabels: batchInfo.batchLabel ? [batchInfo.batchLabel] : [],
+                attendanceBatchDays: batchInfo.days,
+                attendanceBatchStartDate: batchInfo.startDate,
+                attendanceBatchEndDate: batchInfo.endDate,
+                attendanceBatches: [batchInfo],
+                attendanceKey: `${batchId}:${teacher._id}`,
+                attendanceKeys: [`${batchId}:${teacher._id}`],
+              });
+            });
           });
+          const teachers = Array.from(teachersById.values());
 
           setMembers({ students, teachers, batch: null });
           setActiveTab(defaultAttendanceType);
@@ -681,16 +767,36 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
             attendanceBatchEndDate: data.batch?.endDate,
             attendanceKey: `${batchId}:${student._id}`,
           })),
-          teachers: (data.teachers || []).map((teacher) => ({
-            ...teacher,
-            attendanceBatchId: batchId,
-            attendanceKey: `${batchId}:${teacher._id}`,
-          })),
+          teachers: (data.teachers || []).map((teacher) => {
+            const batchInfo = {
+              _id: batchId,
+              batchName: data.batch?.batchName,
+              batchLabel: getBatchOptionLabel(data.batch),
+              days: data.batch?.days,
+              startDate: data.batch?.startDate,
+              endDate: data.batch?.endDate,
+            };
+            const attendanceKey = `${batchId}:${teacher._id}`;
+            return {
+              ...teacher,
+              attendanceBatchId: batchId,
+              attendanceBatchIds: [batchId],
+              attendanceBatchName: batchInfo.batchName,
+              attendanceBatchLabel: batchInfo.batchLabel,
+              attendanceBatchLabels: batchInfo.batchLabel ? [batchInfo.batchLabel] : [],
+              attendanceBatchDays: batchInfo.days,
+              attendanceBatchStartDate: batchInfo.startDate,
+              attendanceBatchEndDate: batchInfo.endDate,
+              attendanceBatches: [batchInfo],
+              attendanceKey,
+              attendanceKeys: [attendanceKey],
+            };
+          }),
         });
       })
       .catch(() => message.error("Failed to load batch members"))
       .finally(() => setLoading(false));
-  }, [attendanceTypes, batches, defaultAttendanceType, selectedBatch]);
+  }, [attendanceTypes, batches, defaultAttendanceType, selectedBatch, selectedBatchIds]);
 
   useEffect(() => {
     if (!attendanceTypes.includes(activeTab)) {
@@ -1408,7 +1514,9 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
     try {
       const targetBatches =
         selectedBatch === ALL_BATCHES_VALUE
-          ? batches
+          ? selectedBatchIds.length
+            ? batches.filter((batch) => selectedBatchIds.includes(batch._id))
+            : batches
           : batches.filter((batch) => batch._id === selectedBatch);
       const responses = await Promise.all(
         targetBatches.map((batch) =>
@@ -1434,7 +1542,7 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
       setDirty(false);
     } catch { message.error("Failed to load attendance"); }
     finally { setLoading(false); }
-  }, [batches, selectedBatch, selectedDate]);
+  }, [batches, selectedBatch, selectedBatchIds, selectedDate]);
 
   useEffect(() => { loadAttendance(); }, [loadAttendance]);
 
@@ -1561,22 +1669,50 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
     setSaving(true);
     try {
       const list = activeTab === "student" ? members.students : members.teachers;
-      const recordsByBatch = list
-        .filter((p) => p.personType !== "student" || isStudentAttendanceEligible(p))
-        .filter(isAttendanceOpenForRow)
-        .reduce((acc, p) => {
-          const batchId = p.attendanceBatchId || selectedBatch;
-          if (!batchId || batchId === ALL_BATCHES_VALUE) return acc;
-          const key = p.attendanceKey || getAttendanceRowKey(p, batchId);
+      const recordsByBatch = list.reduce((acc, person) => {
+        if (person.personType === "student" && !isStudentAttendanceEligible(person)) {
+          return acc;
+        }
+        if (person.personType === "student" && !isAttendanceOpenForRow(person)) {
+          return acc;
+        }
+
+        const batchIds =
+          person.personType === "teacher"
+            ? person.attendanceBatchIds || [person.attendanceBatchId || selectedBatch]
+            : [person.attendanceBatchId || selectedBatch];
+        batchIds.forEach((batchId) => {
+          if (!batchId || batchId === ALL_BATCHES_VALUE) return;
+          const batchDetails = batches.find((batch) => batch._id === batchId);
+          const schedule = person.personType === "teacher"
+            ? person.attendanceBatches?.find((batch) => batch._id === batchId) || batchDetails
+            : {
+                days: person.attendanceBatchDays || batchDetails?.days,
+                startDate: person.attendanceBatchStartDate || batchDetails?.startDate,
+                endDate: person.attendanceBatchEndDate || batchDetails?.endDate,
+              };
+          if (
+            person.personType === "teacher" &&
+            schedule &&
+            !isAttendanceOpenForBatch(schedule)
+          ) {
+            return;
+          }
+
+          const attendanceKey =
+            person.personType === "teacher"
+              ? `${batchId}:${person._id}`
+              : person.attendanceKey || getAttendanceRowKey(person, batchId);
           if (!acc[batchId]) acc[batchId] = [];
           acc[batchId].push({
-            personId: p._id,
-            personType: p.personType,
-            status: attendanceMap[key] || "Absent",
+            personId: person._id,
+            personType: person.personType,
+            status: attendanceMap[attendanceKey] || "Absent",
             notes: "",
           });
-          return acc;
-        }, {});
+        });
+        return acc;
+      }, {});
 
       const batchEntries = Object.entries(recordsByBatch).filter(([, records]) => records.length);
       if (!batchEntries.length) {
@@ -2187,21 +2323,51 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
     return found.length ? found : members.teachers;
   }, [members.teachers, selectedPersonId]);
 
-  const isAttendanceOpenForRow = (record) => {
+  const isAttendanceOpenForBatch = useCallback((batch) => {
     if (!isAllBatchesSelected || !selectedDate) return true;
 
-    if (record.attendanceBatchStartDate) {
-      const start = dayjs(record.attendanceBatchStartDate).startOf("day");
+    if (batch.startDate) {
+      const start = dayjs(batch.startDate).startOf("day");
       if (selectedDate.isBefore(start, "day")) return false;
     }
 
-    if (record.attendanceBatchEndDate) {
-      const end = dayjs(record.attendanceBatchEndDate).endOf("day");
+    if (batch.endDate) {
+      const end = dayjs(batch.endDate).endOf("day");
       if (selectedDate.isAfter(end, "day")) return false;
     }
 
-    const allowedDays = DOW_MAP[record.attendanceBatchDays] || [];
+    const allowedDays = DOW_MAP[batch.days] || [];
     return allowedDays.includes(selectedDate.day());
+  }, [isAllBatchesSelected, selectedDate]);
+
+  const isAttendanceOpenForRow = useCallback((record) => {
+    const batchesForRow = record.attendanceBatches?.length
+      ? record.attendanceBatches
+      : [{
+          startDate: record.attendanceBatchStartDate,
+          endDate: record.attendanceBatchEndDate,
+          days: record.attendanceBatchDays,
+        }];
+    return batchesForRow.some(isAttendanceOpenForBatch);
+  }, [isAttendanceOpenForBatch]);
+
+  const getTeacherAttendanceStatus = useCallback((teacher) => {
+    const statuses = (teacher.attendanceKeys || [teacher.attendanceKey])
+      .map((key) => attendanceMap[key])
+      .filter(Boolean);
+    if (!statuses.length) return undefined;
+    return statuses.every((status) => status === statuses[0]) ? statuses[0] : "Mixed";
+  }, [attendanceMap]);
+
+  const updateTeacherAttendanceStatus = (teacher, status) => {
+    setAttendanceMap((previous) => {
+      const next = { ...previous };
+      (teacher.attendanceKeys || [teacher.attendanceKey]).forEach((key) => {
+        next[key] = status;
+      });
+      return next;
+    });
+    setDirty(true);
   };
 
   const areAllVisibleStudentsPresent = useMemo(() => {
@@ -2212,15 +2378,19 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
     return eligibleStudents.every(
       (student) => (attendanceMap[student.attendanceKey] || "Absent") === "Present",
     );
-  }, [attendanceMap, filteredStudents, selectedDate, isAllBatchesSelected]);
+  }, [attendanceMap, filteredStudents, isAttendanceOpenForRow]);
 
   const areAllVisibleTeachersPresent = useMemo(() => {
     const eligibleTeachers = filteredTeachers.filter(isAttendanceOpenForRow);
     if (eligibleTeachers.length === 0) return false;
     return eligibleTeachers.every(
-      (teacher) => (attendanceMap[teacher.attendanceKey] || "Absent") === "Present",
+      (teacher) => getTeacherAttendanceStatus(teacher) === "Present",
     );
-  }, [attendanceMap, filteredTeachers, selectedDate, isAllBatchesSelected]);
+  }, [
+    filteredTeachers,
+    getTeacherAttendanceStatus,
+    isAttendanceOpenForRow,
+  ]);
 
   const handleMarkAllVisibleStudentsPresent = (event) => {
     const shouldMarkPresent = Boolean(event?.target?.checked);
@@ -2246,7 +2416,9 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
       filteredTeachers
         .filter(isAttendanceOpenForRow)
         .forEach((teacher) => {
-          next[teacher.attendanceKey] = shouldMarkPresent ? "Present" : "Absent";
+          (teacher.attendanceKeys || [teacher.attendanceKey]).forEach((key) => {
+            next[key] = shouldMarkPresent ? "Present" : "Absent";
+          });
         });
       return next;
     });
@@ -2259,15 +2431,23 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
     return activeTab === "student" ? filteredStudents : filteredTeachers;
   }, [activeTab, personTypeFilter, filteredStudents, filteredTeachers]);
   const unmarkedCount = useMemo(
-    () => currentList.filter((p) => !attendanceMap[p.attendanceKey]).length,
-    [attendanceMap, currentList],
+    () => currentList.filter((person) =>
+      person.personType === "teacher"
+        ? !getTeacherAttendanceStatus(person) || getTeacherAttendanceStatus(person) === "Mixed"
+        : !attendanceMap[person.attendanceKey],
+    ).length,
+    [attendanceMap, currentList, getTeacherAttendanceStatus],
   );
   const hasSavedRecordsForSelection = useMemo(
     () => Object.keys(attendanceMap).length > 0,
     [attendanceMap],
   );
   const counts = [...STATUSES, "Holiday"].reduce((acc, s) => {
-    acc[s] = currentList.filter((p) => attendanceMap[p.attendanceKey] === s).length;
+    acc[s] = currentList.filter((person) =>
+      person.personType === "teacher"
+        ? getTeacherAttendanceStatus(person) === s
+        : attendanceMap[person.attendanceKey] === s,
+    ).length;
     return acc;
   }, {});
 
@@ -2349,16 +2529,29 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
     { title: "#", width: 50, render: (_, __, i) => i + 1 },
     { title: "Name", dataIndex: "name", render: (v) => <span className="font-medium">{v}</span> },
     { title: "ID", dataIndex: "teacherId" },
+    ...(isAllBatchesSelected ? [{
+      title: "Batch",
+      dataIndex: "attendanceBatchLabels",
+      render: (labels = []) => (
+        <div className="flex flex-wrap gap-1">
+          {labels.map((label) => <Tag key={label} color="processing">{label}</Tag>)}
+        </div>
+      ),
+    }] : []),
     { title: "Designation", dataIndex: "designation", render: (d) => d || "—" },
     { title: "Gender", dataIndex: "gender", render: (g) => <Tag color={g === "Male" ? "blue" : "pink"}>{g}</Tag> },
-    { title: "Mark Attendance", render: (_, r) => <StatusPicker disabled={isAcademyHoliday} value={attendanceMap[r.attendanceKey]} onChange={(s) => handleStatusChange(r.attendanceKey, s)} /> },
+    { title: "Mark Attendance", render: (_, r) => <StatusPicker disabled={isAcademyHoliday || !isAttendanceOpenForRow(r)} value={getTeacherAttendanceStatus(r)} onChange={(status) => updateTeacherAttendanceStatus(r, status)} /> },
     {
       title: "Status", width: 130,
       render: (_, r) => (
         <div className="flex flex-col gap-1">
-          <StatusTag status={attendanceMap[r.attendanceKey]} />
-          {timeMap[r.attendanceKey] && (
-            <span className="text-[10px] text-gray-400">🕐 {timeMap[r.attendanceKey]}</span>
+          {getTeacherAttendanceStatus(r) === "Mixed"
+            ? <Tag color="orange">Different by batch</Tag>
+            : <StatusTag status={getTeacherAttendanceStatus(r)} />}
+          {r.attendanceKeys?.map((key) => timeMap[key]).find(Boolean) && (
+            <span className="text-[10px] text-gray-400">
+              🕐 {r.attendanceKeys.map((key) => timeMap[key]).find(Boolean)}
+            </span>
           )}
         </div>
       ),
@@ -2570,26 +2763,33 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
       `}</style>
       {/* Controls */}
       <div className="bg-white rounded-xl shadow p-4 flex flex-wrap gap-4 items-end">
-        <div className="flex flex-col gap-1 min-w-[220px]">
+        <div className="flex w-[280px] flex-none flex-col gap-1">
           <label className="text-xs font-semibold text-gray-600">Select Batch</label>
-          <Select placeholder="Choose a batch" value={selectedBatch}
-            onChange={(v) => {
-              const nextBatch = v === ALL_BATCHES_VALUE
-                ? null
-                : batches.find((batch) => batch._id === v) || null;
-              setSelectedBatch(v);
-              if (nextBatch) {
-                setSelectedDate((current) => clampDateToBatchRange(current, nextBatch));
-              }
-              setAttendanceMap({});
-              setTimeMap({});
-              setCalendarData({});
-              setHolidayMap(new Map());
-              setFaceSearch("");
-              setDirty(false);
-            }}
+          <Select
+            mode={isFaceMode ? undefined : "multiple"}
+            placeholder="Choose one or more batches"
+            value={selectedBatchSelectValue}
+            onChange={handleBatchSelectionChange}
             disabled={isQrMode}
             showSearch filterOption={(input, o) => o?.label?.toLowerCase().includes(input.toLowerCase())}
+            maxTagCount={2}
+            maxTagPlaceholder={(omittedValues) => (
+              <span title={omittedValues.map((item) => item.label).join(", ")}>
+                +{omittedValues.length} more
+              </span>
+            )}
+            optionRender={(option) => (
+              <div className="flex items-center gap-2">
+                {!isFaceMode && (
+                  <Checkbox
+                    checked={selectedBatchSelectValue.includes(option.value)}
+                    tabIndex={-1}
+                    className="pointer-events-none"
+                  />
+                )}
+                <span>{option.label}</span>
+              </div>
+            )}
             options={[
               { value: ALL_BATCHES_VALUE, label: "All batches" },
               ...batches.map((b) => ({ value: b._id, label: getBatchOptionLabel(b) })),
@@ -2663,7 +2863,14 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
           <label className="text-xs font-semibold text-gray-600">Attendance Mode</label>
           <Segmented
             value={attendanceMode}
-            onChange={setAttendanceMode}
+            onChange={(mode) => {
+              if (mode === "face" && selectedBatchIds.length > 1) {
+                const [batchId] = selectedBatchIds;
+                setSelectedBatch(batchId);
+                setSelectedBatchIds([batchId]);
+              }
+              setAttendanceMode(mode);
+            }}
             options={[
               { label: "Manual", value: "manual" },
               ...(attendanceTypes.includes("student") ? [

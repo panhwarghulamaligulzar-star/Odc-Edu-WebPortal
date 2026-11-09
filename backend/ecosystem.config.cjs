@@ -37,12 +37,16 @@ module.exports = {
 
       env: {
         NODE_ENV: "production",
-        PORT: "5028"
+        PORT: "5028",
+        FACE_DESCRIPTOR_ENCRYPTION_KEY:
+          process.env.FACE_DESCRIPTOR_ENCRYPTION_KEY,
       },
 
       env_production: {
         NODE_ENV: "production",
-        PORT: "5028"
+        PORT: "5028",
+        FACE_DESCRIPTOR_ENCRYPTION_KEY:
+          process.env.FACE_DESCRIPTOR_ENCRYPTION_KEY,
       }
     }
   ]

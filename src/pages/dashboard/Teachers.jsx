@@ -95,6 +95,7 @@ const Teachers = () => {
   const [exportingEmployees, setExportingEmployees] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [teacherCompensation, setTeacherCompensation] = useState(null);
+  const [selectedSalaryBatchId, setSelectedSalaryBatchId] = useState("all");
   const [loadingTeacherCompensation, setLoadingTeacherCompensation] =
     useState(false);
   const [savingSalaryConfig, setSavingSalaryConfig] = useState(false);
@@ -151,6 +152,10 @@ const Teachers = () => {
       (currentMonth) => currentMonth || dayjs().format("YYYY-MM"),
     );
   }, [teacherId, teachers, selectedTeacher?._id]);
+
+  useEffect(() => {
+    setSelectedSalaryBatchId("all");
+  }, [selectedTeacher?._id]);
 
   useEffect(() => {
     if (!teacherId || !selectedTeacher?._id || !selectedCompensationMonth) {
@@ -1215,8 +1220,17 @@ const Teachers = () => {
       );
     }
 
-    const { salaryConfig, summary, courses: teacherCourses, studentsForSalary, month } =
-      teacherCompensation;
+    const {
+      salaryConfig,
+      summary,
+      courses: teacherCourses,
+      studentsForSalary,
+      month,
+    } = teacherCompensation;
+    const assignedBatches = teacherCompensation.assignedBatches || [];
+    const selectedSalaryBatch = assignedBatches.find(
+      (batch) => String(batch._id) === String(selectedSalaryBatchId),
+    );
     const { firstMonth, lastMonth } = getSalaryMonthBounds(selectedTeacher);
     const selectedMonthLabel = month.displayLabel || month.label;
     const effectiveRate =
@@ -1225,8 +1239,78 @@ const Teachers = () => {
       salaryConfigDraft.attendanceThreshold ?? salaryConfig.attendanceThreshold ?? 50;
     const isMonthConfigured =
       salaryConfig.isConfigured !== false && Number(effectiveRate || 0) > 0;
+    const selectedBatchStudentRecords =
+      selectedSalaryBatchId === "all"
+        ? []
+        : teacherCourses
+            .flatMap((course) => course.activeStudents || [])
+            .filter(
+              (student) =>
+                String(student.batchId) === String(selectedSalaryBatchId),
+            );
+    const selectedBatchRecordsByStudent = new Map(
+      selectedBatchStudentRecords.map((student) => [
+        String(student.studentId),
+        student,
+      ]),
+    );
+    const salaryStudentsForDisplay =
+      selectedSalaryBatchId === "all"
+        ? studentsForSalary
+        : studentsForSalary.flatMap((student) => {
+            const batchStudent = selectedBatchRecordsByStudent.get(
+              String(student.studentId),
+            );
+            if (!batchStudent) return [];
+
+            const monthlyAttendancePercentage = Number(
+              batchStudent.attendancePercentage || 0,
+            );
+            const defaultCalculatedSalaryAmount =
+              isMonthConfigured &&
+              monthlyAttendancePercentage >= effectiveThreshold
+                ? Number(effectiveRate)
+                : 0;
+            const calculatedSalaryAmount = student.hasManualAdjustment
+              ? student.calculatedSalaryAmount
+              : defaultCalculatedSalaryAmount;
+
+            return [
+              {
+                ...student,
+                totalWorkingDays: batchStudent.totalWorkingDays,
+                presentDays: batchStudent.presentDays,
+                halfDays: batchStudent.halfDays,
+                absentDays: batchStudent.absentDays,
+                leaveDays: batchStudent.leaveDays,
+                holidayDays: batchStudent.holidayDays,
+                monthlyAttendancePercentage,
+                attendancePercentage: monthlyAttendancePercentage,
+                defaultCalculatedSalaryAmount,
+                calculatedSalaryAmount,
+                isSalaryEligible: student.hasManualAdjustment
+                  ? Number(calculatedSalaryAmount || 0) > 0
+                  : defaultCalculatedSalaryAmount > 0,
+              },
+            ];
+          });
+    const visibleTeacherCourses =
+      selectedSalaryBatchId === "all"
+        ? teacherCourses
+        : teacherCourses
+            .filter(
+              (course) =>
+                String(course._id) === String(selectedSalaryBatch?.courseId),
+            )
+            .map((course) => ({
+              ...course,
+              activeStudents: (course.activeStudents || []).filter(
+                (student) =>
+                  String(student.batchId) === String(selectedSalaryBatchId),
+              ),
+            }));
     const projectedEligibleStudents = isMonthConfigured
-      ? studentsForSalary.filter(
+      ? salaryStudentsForDisplay.filter(
           (student) => student.monthlyAttendancePercentage >= effectiveThreshold,
         ).length
       : 0;
@@ -1247,26 +1331,31 @@ const Teachers = () => {
         salaryConfigDraft.bonusAmount ?? salaryConfig.bonusAmount ?? 0,
       ),
     );
-    const hasManualAdjustedStudents = studentsForSalary.some(
+    const hasManualAdjustedStudents = salaryStudentsForDisplay.some(
       (student) => student.hasManualAdjustment,
     );
     const displayedEligibleStudents = hasManualAdjustedStudents
-      ? studentsForSalary.filter((student) => Number(student.calculatedSalaryAmount || 0) > 0).length
+      ? salaryStudentsForDisplay.filter((student) => Number(student.calculatedSalaryAmount || 0) > 0).length
       : projectedEligibleStudents;
     const displayedProjectedMonthlySalary = hasManualAdjustedStudents
-      ? studentsForSalary.reduce(
+      ? salaryStudentsForDisplay.reduce(
           (sum, student) => sum + Number(student.calculatedSalaryAmount || 0),
           0,
         )
       : projectedMonthlySalary;
+    const displayedMovedStudents = salaryStudentsForDisplay.filter(
+      (student) => student.isMovedStudent === true,
+    ).length;
+    const displayedStudentCountLabel =
+      selectedSalaryBatchId === "all" ? "All Students" : "Students in Batch";
     const displayedFinalMonthlySalary = Math.max(
       0,
       displayedProjectedMonthlySalary - payrollDeductionAmount,
     ) + payrollBonusAmount;
-    const regularSalaryStudents = studentsForSalary.filter(
+    const regularSalaryStudents = salaryStudentsForDisplay.filter(
       (student) => student.isMovedStudent !== true,
     );
-    const movedSalaryStudents = studentsForSalary.filter(
+    const movedSalaryStudents = salaryStudentsForDisplay.filter(
       (student) => student.isMovedStudent === true,
     );
     const renderSalaryStudentRow = (student) => (
@@ -1351,6 +1440,31 @@ const Teachers = () => {
     return (
       <div className="space-y-4">
         {salaryModePicker}
+        <Card size="small">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <label
+              htmlFor="teacher-salary-batch-filter"
+              className="text-sm font-semibold text-[#01134C]"
+            >
+              Filter students by batch
+            </label>
+            <Select
+              id="teacher-salary-batch-filter"
+              className="w-full sm:max-w-md"
+              value={selectedSalaryBatchId}
+              onChange={setSelectedSalaryBatchId}
+              options={[
+                { value: "all", label: "All assigned batches" },
+                ...assignedBatches.map((batch) => ({
+                  value: String(batch._id),
+                  label: `${batch.batchName} (${batch.batchCode})${
+                    batch.courseName ? ` - ${batch.courseName}` : ""
+                  }`,
+                })),
+              ]}
+            />
+          </div>
+        </Card>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-5">
           <Card size="small">
             <div className="text-xs text-slate-500">Assigned Courses</div>
@@ -1359,15 +1473,17 @@ const Teachers = () => {
             </div>
           </Card>
           <Card size="small">
-            <div className="text-xs text-slate-500">All Students</div>
+            <div className="text-xs text-slate-500">
+              {displayedStudentCountLabel}
+            </div>
             <div className="mt-1 text-xl font-bold text-[#01134C]">
-              {summary.totalActiveStudents}
+              {salaryStudentsForDisplay.length}
             </div>
           </Card>
           <Card size="small">
             <div className="text-xs text-slate-500">Moved Students</div>
             <div className="mt-1 text-xl font-bold text-blue-700">
-              {summary.movedStudents || 0}
+              {displayedMovedStudents}
             </div>
           </Card>
           <Card size="small">
@@ -1375,7 +1491,7 @@ const Teachers = () => {
               Salary Eligible Students
             </div>
             <div className="mt-1 text-xl font-bold text-[#01134C]">
-              {summary.eligibleStudents}
+              {displayedEligibleStudents}
             </div>
           </Card>
           <Card size="small">
@@ -1575,9 +1691,11 @@ const Teachers = () => {
 
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <div className="text-xs text-slate-500">Total Students</div>
+              <div className="text-xs text-slate-500">
+                {displayedStudentCountLabel}
+              </div>
               <div className="mt-1 text-lg font-bold text-[#01134C]">
-                {summary.totalActiveStudents}
+                {salaryStudentsForDisplay.length}
               </div>
             </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -1607,12 +1725,18 @@ const Teachers = () => {
         </Card>
 
         <Card size="small" title={`Monthly Student Salary Check (${selectedMonthLabel})`}>
-          {studentsForSalary.length === 0 ? (
-            <Empty description="No active students linked to this teacher" />
+          {salaryStudentsForDisplay.length === 0 ? (
+            <Empty
+              description={
+                selectedSalaryBatchId === "all"
+                  ? "No active students linked to this teacher"
+                  : "No active students in the selected batch"
+              }
+            />
           ) : (
             <div className="space-y-3">
               <div className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">
-                Active Students ({regularSalaryStudents.length})
+                Active Students ({salaryStudentsForDisplay.length})
               </div>
               {regularSalaryStudents.length ? (
                 regularSalaryStudents.map(renderSalaryStudentRow)
@@ -1633,7 +1757,7 @@ const Teachers = () => {
         </Card>
 
         <div className="space-y-4">
-          {teacherCourses.map((course) => (
+          {visibleTeacherCourses.map((course) => (
             <Card
               key={course._id}
               size="small"
