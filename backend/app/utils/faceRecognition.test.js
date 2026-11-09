@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import process from "node:process";
 import test from "node:test";
 import {
   decryptFaceDescriptors,

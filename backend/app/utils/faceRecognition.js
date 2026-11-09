@@ -1,8 +1,10 @@
+import { Buffer } from "node:buffer";
 import {
   createCipheriv,
   createDecipheriv,
   randomBytes,
 } from "node:crypto";
+import process from "node:process";
 
 export const FACE_DESCRIPTOR_SIZE = 128;
 export const FACE_MODEL_VERSION = "face-api-128-v1";

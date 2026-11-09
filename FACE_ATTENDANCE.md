@@ -11,18 +11,24 @@ created.
 Set `FACE_DESCRIPTOR_ENCRYPTION_KEY` in the backend process environment or
 deployment secret manager. For local development, the backend loads
 `backend/.env.local` before `backend/.env`; keep this file untracked. Do not put
-the key in a tracked file. Generate a key with:
+the key in a tracked file. Generate a key only if one does not already exist:
 
 ```powershell
 node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ```
 
-Keep the same key across restarts and backend instances. Changing it makes
-existing registrations unreadable; those students must be registered again.
-Never commit or share the key.
+Use the same key on desktop and production if they share the database. Keep the
+key unchanged across restarts and backend instances. Changing it makes existing
+registrations unreadable. Never commit or share the key.
+
+On the production server, add the existing key to the backend's untracked
+`backend/.env.local` (the server loads it before `backend/.env`) or configure
+it in the deployment secret manager. Do not copy the key into tracked files.
+If the production database already contains registrations, do not generate a
+replacement key.
 
 For the PM2 deployment, provide the key in PM2's environment when starting or
-restarting the app; `backend/ecosystem.config.cjs` forwards it to the backend:
+restarting the app; `backend/ecosystem.config.cjs` forwards it:
 
 ```sh
 export FACE_DESCRIPTOR_ENCRYPTION_KEY="<base64-encoded 32-byte key>"
@@ -31,8 +37,8 @@ pm2 restart ODC_ALI --update-env
 ```
 
 Set the secret in the deployment environment/secret manager rather than
-committing it. After changing the secret, restart the backend before using
-face setup or attendance on any device.
+committing it. After configuring the key, deploy/reload the PM2 config and
+restart the backend before using face setup or attendance on any device.
 
 Optional matching settings:
 
