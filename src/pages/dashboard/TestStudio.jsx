@@ -230,6 +230,8 @@ const TestStudio = ({ setupMode = false, detailMode = false }) => {
   const [reassignOpen, setReassignOpen] = useState(false);
   const [reassigning, setReassigning] = useState(false);
   const [reassignTest, setReassignTest] = useState(null);
+  const [reassignStudentOptions, setReassignStudentOptions] = useState([]);
+  const [reassignStudentsLoading, setReassignStudentsLoading] = useState(false);
   const [teacherPaperHeader, setTeacherPaperHeader] = useState(defaultPaperHeader);
   const [nowTick, setNowTick] = useState(dayjs());
   const [courseDetailsOpen, setCourseDetailsOpen] = useState(false);
@@ -241,9 +243,12 @@ const TestStudio = ({ setupMode = false, detailMode = false }) => {
   const draftVersionRef = useRef(0);
   const autoSaveErrorShownRef = useRef(false);
   const localStorageErrorShownRef = useRef(false);
+  const reassignStudentsRequestRef = useRef(0);
   const selectedCourse = Form.useWatch("course", { form, preserve: true });
   const selectedCourseValues = Form.useWatch("courseIds", { form, preserve: true }) || EMPTY_ARRAY;
   const selectedBatchIds = Form.useWatch("batchIds", { form, preserve: true }) || EMPTY_ARRAY;
+  const reassignBatchIds =
+    Form.useWatch("batchIds", { form: reassignForm, preserve: true }) || EMPTY_ARRAY;
   const selectedQuestionLayout =
     Form.useWatch(["settings", "layout"], { form, preserve: true }) || "all_questions";
   const submittedDetailAttempts = useMemo(
@@ -953,15 +958,76 @@ const TestStudio = ({ setupMode = false, detailMode = false }) => {
     }
   };
 
-  const openReassignRemaining = (test) => {
+  const loadReassignStudentOptions = async (test, batchIds) => {
+    const requestId = reassignStudentsRequestRef.current + 1;
+    reassignStudentsRequestRef.current = requestId;
+    if (!batchIds.length) {
+      setReassignStudentOptions([]);
+      setReassignStudentsLoading(false);
+      return;
+    }
+
+    setReassignStudentsLoading(true);
+    try {
+      const selectedBatches = new Set(batchIds.map(String));
+      const courseIds = [
+        ...new Set(
+          (test.assignedBatches || [])
+            .filter((item) =>
+              selectedBatches.has(String(item.batch?._id || item.batch)),
+            )
+            .map((item) =>
+              String(
+                item.course?._id ||
+                  item.course ||
+                  test.course?._id ||
+                  test.course ||
+                  "",
+              ),
+            )
+            .filter(Boolean),
+        ),
+      ];
+      const response = await previewTestAssignment({ courseIds, batchIds });
+      if (requestId === reassignStudentsRequestRef.current) {
+        setReassignStudentOptions(response.data?.students || []);
+      }
+    } catch (error) {
+      if (requestId === reassignStudentsRequestRef.current) {
+        setReassignStudentOptions([]);
+        message.error(error.message || "Failed to load students for selected batches");
+      }
+    } finally {
+      if (requestId === reassignStudentsRequestRef.current) {
+        setReassignStudentsLoading(false);
+      }
+    }
+  };
+
+  const openReassignTest = (test) => {
     setReassignTest(test);
     const startAt = dayjs().add(1, "day").hour(9).minute(0).second(0);
+    const batchIds = (test.assignedBatches || []).map((item) =>
+      String(item.batch?._id || item.batch),
+    );
     reassignForm.setFieldsValue({
+      batchIds,
+      studentIds: [],
       startAt,
       endAt: startAt.add(test.schedule?.durationMinutes || 60, "minute"),
       durationMinutes: test.schedule?.durationMinutes || 60,
     });
     setReassignOpen(true);
+    setReassignStudentOptions([]);
+    void loadReassignStudentOptions(test, batchIds);
+  };
+
+  const handleReassignBatchesChange = (batchIds) => {
+    reassignForm.setFieldsValue({ batchIds, studentIds: [] });
+    setReassignStudentOptions([]);
+    if (reassignTest) {
+      void loadReassignStudentOptions(reassignTest, batchIds);
+    }
   };
 
   const handlePublishResults = async () => {
@@ -978,7 +1044,7 @@ const TestStudio = ({ setupMode = false, detailMode = false }) => {
     }
   };
 
-  const handleReassignRemaining = async () => {
+  const handleReassignTest = async () => {
     const targetTest = reassignTest || detailTest;
     if (!targetTest?._id) return;
     try {
@@ -988,10 +1054,13 @@ const TestStudio = ({ setupMode = false, detailMode = false }) => {
         startAt: values.startAt?.toISOString(),
         endAt: values.endAt?.toISOString(),
         durationMinutes: values.durationMinutes,
+        batchIds: values.batchIds,
+        studentIds: values.studentIds,
       });
-      message.success(response.message || "Remaining students reassigned");
+      message.success(response.message || "Test reassigned");
       setReassignOpen(false);
       setReassignTest(null);
+      setReassignStudentOptions([]);
       if (detailMode) {
         setDetailTest(response.data || targetTest);
       }
@@ -2696,8 +2765,8 @@ const TestStudio = ({ setupMode = false, detailMode = false }) => {
                 >
                   Download Results PDF
                 </Button>
-                <Button size="small" onClick={() => openReassignRemaining(detailTest)}>
-                  Reassign Remaining
+                <Button size="small" onClick={() => openReassignTest(detailTest)}>
+                  Reassign Test
                 </Button>
               </Space>
             ) : (
@@ -2911,20 +2980,70 @@ const TestStudio = ({ setupMode = false, detailMode = false }) => {
 
   const renderReassignModal = () => (
     <Modal
-      title="Reassign Remaining Students"
+      title="Reassign Test"
+      width={600}
       open={reassignOpen}
       onCancel={() => {
         setReassignOpen(false);
         setReassignTest(null);
+        setReassignStudentOptions([]);
+        reassignStudentsRequestRef.current += 1;
       }}
-      onOk={handleReassignRemaining}
+      onOk={handleReassignTest}
       confirmLoading={reassigning}
-      okText="Reassign Remaining"
+      okText="Reassign Test"
     >
       <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-        This keeps submitted students completed and reopens the same test only for students who have not submitted yet.
+        Choose batches, then optionally choose specific students. Leaving students
+        empty includes every active student in the selected batches. Reassigned
+        students can take the test again; their previous attempt is replaced by
+        the new result.
       </div>
       <Form form={reassignForm} layout="vertical">
+        <Form.Item
+          name="batchIds"
+          label="Batches"
+          rules={[{ required: true, message: "Select at least one batch" }]}
+        >
+          <Select
+            mode="multiple"
+            placeholder="Select one or more assigned batches"
+            onChange={handleReassignBatchesChange}
+            options={(reassignTest?.assignedBatches || []).map((item) => {
+              const batch = item.batch;
+              const batchId = String(batch?._id || batch || "");
+              return {
+                value: batchId,
+                label: batch?.batchName || batch?.batchCode || batchId,
+              };
+            })}
+          />
+        </Form.Item>
+        <Form.Item
+          name="studentIds"
+          label="Students (optional)"
+          extra="Search by student name or registration number. Leave empty to include all students in the selected batches."
+        >
+          <Select
+            mode="multiple"
+            allowClear
+            showSearch
+            loading={reassignStudentsLoading}
+            disabled={!reassignBatchIds.length}
+            placeholder="All students in selected batches"
+            filterOption={(input, option) =>
+              String(option?.label || "")
+                .toLowerCase()
+                .includes(input.toLowerCase())
+            }
+            options={reassignStudentOptions.map((student) => ({
+              value: String(student._id),
+              label: `${student.studentName || "Student"}${
+                student.registrationNo ? ` (${student.registrationNo})` : ""
+              }`,
+            }))}
+          />
+        </Form.Item>
         <Form.Item name="startAt" label="New Start Date & Time" rules={[{ required: true, message: "Start time is required" }]}>
           <DatePicker showTime className="w-full" disabledDate={(current) => current && current < dayjs().startOf("day")} />
         </Form.Item>
@@ -2992,8 +3111,8 @@ const TestStudio = ({ setupMode = false, detailMode = false }) => {
             </Button>
           ) : null}
           {canPublishTest && ["completed", "live", "scheduled"].includes(test.status) ? (
-            <Button size="small" onClick={() => openReassignRemaining(test)}>
-              Reassign Remaining
+            <Button size="small" onClick={() => openReassignTest(test)}>
+              Reassign Test
             </Button>
           ) : null}
           {canDeleteTest ? (
@@ -3130,8 +3249,8 @@ const TestStudio = ({ setupMode = false, detailMode = false }) => {
               title="Student Test Completion"
               extra={
                 canPublishTest ? (
-                  <Button size="small" onClick={() => openReassignRemaining(detailTest)}>
-                    Reassign Remaining
+                  <Button size="small" onClick={() => openReassignTest(detailTest)}>
+                    Reassign Test
                   </Button>
                 ) : null
               }
