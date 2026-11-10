@@ -298,20 +298,16 @@ const PermissionModuleCard = ({ moduleKey, permissions, setPermissions }) => {
   };
 
   return (
-    <div className={`flex h-full min-h-[258px] flex-col rounded-2xl border border-slate-200 border-t-4 p-5 shadow-sm transition-shadow hover:shadow-md ${moduleAccentClasses[moduleVisual.accent]}`}>
-      <div className="mb-4 flex min-h-[58px] items-start justify-between gap-3">
+    <div className={`flex h-full min-w-0 flex-col rounded-2xl border border-slate-200 border-t-4 p-4 shadow-sm transition-shadow hover:shadow-md sm:p-5 ${moduleAccentClasses[moduleVisual.accent]}`}>
+      <div className="mb-2 flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${moduleIconClasses[moduleVisual.accent]}`}>
             <ModuleIcon size={19} strokeWidth={2} />
           </span>
-          <div className="min-w-0">
-            <h4 className="m-0 text-base font-ArialBold leading-6 text-primary">{moduleLabel}</h4>
-            <p className="m-0 mt-1 text-xs leading-5 text-slate-500">
-            Enable module access and choose allowed actions
-            </p>
-          </div>
+          <h4 className="m-0 min-w-0 text-base font-ArialBold leading-6 text-primary">{moduleLabel}</h4>
         </div>
         <Switch
+          className="shrink-0"
           checked={isEnabled}
           onChange={(checked) =>
             updateModule(
@@ -332,12 +328,15 @@ const PermissionModuleCard = ({ moduleKey, permissions, setPermissions }) => {
           }
         />
       </div>
+      <p className="mb-4 min-h-10 text-sm leading-5 text-slate-500">
+        Enable module access and choose allowed actions.
+      </p>
 
-      <div className="mb-4 flex min-h-8 flex-wrap items-center gap-2">
-        <Button size="small" className="min-w-[88px]" onClick={() => setAll(true)}>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Button size="small" onClick={() => setAll(true)}>
           Select All
         </Button>
-        <Button size="small" className="min-w-[88px]" onClick={() => setAll(false)}>
+        <Button size="small" onClick={() => setAll(false)}>
           Clear All
         </Button>
       </div>
@@ -346,7 +345,7 @@ const PermissionModuleCard = ({ moduleKey, permissions, setPermissions }) => {
         {RBAC_ACTIONS.map((action) => (
           <label
             key={action}
-            className={`flex min-h-[42px] cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${
+            className={`flex min-h-[42px] min-w-0 cursor-pointer items-center gap-2 rounded-xl border px-2 py-2 text-sm transition-colors sm:px-3 ${
               currentActions[action]
                 ? "border-primary bg-slate-50 text-primary"
                 : "border-slate-200 bg-white text-slate-600"
@@ -378,7 +377,7 @@ const PermissionModuleCard = ({ moduleKey, permissions, setPermissions }) => {
                 });
               }}
             />
-            <span>{formatActionLabel(action)}</span>
+            <span className="min-w-0 break-words">{formatActionLabel(action)}</span>
           </label>
         ))}
       </div>
@@ -394,7 +393,7 @@ const PermissionModuleCard = ({ moduleKey, permissions, setPermissions }) => {
             ].map(([key, label]) => (
               <label
                 key={key}
-                className={`flex min-h-[42px] cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors ${
+                className={`flex min-h-[42px] min-w-0 cursor-pointer items-center gap-2 rounded-xl border px-2 py-2 text-sm transition-colors sm:px-3 ${
                   currentActions[key]
                     ? "border-primary bg-slate-50 text-primary"
                     : "border-slate-200 bg-white text-slate-600"
@@ -1846,10 +1845,11 @@ const SuperAdmin = () => {
         onOk={() => userForm.submit()}
         okText={editingUser ? "Update Account" : "Create Account"}
         confirmLoading={savingUser}
-        width={1000}
+        width={1280}
+        style={{ maxWidth: "96vw" }}
         okButtonProps={{ className: "!bg-primary !border-primary hover:!bg-[#0e215fc7]" }}
       >
-        <div className="max-h-[76vh] overflow-y-auto pr-2">
+        <div className="max-h-[76vh] min-w-0 overflow-x-hidden overflow-y-auto pr-2">
           <Form
             layout="vertical"
             form={userForm}
@@ -2120,7 +2120,7 @@ const SuperAdmin = () => {
                   This account can perform only the actions enabled below.
                 </p>
               </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid grid-cols-1 items-stretch gap-4 sm:grid-cols-2 2xl:grid-cols-3">
                 {RBAC_MODULES.map((moduleKey) => (
                   <PermissionModuleCard
                     key={moduleKey}
