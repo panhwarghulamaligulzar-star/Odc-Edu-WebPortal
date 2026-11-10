@@ -151,6 +151,7 @@ const testSchema = new mongoose.Schema(
     },
     assignedBatches: { type: [testBatchSchema], default: [] },
     excludedStudents: { type: [excludedStudentSchema], default: [] },
+    allowedStudents: { type: [{ type: String, ref: "Admission" }], default: [] },
     settings: { type: settingsSchema, default: () => ({}) },
     resultsPublished: { type: Boolean, default: false },
     wizardStep: { type: Number, default: 0, min: 0, max: 6 },
@@ -227,7 +228,7 @@ const testAttemptSchema = new mongoose.Schema(
     startedAt: { type: Date, default: null },
     expiresAt: { type: Date, default: null },
     submittedAt: { type: Date, default: null },
-    attemptsUsed: { type: Number, default: 1, min: 1 },
+    attemptsUsed: { type: Number, default: 1, min: 0 },
     status: {
       type: String,
       enum: ["not_started", "in_progress", "submitted", "auto_submitted", "expired", "graded"],

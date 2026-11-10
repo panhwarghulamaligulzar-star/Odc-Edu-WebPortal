@@ -115,6 +115,14 @@ const getStudentBatchIds = async (studentId) => {
   return [...new Set(enrollments.map((enrollment) => String(enrollment.batch)).filter(Boolean))];
 };
 
+const getStudentTestAccessFilter = (studentId) => ({
+  $or: [
+    { allowedStudents: { $exists: false } },
+    { allowedStudents: { $size: 0 } },
+    { allowedStudents: String(studentId) },
+  ],
+});
+
 const sanitizeQuestionForStudent = (question = {}, index = 0) => ({
   _id: question._id,
   order: question.order ?? index,
@@ -172,7 +180,7 @@ const serializeStudentTest = (test, attempt = null, now = new Date(), attemptsUs
     attempt.expiresAt &&
     now < new Date(attempt.expiresAt);
   const status = canResume ? "live" : lifecycleStatus;
-  const usedAttempts = attemptsUsed || Number(attempt?.attemptsUsed || 0);
+  const usedAttempts = attemptsUsed ?? Number(attempt?.attemptsUsed ?? 0);
   const canStart =
     canResume ||
     (status === "live" &&
@@ -232,7 +240,7 @@ const serializeStudentTest = (test, attempt = null, now = new Date(), attemptsUs
                 score: attempt.score,
                 percentage: attempt.percentage,
                 passed: ["submitted", "auto_submitted", "graded"].includes(attempt.status) &&
-                  Number(attempt.score || 0) >= Number(plain.passingMarks || 0),
+                  Number(attempt.score || 0) >= Number(test.passingMarks || 0),
               }
             : {}),
         }
@@ -449,9 +457,14 @@ const syncQuestionBank = async (test, req) => {
 const attachAssignmentStats = async (test) => {
   const plain = test.toObject ? test.toObject() : test;
   const batchIds = (plain.assignedBatches || []).map((item) => item.batch?._id || item.batch);
+  const allowedStudents = (plain.allowedStudents || []).map(String);
   const excluded = new Set((plain.excludedStudents || []).map((item) => String(item.student?._id || item.student)));
   const enrollments = batchIds.length
-    ? await Enrollment.find({ batch: { $in: batchIds }, status: "Active" })
+    ? await Enrollment.find({
+        batch: { $in: batchIds },
+        status: "Active",
+        ...(allowedStudents.length ? { student: { $in: allowedStudents } } : {}),
+      })
         .populate("student", "studentName registrationNo emailAddress isActive")
         .lean()
     : [];
@@ -461,7 +474,10 @@ const attachAssignmentStats = async (test) => {
       enrollment.student.isActive !== false &&
       !excluded.has(String(enrollment.student._id)),
   );
-  const attempts = await TestAttempt.find({ test: plain._id }).lean();
+  const attempts = await TestAttempt.find({
+    test: plain._id,
+    ...(allowedStudents.length ? { student: { $in: allowedStudents } } : {}),
+  }).lean();
   const attemptCounts = attempts.reduce(
     (acc, attempt) => {
       acc[attempt.status] = (acc[attempt.status] || 0) + 1;
@@ -543,6 +559,7 @@ export const getMyStudentTests = async (req, res) => {
           status: { $nin: ["draft", "cancelled"] },
           "assignedBatches.batch": { $in: batchIds },
           "excludedStudents.student": { $ne: studentId },
+          ...getStudentTestAccessFilter(studentId),
         })
           .populate("course", "courseId courseName")
           .populate("courses", "courseId courseName")
@@ -559,7 +576,7 @@ export const getMyStudentTests = async (req, res) => {
     attempts.forEach((attempt) => {
       const testId = String(attempt.test);
       attemptByTest.set(testId, attempt);
-      attemptsUsedByTest.set(testId, Number(attempt.attemptsUsed || 1));
+      attemptsUsedByTest.set(testId, Number(attempt.attemptsUsed ?? 0));
     });
 
     res.status(200).json({
@@ -588,6 +605,7 @@ export const getMyStudentTestReview = async (req, res) => {
       isDeleted: false,
       "assignedBatches.batch": { $in: batchIds },
       "excludedStudents.student": { $ne: studentId },
+      ...getStudentTestAccessFilter(studentId),
     })
       .populate("course", "courseId courseName")
       .populate("courses", "courseId courseName")
@@ -665,7 +683,7 @@ export const getMyStudentTestReview = async (req, res) => {
               score: attempt.score,
               percentage: attempt.percentage,
               passed: ["submitted", "auto_submitted", "graded"].includes(attempt.status) &&
-                Number(attempt.score || 0) >= Number(plain.passingMarks || 0),
+                Number(attempt.score || 0) >= Number(test.passingMarks || 0),
             }
           : {}),
         questions,
@@ -687,6 +705,7 @@ export const startMyStudentTest = async (req, res) => {
       status: { $nin: ["draft", "cancelled"] },
       "assignedBatches.batch": { $in: batchIds },
       "excludedStudents.student": { $ne: studentId },
+      ...getStudentTestAccessFilter(studentId),
     })
       .populate("course", "courseId courseName")
       .populate("teacherUser", "name email profile");
@@ -729,7 +748,7 @@ export const startMyStudentTest = async (req, res) => {
       });
     } else if (attempt.status !== "in_progress") {
       const attemptsAllowed = Math.max(1, Number(test.settings?.attemptsAllowed || 1));
-      if (Number(attempt.attemptsUsed || 1) >= attemptsAllowed) {
+      if (Number(attempt.attemptsUsed ?? 0) >= attemptsAllowed) {
         return res.status(400).json({ success: false, message: "You have used all attempts allowed for this test." });
       }
       attempt.startedAt = now;
@@ -742,7 +761,7 @@ export const startMyStudentTest = async (req, res) => {
       attempt.score = 0;
       attempt.percentage = 0;
       attempt.passed = false;
-      attempt.attemptsUsed = Number(attempt.attemptsUsed || 1) + 1;
+      attempt.attemptsUsed = Number(attempt.attemptsUsed ?? 0) + 1;
       await attempt.save();
     } else if (!canResumeAttempt) {
       return res.status(400).json({ success: false, message: "Your test duration has ended." });
@@ -795,7 +814,14 @@ export const submitMyStudentTest = async (req, res) => {
   try {
     const studentUser = await getStudentPortalUser(req);
     const studentId = String(studentUser.student);
-    const test = await Test.findOne({ _id: req.params.id, isDeleted: false });
+    const batchIds = await getStudentBatchIds(studentId);
+    const test = await Test.findOne({
+      _id: req.params.id,
+      isDeleted: false,
+      "assignedBatches.batch": { $in: batchIds },
+      "excludedStudents.student": { $ne: studentId },
+      ...getStudentTestAccessFilter(studentId),
+    });
     if (!test) return res.status(404).json({ success: false, message: "Test not found." });
 
     const now = new Date();
@@ -824,6 +850,9 @@ export const submitMyStudentTest = async (req, res) => {
     const completedAttempts = await TestAttempt.find({
       test: test._id,
       status: { $in: ["submitted", "auto_submitted", "graded"] },
+      ...(test.allowedStudents?.length
+        ? { student: { $in: test.allowedStudents } }
+        : {}),
     })
       .select("_id score percentage submittedAt")
       .sort({ score: -1, percentage: -1, submittedAt: 1, _id: 1 })
@@ -929,7 +958,13 @@ export const getTestAttempts = async (req, res) => {
       return res.status(403).json({ success: false, message: "You can only view submissions for your own tests." });
     }
 
-    const attempts = await TestAttempt.find({ test: test._id })
+    const allowedStudentIds = (test.allowedStudents || []).map(String);
+    const attempts = await TestAttempt.find({
+      test: test._id,
+      ...(allowedStudentIds.length
+        ? { student: { $in: allowedStudentIds } }
+        : {}),
+    })
       .populate("student", "studentName registrationNo mobileNumber emailAddress")
       .populate("batch", "batchName batchCode")
       .sort({ submittedAt: -1, updatedAt: -1 })
@@ -938,7 +973,13 @@ export const getTestAttempts = async (req, res) => {
     const batchIds = (test.assignedBatches || []).map((item) => item.batch);
     const excluded = new Set((test.excludedStudents || []).map((item) => String(item.student)));
     const enrollments = batchIds.length
-      ? await Enrollment.find({ batch: { $in: batchIds }, status: "Active" })
+      ? await Enrollment.find({
+          batch: { $in: batchIds },
+          status: "Active",
+          ...(allowedStudentIds.length
+            ? { student: { $in: allowedStudentIds } }
+            : {}),
+        })
           .populate("student", "studentName registrationNo mobileNumber emailAddress isActive")
           .populate("batch", "batchName batchCode")
           .lean()
@@ -1032,6 +1073,7 @@ export const getStudentTestHistory = async (req, res) => {
         { course: { $in: accessibleCourseIds } },
       ],
       "excludedStudents.student": { $ne: student._id },
+      $and: [getStudentTestAccessFilter(student._id)],
       ...(!(req.currentUser?.isSuperAdmin || req.user?.isSuperAdmin)
         ? { teacherUser: getUserId(req) }
         : {}),
@@ -1124,24 +1166,95 @@ export const reassignRemainingStudents = async (req, res) => {
       return res.status(400).json({ success: false, message: "End time must be after start time." });
     }
 
-    const before = test.toObject();
-    const submittedStatuses = ["submitted", "auto_submitted", "graded"];
-    const remainingAttempts = await TestAttempt.find({
-      test: test._id,
-      status: { $nin: submittedStatuses },
+    const assignedBatchById = new Map(
+      (test.assignedBatches || []).map((item) => [String(item.batch), item]),
+    );
+    const requestedBatchIds = normalizeArray(req.body?.batchIds);
+    const targetBatchIds = requestedBatchIds.length
+      ? [...new Set(requestedBatchIds.map(String))]
+      : [...assignedBatchById.keys()];
+    if (
+      !targetBatchIds.length ||
+      targetBatchIds.some((batchId) => !assignedBatchById.has(batchId))
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Select one or more batches already assigned to this test.",
+      });
+    }
+
+    const targetCourses = [
+      ...new Set(
+        targetBatchIds
+          .map((batchId) => String(assignedBatchById.get(batchId)?.course || test.course))
+          .filter(Boolean),
+      ),
+    ];
+    const validatedBatches = await assertBatchAccess(
+      req,
+      targetCourses,
+      targetBatchIds,
+    );
+    const enrollments = await Enrollment.find({
+      batch: { $in: targetBatchIds },
+      status: "Active",
+    })
+      .populate("student", "isActive")
+      .lean();
+    const enrolledStudents = new Map();
+    enrollments.forEach((enrollment) => {
+      const studentId = String(enrollment.student?._id || "");
+      if (studentId && enrollment.student?.isActive !== false) {
+        enrolledStudents.set(studentId, String(enrollment.batch));
+      }
     });
 
-    await Promise.all(
-      remainingAttempts.map((attempt) => {
-        attempt.status = "not_started";
-        attempt.startedAt = null;
-        attempt.expiresAt = null;
-        attempt.submittedAt = null;
-        attempt.lastAutosaveAt = null;
-        return attempt.save();
-      }),
+    const requestedStudentIds = normalizeArray(req.body?.studentIds).map(String);
+    const targetStudentIds = requestedStudentIds.length
+      ? [...new Set(requestedStudentIds)]
+      : [...enrolledStudents.keys()];
+    if (!targetStudentIds.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No active students are enrolled in the selected batches.",
+      });
+    }
+    if (targetStudentIds.some((studentId) => !enrolledStudents.has(studentId))) {
+      return res.status(400).json({
+        success: false,
+        message: "One or more selected students are not actively enrolled in the selected batches.",
+      });
+    }
+
+    const before = test.toObject();
+    await TestAttempt.bulkWrite(
+      targetStudentIds.map((studentId) => ({
+        updateOne: {
+          filter: { test: test._id, student: studentId },
+          update: {
+            $set: {
+              batch: enrolledStudents.get(studentId),
+              startedAt: null,
+              expiresAt: null,
+              submittedAt: null,
+              attemptsUsed: 0,
+              status: "not_started",
+              answers: [],
+              score: 0,
+              percentage: 0,
+              passed: false,
+              lastAutosaveAt: null,
+            },
+          },
+        },
+      })),
     );
 
+    test.assignedBatches = validatedBatches.map((batch) => ({
+      batch: String(batch._id),
+      course: String(batch.course),
+    }));
+    test.allowedStudents = targetStudentIds;
     test.schedule.startAt = nextStart;
     test.schedule.endAt = nextEnd;
     test.schedule.durationMinutes = Number(durationMinutes || test.schedule.durationMinutes || 60);
@@ -1152,15 +1265,19 @@ export const reassignRemainingStudents = async (req, res) => {
     await test.save();
 
     const stats = await attachAssignmentStats(test);
-    const remainingCount =
-      (stats.attemptCounts?.not_started || 0) +
-      (stats.attemptCounts?.in_progress || 0) +
-      (stats.attemptCounts?.expired || 0);
+    const reassignedCount = targetStudentIds.length;
 
-    await createAudit(test, req, "reassigned_remaining", before, test.toObject(), `Remaining students: ${remainingCount}`);
+    await createAudit(
+      test,
+      req,
+      "reassigned_students",
+      before,
+      test.toObject(),
+      `Reassigned students: ${reassignedCount}`,
+    );
     res.status(200).json({
       success: true,
-      message: `Test reassigned for ${remainingCount} remaining student(s). Submitted students are kept completed.`,
+      message: `Test reassigned to ${reassignedCount} student(s). Their previous attempts were replaced.`,
       data: stats,
     });
   } catch (error) {
