@@ -1,5 +1,5 @@
 import axios from "axios";
-import useZustandStore  from "../stores/zustandStore";
+import useZustandStore from "../stores/zustandStore";
 
 const getApiBaseUrl = () => {
   if (import.meta.env.DEV) {

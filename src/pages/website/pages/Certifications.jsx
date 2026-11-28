@@ -3,7 +3,7 @@ import { Search, Award, Calendar, User, FileText, Download, Eye } from 'lucide-r
 import AppHeader from '../../../layouts/AppHeader';
 import OdysseyFooter from '../layout/OdysseyFooter';
 import WebHeader from '../layout/WebHeader';
-import { getCertificationByCourseId } from '../../../services/certificationService';
+import { getPublicCertificationsByRegistrationNo } from '../../../services/certificationService';
 import { message, Modal } from 'antd';
 import dayjs from "dayjs";
 import odc_logo from "../../../assets/images/logos/new logo.png";
@@ -32,7 +32,7 @@ const Certifications = () => {
     try {
       setIsSearching(true);
       setInValidStudentId(false);
-      let resp = await getCertificationByCourseId(searchId);
+      const resp = await getPublicCertificationsByRegistrationNo(searchId.trim());
       // console.log("resp", resp);
       if (resp?.success === true && resp?.data) {
         const certificates = Array.isArray(resp.data) ? resp.data : [resp.data];
@@ -43,12 +43,17 @@ const Certifications = () => {
         setInValidStudentId(true);
         setSearchResult(false);
         setCertificationData([]);
-        message.error('No certificates found for this Student ID');
+        message.error('No certificates found for this Registration No');
       }
     } catch (error) {
-      console.log("error", error);
-      message.error('Error searching for certificates');
-      setInValidStudentId(true);
+      if (error.response?.status === 404) {
+        setInValidStudentId(true);
+        setCertificationData([]);
+        message.error('No certificates found for this Registration No');
+      } else {
+        setInValidStudentId(false);
+        message.error(error.response?.data?.message || 'Error searching for certificates');
+      }
       setSearchResult(false);
     } finally {
       setIsSearching(false);
@@ -353,7 +358,7 @@ const Certifications = () => {
       </div>
 
       {/* Card Footer */}
-      {/* <div className="px-6 pb-6">
+      <div className="px-6 pb-6">
         <button
           onClick={() => handleViewCertificate(certificate)}
           className="w-full bg-blue-900 hover:bg-blue-800 text-white font-semibold py-3 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2 shadow-md"
@@ -361,7 +366,7 @@ const Certifications = () => {
           <Eye size={20} />
           View Full Certificate
         </button>
-      </div> */}
+      </div>
     </div>
   );
 
@@ -447,11 +452,10 @@ const Certifications = () => {
               </div>
 
               {/* Cards Grid */}
-              <div className="w-[90%]  m-auto flex flex-wrap justify-center items-center gap-[10px] ">
+              <div className="w-full sm:w-[90%] m-auto flex flex-wrap justify-center items-center gap-[10px] ">
                 {certificateData.map((certificate, index) => (
-                  <div className='w-[350px]'>
+                  <div className="w-full max-w-[350px]" key={certificate?.certificateNo || index}>
                   <CertificateCardPreview 
-                    key={certificate?._id || certificate?.certificateNo || index}
                     certificate={certificate}
                     index={index}
                   />

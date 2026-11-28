@@ -47,13 +47,11 @@ export const deleteCertification = async (id, data) => {
   }
 };
 
-export const getCertificationByCourseId = async (courseId) => {
-  try {
-    const respance = await api.get(`/student/certificate/${courseId}`);
-    return respance.data;
-  } catch (error) {
-    return error;
-  }
+export const getPublicCertificationsByRegistrationNo = async (registrationNo) => {
+  const response = await api.get(
+    `/student/public/certificates/${encodeURIComponent(registrationNo)}`,
+  );
+  return response.data;
 };
 
 // Bulk create certifications
@@ -68,12 +66,8 @@ export const getCertificationByCourseId = async (courseId) => {
 
 // NEW FUNCTION - Bulk upload certifications from Excel
 export const bulkUploadCertifications = async (certificationsData) => {
-  try {
-    const response = await api.post("/student/bulk-upload", certificationsData);
-    return response.data;
-  } catch (error) {
-    throw error;
-  }
+  const response = await api.post("/student/bulk-upload", certificationsData);
+  return response.data;
 };
 
 // Get all students (admissions)

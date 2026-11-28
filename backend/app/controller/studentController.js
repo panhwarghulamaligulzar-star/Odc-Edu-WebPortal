@@ -117,6 +117,49 @@ const getCertificates = async (req, res) => {
   }
 };
 
+const getPublicCertificates = async (req, res) => {
+  try {
+    const registrationNo = String(req.params.registrationNo || "").trim();
+    if (!registrationNo) {
+      return res.status(400).json({
+        success: false,
+        message: "Registration number is required",
+      });
+    }
+
+    const certificates = await certificationModule
+      .find({ registrationNo })
+      .select(
+        "registrationNo courseId certificateNo studentName fatherName course duration startingDate endingDate issueDate grade skills",
+      )
+      .lean();
+
+    if (certificates.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No certificates found for this Registration No",
+        data: [],
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message:
+        certificates.length === 1
+          ? "Certificate retrieved successfully"
+          : `Found ${certificates.length} certificates`,
+      count: certificates.length,
+      data: certificates,
+    });
+  } catch (error) {
+    console.error("Error retrieving public certificate(s):", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while retrieving certificates",
+    });
+  }
+};
+
 const updateCertificate = async (req, res) => {
   try {
     const { id } = req.params;
@@ -323,4 +366,12 @@ export const bulkUploadCertifications = async (req, res) => {
 
 
 
-export default { createStudentCertificate, getAllCertificates, getCertificates, updateCertificate, deleteCertificate,bulkUploadCertifications };
+export default {
+  createStudentCertificate,
+  getAllCertificates,
+  getCertificates,
+  getPublicCertificates,
+  updateCertificate,
+  deleteCertificate,
+  bulkUploadCertifications,
+};

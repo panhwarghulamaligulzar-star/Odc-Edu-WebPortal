@@ -29,6 +29,8 @@ studentRoute.post(
 studentRoute.post("/bulk-upload", authMiddleware, authorize("certifications", "import"), studentController.bulkUploadCertifications);
 // Get all certificates
 studentRoute.get("/certificates", authMiddleware, authorize("certifications", "view"), studentController.getAllCertificates);
+// Public certificate verification returns only fields shown on the certificate.
+studentRoute.get("/public/certificates/:registrationNo", studentController.getPublicCertificates);
 // Get certificate(s) by student ID
 studentRoute.get("/certificate/:id", authMiddleware, authorize("certifications", "view"), studentController.getCertificates);
 // Update certificate with image upload
