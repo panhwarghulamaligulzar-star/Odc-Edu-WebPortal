@@ -636,6 +636,7 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
   const faceScanHandlerRef = useRef(null);
   const faceLastMatchRef = useRef({ key: "", at: 0, descriptor: null });
   const faceSetupThenMarkRef = useRef(false);
+  const faceSetupCaptureRef = useRef(null);
   const faceSuccessTimerRef = useRef(null);
   const faceNoMatchTimerRef = useRef(null);
   const loadCalendarRef = useRef(async () => {});
@@ -1228,9 +1229,26 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
     setFaceScanStatus("idle");
   }, []);
 
-  const startFaceCamera = useCallback(async () => {
+  const startFaceCamera = useCallback(async ({ restart = false } = {}) => {
     if (!faceSupported) {
       setFaceScanError("Camera access is not available in this browser. Use Chrome/Edge on HTTPS or localhost.");
+      return;
+    }
+
+    if (!restart && faceStreamRef.current && faceDetectorRef.current) {
+      try {
+        if (faceVideoRef.current) {
+          faceVideoRef.current.srcObject = faceStreamRef.current;
+          await faceVideoRef.current.play();
+        }
+        setFaceScanError("");
+        setFaceCameraActive(true);
+        setFaceScanStatus("scanning");
+      } catch (error) {
+        setFaceScanError(error?.message || "Unable to resume the face camera.");
+        setFaceCameraActive(false);
+        setFaceScanStatus("error");
+      }
       return;
     }
 
@@ -1331,9 +1349,12 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
   }, [qrScannerOpen, startQrScanner, stopQrScanner]);
 
   useEffect(() => {
-    if (!faceSetupOpen && !faceScannerOpen) return;
+    if (!faceSetupOpen && !faceScannerOpen) {
+      stopFaceCamera();
+      return;
+    }
+
     startFaceCamera();
-    return () => stopFaceCamera();
   }, [faceSetupOpen, faceScannerOpen, startFaceCamera, stopFaceCamera]);
 
   useEffect(() => {
@@ -1822,86 +1843,23 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
         updatedAt: new Date().toISOString(),
       });
 
-      if (faceSetupThenMarkRef.current) {
-        faceSetupThenMarkRef.current = false;
-        try {
-          const attendanceResponse = await markFaceAttendance({
-            batchId: selectedBatch,
-            date: selectedDate.format("YYYY-MM-DD"),
-            faceDescriptor: capture.descriptor,
-          });
-          const markedStudent = attendanceResponse?.data?.student || {
-            _id: faceEnrollmentStudent._id,
-            name: faceEnrollmentStudent.name,
-            registrationNo: faceEnrollmentStudent.registrationNo,
-            gender: faceEnrollmentStudent.gender,
-            profilePicture: faceEnrollmentStudent.profilePicture,
-          };
-          faceLastMatchRef.current = {
-            key: String(markedStudent._id),
-            at: Date.now(),
-            descriptor: capture.descriptor,
-            alreadyMarked: false,
-          };
-          handleFaceAttendanceMarked(
-            markedStudent,
-            attendanceResponse?.data?.confidence,
-            attendanceResponse?.data?.batchesMarked || [],
-            {
-              capturedFaceImage: capture.imageData,
-              attendanceRecords: attendanceResponse?.data?.attendanceRecords || [],
-            },
-          );
-          message.success(attendanceResponse?.message || "Face saved and attendance marked.");
-        } catch (attendanceError) {
-          const alreadyMarkedData = attendanceError?.response?.data;
-          if (alreadyMarkedData?.code === "ATTENDANCE_ALREADY_MARKED" && alreadyMarkedData.data?.student) {
-            faceLastMatchRef.current = {
-              key: String(alreadyMarkedData.data.student._id),
-              at: Date.now(),
-              descriptor: capture.descriptor,
-              alreadyMarked: true,
-            };
-            handleFaceAttendanceMarked(
-              alreadyMarkedData.data.student,
-              alreadyMarkedData.data.confidence,
-              alreadyMarkedData.data.batchesMarked || [],
-              {
-                capturedFaceImage: capture.imageData,
-                alreadyMarked: true,
-                attendanceRecords: alreadyMarkedData.data.attendanceRecords || [],
-              },
-            );
-            message.info("Face setup saved; this student's attendance was already marked.");
-          } else {
-            const attendanceErrorMessage =
-              alreadyMarkedData?.message ||
-              attendanceError?.message ||
-              "Face setup was saved, but attendance could not be marked. Retry the face scan.";
-            setFaceScanError(attendanceErrorMessage);
-            message.error(attendanceErrorMessage);
-          }
-        }
-
-        setFaceSetupOpen(false);
-        setFaceScannerOpen(true);
-      } else {
-        setFaceSetupSuccessData({
-          ...(enrollmentResponse?.data?.student || faceEnrollmentStudent),
-          name: enrollmentResponse?.data?.student?.name || faceEnrollmentStudent.name,
-          registrationNo: enrollmentResponse?.data?.student?.registrationNo || faceEnrollmentStudent.registrationNo,
-          capturedFaceImage: capture.imageData,
-          batchName:
-            faceEnrollmentStudent.batchLabels?.join(", ") ||
-            faceEnrollmentStudent.attendanceBatchLabel ||
-            faceEnrollmentStudent.attendanceBatchName ||
-            "Face attendance roster",
-        });
-        setFaceSetupSuccessOpen(true);
-        message.success(enrollmentResponse?.message || "Face setup saved successfully");
-        setFaceSetupOpen(false);
-        setFaceScannerOpen(true);
-      }
+      faceSetupThenMarkRef.current = false;
+      faceSetupCaptureRef.current = capture;
+      setFaceSetupSuccessData({
+        ...(enrollmentResponse?.data?.student || faceEnrollmentStudent),
+        name: enrollmentResponse?.data?.student?.name || faceEnrollmentStudent.name,
+        registrationNo: enrollmentResponse?.data?.student?.registrationNo || faceEnrollmentStudent.registrationNo,
+        capturedFaceImage: capture.imageData,
+        batchName:
+          faceEnrollmentStudent.batchLabels?.join(", ") ||
+          faceEnrollmentStudent.attendanceBatchLabel ||
+          faceEnrollmentStudent.attendanceBatchName ||
+          "Face attendance roster",
+      });
+      setFaceSetupSuccessOpen(true);
+      message.success(enrollmentResponse?.message || "Face setup saved successfully");
+      setFaceSetupOpen(false);
+      setFaceScannerOpen(true);
     } catch (error) {
       faceSetupThenMarkRef.current = false;
       const errorMessage = error?.response?.data?.message || error?.message || "Failed to save face setup";
@@ -1977,6 +1935,82 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
       setFaceSuccessOpen(false);
       setFaceScanStatus("scanning");
     }, 2000);
+  };
+
+  const continueFaceScreening = async () => {
+    const capture = faceSetupCaptureRef.current;
+    if (!capture?.descriptor) {
+      message.error("The captured face is unavailable. Please set up the face again.");
+      return;
+    }
+    if (!selectedBatch) {
+      message.warning("Select a batch before continuing face attendance.");
+      return;
+    }
+
+    faceBusyRef.current = true;
+    setFaceBusy(true);
+    try {
+      const response = await markFaceAttendance({
+        batchId: selectedBatch,
+        date: selectedDate.format("YYYY-MM-DD"),
+        faceDescriptor: capture.descriptor,
+      });
+      const student =
+        response?.data?.student ||
+        faceSetupSuccessData;
+      faceLastMatchRef.current = {
+        key: String(student?._id || ""),
+        at: Date.now(),
+        descriptor: capture.descriptor,
+        alreadyMarked: false,
+      };
+      faceSetupCaptureRef.current = null;
+      setFaceSetupSuccessOpen(false);
+      handleFaceAttendanceMarked(
+        student,
+        response?.data?.confidence,
+        response?.data?.batchesMarked || [],
+        {
+          capturedFaceImage: capture.imageData,
+          attendanceRecords: response?.data?.attendanceRecords || [],
+        },
+      );
+      message.success(response?.message || "Face setup saved and attendance marked.");
+      await loadAttendance();
+    } catch (error) {
+      const data = error?.response?.data;
+      if (data?.code === "ATTENDANCE_ALREADY_MARKED" && data.data?.student) {
+        faceLastMatchRef.current = {
+          key: String(data.data.student._id),
+          at: Date.now(),
+          descriptor: capture.descriptor,
+          alreadyMarked: true,
+        };
+        faceSetupCaptureRef.current = null;
+        setFaceSetupSuccessOpen(false);
+        handleFaceAttendanceMarked(
+          data.data.student,
+          data.data.confidence,
+          data.data.batchesMarked || [],
+          {
+            capturedFaceImage: capture.imageData,
+            alreadyMarked: true,
+            attendanceRecords: data.data.attendanceRecords || [],
+          },
+        );
+        message.info("This student's attendance was already marked.");
+        await loadAttendance();
+      } else {
+        const errorMessage =
+          data?.message || error?.message || "Face setup was saved, but attendance could not be marked.";
+        setFaceScanError(errorMessage);
+        message.error(errorMessage);
+      }
+    } finally {
+      faceBusyRef.current = false;
+      setFaceBusy(false);
+    }
   };
 
   const showFaceNoMatchPopup = ({ message: popupMessage, capturedFaceImage, title, code }) => {
@@ -2166,12 +2200,26 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
   });
 
   useEffect(() => {
-    if (!faceScannerOpen || faceSetupOpen || !faceCameraActive || faceSuccessOpen || faceNoMatchOpen) return;
+    if (
+      !faceScannerOpen ||
+      faceSetupOpen ||
+      faceSetupSuccessOpen ||
+      !faceCameraActive ||
+      faceSuccessOpen ||
+      faceNoMatchOpen
+    ) return;
 
     faceScanHandlerRef.current?.({ showToast: false });
 
     faceScanTimerRef.current = setInterval(() => {
-      if (!faceScannerOpen || faceSetupOpen || !faceCameraActive || faceSuccessOpen || faceNoMatchOpen) {
+      if (
+        !faceScannerOpen ||
+        faceSetupOpen ||
+        faceSetupSuccessOpen ||
+        !faceCameraActive ||
+        faceSuccessOpen ||
+        faceNoMatchOpen
+      ) {
         return;
       }
       if (faceBusyRef.current) {
@@ -2186,7 +2234,14 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
         faceScanTimerRef.current = null;
       }
     };
-  }, [faceScannerOpen, faceSetupOpen, faceCameraActive, faceSuccessOpen, faceNoMatchOpen]);
+  }, [
+    faceScannerOpen,
+    faceSetupOpen,
+    faceSetupSuccessOpen,
+    faceCameraActive,
+    faceSuccessOpen,
+    faceNoMatchOpen,
+  ]);
 
   const cellRender = useCallback((current, info) => {
     if (info.type !== "date") return info.originNode;
@@ -3299,7 +3354,7 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
             key="start"
             icon={<MdCameraAlt size={16} />}
             loading={faceInitializing}
-            onClick={startFaceCamera}
+            onClick={() => startFaceCamera({ restart: true })}
           >
             {faceCameraActive ? "Restart Camera" : "Start Camera"}
           </Button>,
@@ -3323,7 +3378,12 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
             <Segmented
               aria-label="Face setup camera"
               value={faceFacingMode}
-              onChange={setFaceFacingMode}
+              onChange={(mode) => {
+                if (mode !== faceFacingMode) {
+                  stopFaceCamera();
+                  setFaceFacingMode(mode);
+                }
+              }}
               disabled={faceInitializing}
               options={[
                 { label: "Front camera", value: "user" },
@@ -3382,11 +3442,20 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
         open={faceSetupSuccessOpen}
         zIndex={1200}
         footer={[
-          <Button key="ok" type="primary" onClick={() => setFaceSetupSuccessOpen(false)}>
-            OK
+          <Button
+            key="continue"
+            type="primary"
+            icon={<MdFace size={16} />}
+            loading={faceBusy}
+            onClick={continueFaceScreening}
+          >
+            Continue Screening
           </Button>,
         ]}
-        onCancel={() => setFaceSetupSuccessOpen(false)}
+        onCancel={() => {
+          faceSetupCaptureRef.current = null;
+          setFaceSetupSuccessOpen(false);
+        }}
       >
         {faceSetupSuccessData ? (
           <div className="space-y-4 pt-2">
@@ -3413,6 +3482,14 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Batch / Roster</div>
               <div className="mt-1 font-medium text-slate-800">{faceSetupSuccessData.batchName}</div>
             </div>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              Select Continue Screening to mark this student present and keep the camera ready for the next student.
+            </div>
+            {faceScanError ? (
+              <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {faceScanError}
+              </div>
+            ) : null}
           </div>
         ) : null}
       </Modal>
@@ -3429,7 +3506,7 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
             key="start"
             icon={<MdCameraAlt size={16} />}
             loading={faceInitializing}
-            onClick={startFaceCamera}
+            onClick={() => startFaceCamera({ restart: true })}
           >
             {faceCameraActive ? "Restart Camera" : "Start Camera"}
           </Button>,
@@ -3453,7 +3530,12 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
             <Segmented
               aria-label="Face attendance camera"
               value={faceFacingMode}
-              onChange={setFaceFacingMode}
+              onChange={(mode) => {
+                if (mode !== faceFacingMode) {
+                  stopFaceCamera();
+                  setFaceFacingMode(mode);
+                }
+              }}
               disabled={faceInitializing}
               options={[
                 { label: "Front camera", value: "user" },
@@ -3607,7 +3689,7 @@ function MarkAttendancePanel({ batches, attendanceTypes }) {
             </div>
             <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
                 {faceNoMatchData?.code === "FACE_NOT_SETUP"
-                  ? "Select the existing student whose face is in front of the camera. Setup will capture three fresh samples and retry attendance for that student."
+                ? "Select the existing student whose face is in front of the camera. After capturing three samples, choose Continue Screening to mark attendance."
                   : "This does not mean the student has no face setup. Retry the scan first; if it still fails, verify the student before refreshing their saved face."}
             </div>
             <Select
